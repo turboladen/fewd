@@ -8,7 +8,9 @@ async fn main() {
     tauri::Builder::default()
         .setup(|app| {
             let db = tauri::async_runtime::block_on(async {
-                db::init(app.handle()).await.expect("Failed to initialize database")
+                db::init(app.handle())
+                    .await
+                    .expect("Failed to initialize database")
             });
 
             app.manage(AppState { db });
