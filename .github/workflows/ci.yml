@@ -10,6 +10,35 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  auto-format:
+    name: Auto Format
+    runs-on: macos-latest
+    if: github.event_name == 'push' && github.ref != 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup dprint
+        run: cargo install dprint
+
+      - name: Format code
+        run: dprint fmt
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add -A
+          if ! git diff --quiet HEAD; then
+            git commit -m "Auto-format code with dprint"
+            git push
+            echo "Code was formatted and pushed. CI will re-run with formatted code."
+            exit 0
+          fi
+
   rust-checks:
     name: Rust Checks
     runs-on: macos-latest
@@ -51,8 +80,12 @@ jobs:
   frontend-checks:
     name: Frontend Checks
     runs-on: macos-latest
+    needs: [auto-format]
+    if: always()
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
@@ -88,7 +121,8 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [rust-checks, frontend-checks, typos-check]
+    needs: [auto-format, rust-checks, frontend-checks, typos-check]
+    if: always()
     runs-on: macos-latest
     steps:
       - run: echo "All checks passed!"
