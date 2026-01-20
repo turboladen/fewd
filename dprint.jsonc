@@ -15,7 +15,12 @@
     "dist",
     "build",
     "target",
-    "**/*.min.js"
+    "**/*.min.js",
+    "src-tauri/gen",
+    "CLAUDE.md",
+    "IMPLEMENTATION_PLAN.md",
+    "REQUIREMENTS.md",
+    "bun.lock"
   ],
   "plugins": [
     "https://plugins.dprint.dev/typescript-0.91.1.wasm",
