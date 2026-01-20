@@ -10,13 +10,11 @@ export default defineConfig({
     host: host || false,
     port: 5173,
     strictPort: true,
-    hmr: host
-      ? {
-        protocol: 'ws',
-        host: host,
-        port: 5183,
-      }
-      : undefined,
+    hmr: host ? {
+      protocol: 'ws',
+      host: host,
+      port: 5183,
+    } : undefined,
   },
   envPrefix: ['VITE_', 'TAURI_'],
   build: {

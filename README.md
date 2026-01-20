@@ -17,10 +17,10 @@ bun run tauri build
 
 ## Documentation
 
-- **<REQUIREMENTS.md>** - Full specifications and data models
-- **<IMPLEMENTATION_PLAN.md>** - Step-by-step build guide
-- **<CLAUDE.md>** - Development guide for AI assistants
-- **<SETUP_SCRIPTS.md>** - Linting/testing setup
+- **REQUIREMENTS.md** - Full specifications and data models
+- **IMPLEMENTATION_PLAN.md** - Step-by-step build guide
+- **CLAUDE.md** - Development guide for AI assistants
+- **SETUP_SCRIPTS.md** - Linting/testing setup
 
 ## Features
 
@@ -133,7 +133,7 @@ Creates release with builds for macOS, Windows, Linux.
 
 ## Contributing
 
-1. Read <CLAUDE.md> for code standards
+1. Read CLAUDE.md for code standards
 1. Run `./scripts/ci-check.sh` before committing
 1. Keep commits focused and descriptive
 1. Update docs if changing behavior
