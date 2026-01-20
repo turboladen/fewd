@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches-ignore:
+      - main
   pull_request:
     branches: [main, develop]
 
@@ -13,7 +14,7 @@ jobs:
   auto-format:
     name: Auto Format
     runs-on: macos-latest
-    if: github.event_name == 'push' && github.ref != 'refs/heads/main'
+    if: github.event_name == 'push'
     permissions:
       contents: write
     steps:
