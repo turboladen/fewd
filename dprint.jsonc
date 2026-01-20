@@ -16,7 +16,6 @@
     "build",
     "target",
     "**/*.min.js",
-    "src-tauri/gen/**",
     "CLAUDE.md",
     "IMPLEMENTATION_PLAN.md",
     "REQUIREMENTS.md",
