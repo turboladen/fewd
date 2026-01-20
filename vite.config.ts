@@ -1,5 +1,5 @@
-import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite'
 
 const host = process.env.TAURI_DEV_HOST
 
@@ -10,11 +10,13 @@ export default defineConfig({
     host: host || false,
     port: 5173,
     strictPort: true,
-    hmr: host ? {
-      protocol: 'ws',
-      host: host,
-      port: 5183,
-    } : undefined,
+    hmr: host
+      ? {
+        protocol: 'ws',
+        host: host,
+        port: 5183,
+      }
+      : undefined,
   },
   envPrefix: ['VITE_', 'TAURI_'],
   build: {
