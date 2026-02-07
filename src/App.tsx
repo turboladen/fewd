@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
 import { FamilyManager } from './components/FamilyManager'
+import { MealPlanner } from './components/MealPlanner'
 import { RecipeManager } from './components/RecipeManager'
 
 const queryClient = new QueryClient()
 
-type Tab = 'family' | 'recipes'
+type Tab = 'family' | 'recipes' | 'planner'
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('family')
@@ -38,11 +39,22 @@ function App() {
             >
               Recipes
             </button>
+            <button
+              onClick={() => setActiveTab('planner')}
+              className={`px-6 py-3 font-medium text-sm ${
+                activeTab === 'planner'
+                  ? 'text-blue-600 border-b-2 border-blue-600'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Planner
+            </button>
           </div>
         </nav>
         <main className='flex-1 overflow-y-auto'>
           {activeTab === 'family' && <FamilyManager />}
           {activeTab === 'recipes' && <RecipeManager />}
+          {activeTab === 'planner' && <MealPlanner />}
         </main>
       </div>
     </QueryClientProvider>
