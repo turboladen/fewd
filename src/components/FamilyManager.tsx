@@ -182,6 +182,7 @@ export function FamilyManager() {
 
   const [isAdding, setIsAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
 
   const handleCreate = (formData: PersonFormData) => {
     const dto: CreatePersonDto = {
@@ -211,10 +212,10 @@ export function FamilyManager() {
     })
   }
 
-  const handleDelete = (id: string, name: string) => {
-    if (confirm(`Delete ${name}?`)) {
-      deleteMutation.mutate(id)
-    }
+  const handleDelete = (id: string) => {
+    deleteMutation.mutate(id, {
+      onSuccess: () => setConfirmingDeleteId(null),
+    })
   }
 
   if (isLoading) {
@@ -315,12 +316,32 @@ export function FamilyManager() {
                   >
                     Edit
                   </button>
-                  <button
-                    onClick={() => handleDelete(person.id, person.name)}
-                    className='text-red-600 text-sm hover:underline'
-                  >
-                    Delete
-                  </button>
+                  {confirmingDeleteId === person.id
+                    ? (
+                      <span className='flex gap-1 items-center text-sm'>
+                        <span className='text-red-600'>Delete?</span>
+                        <button
+                          onClick={() => handleDelete(person.id)}
+                          className='text-red-700 font-semibold hover:underline'
+                        >
+                          Yes
+                        </button>
+                        <button
+                          onClick={() => setConfirmingDeleteId(null)}
+                          className='text-gray-500 hover:underline'
+                        >
+                          No
+                        </button>
+                      </span>
+                    )
+                    : (
+                      <button
+                        onClick={() => setConfirmingDeleteId(person.id)}
+                        className='text-red-600 text-sm hover:underline'
+                      >
+                        Delete
+                      </button>
+                    )}
                 </div>
               </div>
               <p className='text-sm text-gray-500 mt-1'>
