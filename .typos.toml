@@ -1,0 +1,15 @@
+[default]
+extend-ignore-re = [
+  "uuid",  # UUIDs often flagged as typos
+]
+extend-words = { fewd = "fewd" }  # Project name
+
+[files]
+extend-exclude = [
+  "target/",
+  "node_modules/",
+  "dist/",
+  "*.db",
+  "bun.lock",
+  "Cargo.lock",
+]

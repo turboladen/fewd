@@ -1,0 +1,25 @@
+[package]
+name = "fewd"
+version = "0.1.0"
+description = "Family meal planner desktop app"
+authors = ["you"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sea-orm = { version = "1.1", features = ["sqlx-sqlite", "runtime-tokio-native-tls", "macros"] }
+tokio = { version = "1", features = ["full"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dependencies.migration]
+path = "./migration"
+
+[lib]
+name = "fewd_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
