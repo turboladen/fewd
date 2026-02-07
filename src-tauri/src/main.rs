@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use fewd_lib::commands::person;
+use fewd_lib::commands::{person, recipe};
 use fewd_lib::{db, AppState};
 use tauri::Manager;
 
@@ -22,6 +22,14 @@ fn main() {
             person::create_person,
             person::update_person,
             person::delete_person,
+            recipe::get_all_recipes,
+            recipe::get_recipe,
+            recipe::create_recipe,
+            recipe::update_recipe,
+            recipe::delete_recipe,
+            recipe::search_recipes,
+            recipe::toggle_favorite_recipe,
+            recipe::import_recipe_from_markdown,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
