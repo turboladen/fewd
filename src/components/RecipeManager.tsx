@@ -137,7 +137,27 @@ function IngredientRow({
 
   return (
     <div className='flex gap-2 items-start'>
-      <div className='flex gap-1'>
+      <button
+        type='button'
+        onClick={() => {
+          if (isRange) {
+            const amt = ingredient.amount as { type: 'range'; min: number; max: number }
+            onChange({ ...ingredient, amount: { type: 'single', value: amt.min } })
+          } else {
+            const amt = ingredient.amount as { type: 'single'; value: number }
+            onChange({ ...ingredient, amount: { type: 'range', min: amt.value, max: amt.value } })
+          }
+        }}
+        className={`text-xs px-1.5 py-1 rounded border whitespace-nowrap ${
+          isRange
+            ? 'bg-blue-50 border-blue-300 text-blue-700'
+            : 'bg-gray-50 border-gray-300 text-gray-500 hover:border-blue-300'
+        }`}
+        title={isRange ? 'Switch to exact amount' : 'Switch to range (e.g. 1-2)'}
+      >
+        {isRange ? 'Range' : 'Exact'}
+      </button>
+      <div className='flex gap-1 w-20'>
         {isRange
           ? (
             <>
@@ -154,7 +174,7 @@ function IngredientRow({
                       max: (ingredient.amount as { type: 'range'; min: number; max: number }).max,
                     },
                   })}
-                className='border border-gray-300 p-1 rounded w-16 text-sm'
+                className='border border-gray-300 p-1 rounded w-9 text-sm'
                 placeholder='min'
               />
               <span className='text-gray-400 self-center'>-</span>
@@ -171,7 +191,7 @@ function IngredientRow({
                       max: parseFloat(e.target.value) || 0,
                     },
                   })}
-                className='border border-gray-300 p-1 rounded w-16 text-sm'
+                className='border border-gray-300 p-1 rounded w-9 text-sm'
                 placeholder='max'
               />
             </>
@@ -187,25 +207,9 @@ function IngredientRow({
                   amount: { type: 'single', value: parseFloat(e.target.value) || 0 },
                 })}
               className='border border-gray-300 p-1 rounded w-20 text-sm'
-              placeholder='Amount'
+              placeholder='Amt'
             />
           )}
-        <button
-          type='button'
-          onClick={() => {
-            if (isRange) {
-              const amt = ingredient.amount as { type: 'range'; min: number; max: number }
-              onChange({ ...ingredient, amount: { type: 'single', value: amt.min } })
-            } else {
-              const amt = ingredient.amount as { type: 'single'; value: number }
-              onChange({ ...ingredient, amount: { type: 'range', min: amt.value, max: amt.value } })
-            }
-          }}
-          className='text-xs text-blue-600 hover:underline self-center'
-          title={isRange ? 'Switch to single amount' : 'Switch to range'}
-        >
-          {isRange ? '1' : '1-2'}
-        </button>
       </div>
       <input
         type='text'
@@ -367,12 +371,12 @@ function RecipeForm({
         <label className='block text-sm font-medium text-gray-700 mb-1'>
           Description
         </label>
-        <input
-          type='text'
+        <textarea
           value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })}
-          placeholder='Brief description'
+          placeholder='Brief description of the recipe'
           className='border border-gray-300 p-2 rounded w-full'
+          rows={2}
         />
       </div>
 
@@ -620,9 +624,9 @@ function RecipeDetail({
                 {parsed.ingredients.map((ing, i) => (
                   <li key={i} className='text-sm'>
                     <span className='font-medium'>{formatAmount(ing.amount)}</span>
-                    {ing.unit && <span className='text-gray-500'> {ing.unit}</span>}
-                    <span> {ing.name}</span>
-                    {ing.notes && <span className='text-gray-400 italic'> ({ing.notes})</span>}
+                    {ing.unit && <span className='text-gray-500'>{` ${ing.unit}`}</span>}
+                    <span>{` ${ing.name}`}</span>
+                    {ing.notes && <span className='text-gray-400 italic'>{` (${ing.notes})`}</span>}
                   </li>
                 ))}
               </ul>

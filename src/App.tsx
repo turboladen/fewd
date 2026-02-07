@@ -12,9 +12,12 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className='min-h-screen bg-gray-50'>
-        <nav className='bg-white border-b border-gray-200'>
-          <div className='flex'>
+      <div className='h-screen flex flex-col bg-gray-50'>
+        <nav
+          className='flex-none bg-white border-b border-gray-200 pt-7'
+          data-tauri-drag-region
+        >
+          <div className='flex pl-2'>
             <button
               onClick={() => setActiveTab('family')}
               className={`px-6 py-3 font-medium text-sm ${
@@ -37,8 +40,10 @@ function App() {
             </button>
           </div>
         </nav>
-        {activeTab === 'family' && <FamilyManager />}
-        {activeTab === 'recipes' && <RecipeManager />}
+        <main className='flex-1 overflow-y-auto'>
+          {activeTab === 'family' && <FamilyManager />}
+          {activeTab === 'recipes' && <RecipeManager />}
+        </main>
       </div>
     </QueryClientProvider>
   )
