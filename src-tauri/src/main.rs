@@ -1,10 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use fewd_lib::commands::person;
 use fewd_lib::{db, AppState};
 use tauri::Manager;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     tauri::Builder::default()
         .setup(|app| {
             let db = tauri::async_runtime::block_on(async {
@@ -16,7 +16,13 @@ async fn main() {
             app.manage(AppState { db });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![])
+        .invoke_handler(tauri::generate_handler![
+            person::get_all_people,
+            person::get_person,
+            person::create_person,
+            person::update_person,
+            person::delete_person,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -4,59 +4,57 @@ A family meal planning desktop app built with Tauri (Rust + React). Plan meals, 
 
 ## Quick Start
 
+### Prerequisites
+
+- [Rust](https://www.rust-lang.org/tools/install) (via rustup)
+- [Bun](https://bun.sh/) (JavaScript runtime and package manager)
+
+Optional (for code quality checks):
+
+- dprint: `cargo install dprint`
+- typos-cli: `brew install typos-cli`
+
+### Setup and Run
+
 ```bash
-# Install dependencies
+# 1. Install JavaScript dependencies (includes Tauri CLI)
 bun install
 
-# Run in development mode
+# 2. Run in development mode (compiles Rust + starts React dev server)
 bun run tauri dev
+```
 
-# Build for production
+The first run will take a few minutes to compile Rust dependencies. Subsequent runs are fast.
+
+### Build for Production
+
+```bash
 bun run tauri build
 ```
+
+Output will be in `src-tauri/target/release/bundle/`.
+
+## Current Status
+
+- [x] Project scaffolding (Tauri + React + SeaORM)
+- [x] Family member management (create, edit, delete)
+- [ ] Recipe management
+- [ ] Meal planning calendar
+- [ ] Shopping list generation
 
 ## Documentation
 
 - **REQUIREMENTS.md** - Full specifications and data models
 - **IMPLEMENTATION_PLAN.md** - Step-by-step build guide
 - **CLAUDE.md** - Development guide for AI assistants
-- **SETUP_SCRIPTS.md** - Linting/testing setup
-
-## Features
-
-- ✅ Manage family members with dietary preferences
-- ✅ Store and organize recipes
-- ✅ Import recipes from markdown
-- ✅ Plan meals for the week
-- ✅ Assign different recipes to different people
-- ✅ Support ad-hoc food items (not just recipes)
-- ✅ Generate shopping lists with unit conversion
-- ✅ Desktop app (macOS, Windows, Linux)
-- ✅ Local SQLite storage (no cloud required)
 
 ## Tech Stack
 
-**Backend:**
+**Backend:** Rust + Tauri 2 + SeaORM + SQLite
 
-- Rust + Tauri 2
-- SeaORM + SQLite
-- Unit conversion with `uom`
-
-**Frontend:**
-
-- React 18 + TypeScript
-- Vite + TanStack Query
-- Tailwind CSS
+**Frontend:** React 18 + TypeScript + Vite + TanStack Query + Tailwind CSS
 
 ## Development
-
-### Prerequisites
-
-- Rust (via rustup)
-- Bun.js (JavaScript runtime)
-- Tauri CLI: `cargo install tauri-cli`
-- dprint: `cargo install dprint` (optional, for formatting)
-- typos-cli: `brew install typos-cli` (optional, for spell checking)
 
 ### Commands
 
@@ -65,19 +63,18 @@ bun run tauri build
 bun run tauri dev          # Run with hot reload
 
 # Testing
-cargo test                 # Rust tests
-bun test                   # Frontend tests
-./scripts/ci-check.sh      # Run all CI checks locally
+cargo test                 # Rust tests (from src-tauri/)
+bun run test               # Frontend tests
 
 # Linting & Formatting
-cargo fmt                  # Format Rust code
-cargo clippy               # Lint Rust code
+cargo fmt                  # Format Rust code (from src-tauri/)
+cargo clippy               # Lint Rust code (from src-tauri/)
 dprint fmt                 # Format frontend code
 bun run lint               # Lint frontend code
 typos                      # Check for typos
 
-# Building
-bun run tauri build        # Build production app
+# All CI checks at once
+./scripts/ci-check.sh
 ```
 
 ### Project Structure
@@ -85,58 +82,30 @@ bun run tauri build        # Build production app
 ```
 fewd/
 ├── src/                   # React frontend
-│   ├── components/
-│   ├── hooks/
-│   ├── types/
+│   ├── components/        # UI components
+│   ├── hooks/             # TanStack Query hooks
+│   ├── types/             # TypeScript type definitions
 │   └── App.tsx
-├── src-tauri/            # Rust backend
+├── src-tauri/             # Rust backend
 │   ├── src/
-│   │   ├── commands/     # Tauri command handlers
-│   │   ├── entities/     # SeaORM entities
-│   │   ├── services/     # Business logic
+│   │   ├── commands/      # Tauri command handlers (thin layer)
+│   │   ├── entities/      # SeaORM entities (DB models)
+│   │   ├── services/      # Business logic
+│   │   ├── db.rs          # Database initialization
 │   │   └── main.rs
-│   └── migration/        # Database migrations
-├── .github/
-│   └── workflows/        # CI/CD workflows
-└── scripts/              # Development scripts
+│   └── migration/         # SeaORM database migrations
+├── .github/workflows/     # CI/CD
+└── scripts/               # Development scripts
 ```
 
-## Database
+### Database
 
-SQLite database location:
+SQLite database is stored locally:
 
-- **Development:** `~/Library/Application Support/com.fewd.dev/fewd.db`
+- **Dev:** `~/Library/Application Support/com.fewd.dev/fewd.db`
 - **Production:** `~/Library/Application Support/com.fewd/fewd.db`
 
-Inspect with:
-
-```bash
-sqlite3 ~/Library/Application\ Support/com.fewd.dev/fewd.db
-```
-
-## CI/CD
-
-GitHub Actions runs on every push:
-
-- ✅ Rust formatting, linting, tests
-- ✅ Frontend formatting (dprint), linting, tests
-- ✅ Typo checking
-
-Build workflow runs on git tags:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-Creates release with builds for macOS, Windows, Linux.
-
-## Contributing
-
-1. Read CLAUDE.md for code standards
-1. Run `./scripts/ci-check.sh` before committing
-1. Keep commits focused and descriptive
-1. Update docs if changing behavior
+Inspect with: `sqlite3 ~/Library/Application\ Support/com.fewd.dev/fewd.db`
 
 ## License
 
