@@ -24,7 +24,8 @@
       "Bash(file:*)",
       "Bash(python3:*)",
       "Bash(cargo build:*)",
-      "Bash(cargo run:*)"
+      "Bash(cargo run:*)",
+      "WebFetch(domain:v2.tauri.app)"
     ]
   }
 }

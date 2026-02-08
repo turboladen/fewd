@@ -2,5 +2,11 @@ pub mod meal_service;
 pub mod person_service;
 pub mod recipe_parser;
 pub mod recipe_service;
+pub mod seed_data;
 pub mod shopping_service;
 pub mod unit_converter;
+
+pub fn to_json<T: serde::Serialize>(value: &T) -> Result<String, sea_orm::DbErr> {
+    serde_json::to_string(value)
+        .map_err(|e| sea_orm::DbErr::Custom(format!("JSON serialization error: {}", e)))
+}

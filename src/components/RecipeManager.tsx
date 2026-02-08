@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   useCreateRecipe,
   useDeleteRecipe,
@@ -165,9 +165,15 @@ function RecipeForm({
   submitLabel: string
 }) {
   const [form, setForm] = useState<RecipeFormData>(initialData)
+  const [validationError, setValidationError] = useState<string | null>(null)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (form.ingredients.length === 0 || form.ingredients.every((i) => !i.name.trim())) {
+      setValidationError('At least 1 ingredient with a name required')
+      return
+    }
+    setValidationError(null)
     onSubmit(form)
   }
 
@@ -282,6 +288,12 @@ function RecipeForm({
         />
       </div>
 
+      {validationError && (
+        <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+          {validationError}
+        </div>
+      )}
+
       <div className='flex gap-2'>
         <button
           type='submit'
@@ -334,7 +346,11 @@ function ImportRecipeForm({
           placeholder={`# Recipe Name\nDescription here\nPrep time: 15 min\nServings: 4\n\n## Ingredients\n- 2 cups flour\n- 1 tsp salt\n\n## Instructions\n1. Mix ingredients...\n\n## Tags\ndinner, quick`}
         />
       </div>
-      {error && <p className='text-red-600 text-sm'>{error}</p>}
+      {error && (
+        <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+          {error}
+        </div>
+      )}
       <div className='flex gap-2'>
         <button
           type='submit'
@@ -543,6 +559,23 @@ export function RecipeManager() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (editingId) {
+          setEditingId(null)
+        } else if (viewingId) {
+          setViewingId(null)
+          setConfirmingDeleteId(null)
+        } else if (viewMode !== 'list') {
+          setViewMode('list')
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [editingId, viewingId, viewMode])
+
   const filteredRecipes = recipes?.filter((r) =>
     r.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
@@ -599,13 +632,15 @@ export function RecipeManager() {
   }
 
   if (isLoading) {
-    return <div className='p-6 text-gray-500'>Loading recipes...</div>
+    return <div className='p-6 text-gray-500 animate-pulse'>Loading recipes...</div>
   }
 
   if (error) {
     return (
-      <div className='p-6 text-red-600'>
-        Failed to load recipes: {String(error)}
+      <div className='p-6'>
+        <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+          Failed to load recipes: {String(error)}
+        </div>
       </div>
     )
   }
@@ -642,9 +677,9 @@ export function RecipeManager() {
             submitLabel='Add Recipe'
           />
           {createMutation.error && (
-            <p className='mt-2 text-red-600 text-sm'>
+            <div className='mt-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
               {String(createMutation.error)}
-            </p>
+            </div>
           )}
         </div>
       )}
@@ -712,9 +747,9 @@ export function RecipeManager() {
                   submitLabel='Save Changes'
                 />
                 {updateMutation.error && (
-                  <p className='mt-2 text-red-600 text-sm'>
+                  <div className='mt-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
                     {String(updateMutation.error)}
-                  </p>
+                  </div>
                 )}
               </div>
             )

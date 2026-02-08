@@ -4,6 +4,7 @@ use sea_orm::*;
 use crate::commands::meal::{CreateMealDto, PersonServingDto, UpdateMealDto};
 use crate::entities::meal::{self, Entity as Meal};
 use crate::entities::recipe::{self, Entity as Recipe};
+use crate::services::to_json;
 
 pub struct MealService;
 
@@ -47,7 +48,7 @@ impl MealService {
             date: Set(date),
             meal_type: Set(data.meal_type),
             order_index: Set(data.order_index),
-            servings: Set(serde_json::to_string(&data.servings).unwrap()),
+            servings: Set(to_json(&data.servings)?),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -84,7 +85,7 @@ impl MealService {
             meal.order_index = Set(order_index);
         }
         if let Some(ref servings) = data.servings {
-            meal.servings = Set(serde_json::to_string(servings).unwrap());
+            meal.servings = Set(to_json(servings)?);
         }
 
         meal.updated_at = Set(chrono::Utc::now());

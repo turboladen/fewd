@@ -2,6 +2,7 @@ use sea_orm::*;
 
 use crate::commands::recipe::{CreateRecipeDto, UpdateRecipeDto};
 use crate::entities::recipe::{self, Entity as Recipe};
+use crate::services::to_json;
 
 pub struct RecipeService;
 
@@ -32,19 +33,18 @@ impl RecipeService {
             description: Set(data.description),
             source: Set(data.source),
             parent_recipe_id: Set(data.parent_recipe_id),
-            prep_time: Set(data.prep_time.map(|t| serde_json::to_string(&t).unwrap())),
-            cook_time: Set(data.cook_time.map(|t| serde_json::to_string(&t).unwrap())),
-            total_time: Set(data.total_time.map(|t| serde_json::to_string(&t).unwrap())),
+            prep_time: Set(data.prep_time.map(|t| to_json(&t)).transpose()?),
+            cook_time: Set(data.cook_time.map(|t| to_json(&t)).transpose()?),
+            total_time: Set(data.total_time.map(|t| to_json(&t)).transpose()?),
             servings: Set(data.servings),
-            portion_size: Set(data
-                .portion_size
-                .map(|p| serde_json::to_string(&p).unwrap())),
+            portion_size: Set(data.portion_size.map(|p| to_json(&p)).transpose()?),
             instructions: Set(data.instructions),
-            ingredients: Set(serde_json::to_string(&data.ingredients).unwrap()),
+            ingredients: Set(to_json(&data.ingredients)?),
             nutrition_per_serving: Set(data
                 .nutrition_per_serving
-                .map(|n| serde_json::to_string(&n).unwrap())),
-            tags: Set(serde_json::to_string(&data.tags).unwrap()),
+                .map(|n| to_json(&n))
+                .transpose()?),
+            tags: Set(to_json(&data.tags)?),
             notes: Set(data.notes),
             icon: Set(data.icon),
             is_favorite: Set(false),
@@ -76,31 +76,31 @@ impl RecipeService {
             recipe.description = Set(Some(description));
         }
         if let Some(prep_time) = data.prep_time {
-            recipe.prep_time = Set(Some(serde_json::to_string(&prep_time).unwrap()));
+            recipe.prep_time = Set(Some(to_json(&prep_time)?));
         }
         if let Some(cook_time) = data.cook_time {
-            recipe.cook_time = Set(Some(serde_json::to_string(&cook_time).unwrap()));
+            recipe.cook_time = Set(Some(to_json(&cook_time)?));
         }
         if let Some(total_time) = data.total_time {
-            recipe.total_time = Set(Some(serde_json::to_string(&total_time).unwrap()));
+            recipe.total_time = Set(Some(to_json(&total_time)?));
         }
         if let Some(servings) = data.servings {
             recipe.servings = Set(servings);
         }
         if let Some(portion_size) = data.portion_size {
-            recipe.portion_size = Set(Some(serde_json::to_string(&portion_size).unwrap()));
+            recipe.portion_size = Set(Some(to_json(&portion_size)?));
         }
         if let Some(instructions) = data.instructions {
             recipe.instructions = Set(instructions);
         }
         if let Some(ingredients) = data.ingredients {
-            recipe.ingredients = Set(serde_json::to_string(&ingredients).unwrap());
+            recipe.ingredients = Set(to_json(&ingredients)?);
         }
         if let Some(nutrition) = data.nutrition_per_serving {
-            recipe.nutrition_per_serving = Set(Some(serde_json::to_string(&nutrition).unwrap()));
+            recipe.nutrition_per_serving = Set(Some(to_json(&nutrition)?));
         }
         if let Some(tags) = data.tags {
-            recipe.tags = Set(serde_json::to_string(&tags).unwrap());
+            recipe.tags = Set(to_json(&tags)?);
         }
         if let Some(notes) = data.notes {
             recipe.notes = Set(Some(notes));

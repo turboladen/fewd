@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useCreatePerson, useDeletePerson, usePeople, useUpdatePerson } from '../hooks/usePeople'
 import type { CreatePersonDto, UpdatePersonDto } from '../types/person'
 import { parsePerson } from '../types/person'
@@ -91,8 +91,11 @@ function PersonForm({
 }) {
   const [form, setForm] = useState<PersonFormData>(initialData)
 
+  const isValid = form.name.trim() !== '' && form.birthdate !== ''
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (!isValid) return
     onSubmit(form)
   }
 
@@ -158,7 +161,12 @@ function PersonForm({
       <div className='flex gap-2'>
         <button
           type='submit'
-          className='bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700'
+          disabled={!isValid}
+          className={`px-4 py-2 rounded text-white ${
+            isValid
+              ? 'bg-blue-600 hover:bg-blue-700'
+              : 'bg-blue-300 cursor-not-allowed'
+          }`}
         >
           {submitLabel}
         </button>
@@ -183,6 +191,22 @@ export function FamilyManager() {
   const [isAdding, setIsAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (confirmingDeleteId) {
+          setConfirmingDeleteId(null)
+        } else if (editingId) {
+          setEditingId(null)
+        } else if (isAdding) {
+          setIsAdding(false)
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [editingId, isAdding, confirmingDeleteId])
 
   const handleCreate = (formData: PersonFormData) => {
     const dto: CreatePersonDto = {
@@ -219,13 +243,15 @@ export function FamilyManager() {
   }
 
   if (isLoading) {
-    return <div className='p-6 text-gray-500'>Loading family members...</div>
+    return <div className='p-6 text-gray-500 animate-pulse'>Loading family members...</div>
   }
 
   if (error) {
     return (
-      <div className='p-6 text-red-600'>
-        Failed to load family members: {String(error)}
+      <div className='p-6'>
+        <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+          Failed to load family members: {String(error)}
+        </div>
       </div>
     )
   }
@@ -254,9 +280,9 @@ export function FamilyManager() {
             submitLabel='Add Person'
           />
           {createMutation.error && (
-            <p className='mt-2 text-red-600 text-sm'>
+            <div className='mt-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
               {String(createMutation.error)}
-            </p>
+            </div>
           )}
         </div>
       )}
@@ -294,9 +320,9 @@ export function FamilyManager() {
                   submitLabel='Save Changes'
                 />
                 {updateMutation.error && (
-                  <p className='mt-2 text-red-600 text-sm'>
+                  <div className='mt-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
                     {String(updateMutation.error)}
-                  </p>
+                  </div>
                 )}
               </div>
             )

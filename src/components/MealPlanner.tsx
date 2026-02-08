@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   useCreateMeal,
   useDeleteMeal,
@@ -207,6 +207,7 @@ function MealEditor({
   })
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [customMealType, setCustomMealType] = useState(mealType)
+  const [validationError, setValidationError] = useState<string | null>(null)
   const isCustom = orderIndex >= 3
 
   const handlePersonChange = (personId: string, serving: PersonServing | undefined) => {
@@ -220,6 +221,11 @@ function MealEditor({
   }
 
   const handleSave = () => {
+    if (servingsMap.size === 0) {
+      setValidationError('Assign food to at least one person')
+      return
+    }
+    setValidationError(null)
     const servings = Array.from(servingsMap.values())
     onSave({
       date,
@@ -299,6 +305,12 @@ function MealEditor({
         ))}
       </div>
 
+      {validationError && (
+        <div className='mb-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+          {validationError}
+        </div>
+      )}
+
       <div className='flex gap-2'>
         <button
           onClick={handleSave}
@@ -333,13 +345,26 @@ export function MealPlanner() {
   const startDate = formatDateKey(weekDates[0])
   const endDate = formatDateKey(weekDates[6])
 
-  const { data: meals, isLoading: mealsLoading } = useMealsForDateRange(startDate, endDate)
+  const { data: meals, isLoading: mealsLoading, error: mealsError } = useMealsForDateRange(
+    startDate,
+    endDate,
+  )
   const { data: people } = usePeople()
   const { data: rawRecipes } = useRecipes()
 
   const createMutation = useCreateMeal()
   const updateMutation = useUpdateMeal()
   const deleteMutation = useDeleteMeal()
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && editingSlot) {
+        setEditingSlot(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [editingSlot])
 
   // Build recipe name lookup
   const recipes = rawRecipes?.map((r) => ({ id: r.id, name: r.name })) ?? []
@@ -411,7 +436,7 @@ export function MealPlanner() {
     weekDates[6].toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   }`
 
-  if (mealsLoading) return <div className='p-6 text-gray-500'>Loading...</div>
+  if (mealsLoading) return <div className='p-6 text-gray-500 animate-pulse'>Loading...</div>
 
   return (
     <div className='p-6'>
@@ -442,6 +467,12 @@ export function MealPlanner() {
           </button>
         </div>
       </div>
+
+      {mealsError && (
+        <div className='mb-4 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+          Failed to load meals: {String(mealsError)}
+        </div>
+      )}
 
       {/* Calendar grid */}
       <div className='grid grid-cols-7 gap-2'>
@@ -542,9 +573,9 @@ export function MealPlanner() {
               : undefined}
           />
           {(createMutation.error || updateMutation.error) && (
-            <p className='mt-2 text-red-600 text-sm'>
+            <div className='mt-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
               {String(createMutation.error || updateMutation.error)}
-            </p>
+            </div>
           )}
         </div>
       )}

@@ -151,7 +151,7 @@ export function ShoppingList() {
       </div>
 
       {/* Loading state */}
-      {isLoading && <div className='text-gray-500'>Loading shopping list...</div>}
+      {isLoading && <div className='text-gray-500 animate-pulse'>Loading shopping list...</div>}
 
       {/* Error state */}
       {error && (

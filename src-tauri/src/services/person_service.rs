@@ -3,6 +3,7 @@ use sea_orm::*;
 
 use crate::commands::person::{CreatePersonDto, UpdatePersonDto};
 use crate::entities::person::{self, Entity as Person};
+use crate::services::to_json;
 
 pub struct PersonService;
 
@@ -35,8 +36,8 @@ impl PersonService {
             name: Set(data.name),
             birthdate: Set(birthdate),
             dietary_goals: Set(data.dietary_goals),
-            dislikes: Set(serde_json::to_string(&data.dislikes).unwrap()),
-            favorites: Set(serde_json::to_string(&data.favorites).unwrap()),
+            dislikes: Set(to_json(&data.dislikes)?),
+            favorites: Set(to_json(&data.favorites)?),
             notes: Set(data.notes),
             is_active: Set(true),
             created_at: Set(now),
@@ -70,10 +71,10 @@ impl PersonService {
             person.dietary_goals = Set(Some(dietary_goals));
         }
         if let Some(dislikes) = data.dislikes {
-            person.dislikes = Set(serde_json::to_string(&dislikes).unwrap());
+            person.dislikes = Set(to_json(&dislikes)?);
         }
         if let Some(favorites) = data.favorites {
-            person.favorites = Set(serde_json::to_string(&favorites).unwrap());
+            person.favorites = Set(to_json(&favorites)?);
         }
         if let Some(notes) = data.notes {
             person.notes = Set(Some(notes));

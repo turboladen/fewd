@@ -17,5 +17,7 @@ pub async fn init(app_handle: &tauri::AppHandle) -> Result<DatabaseConnection, D
 
     migration::Migrator::up(&db, None).await?;
 
+    crate::services::seed_data::seed_if_empty(&db).await?;
+
     Ok(db)
 }

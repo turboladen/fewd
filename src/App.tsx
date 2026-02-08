@@ -15,10 +15,11 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <div className='h-screen flex flex-col bg-gray-50'>
-        <nav
-          className='flex-none bg-white border-b border-gray-200 pt-7'
-          data-tauri-drag-region
-        >
+        <nav className='flex-none bg-white border-b border-gray-200'>
+          <div
+            className='h-7 w-full'
+            data-tauri-drag-region
+          />
           <div className='flex pl-2'>
             <button
               onClick={() => setActiveTab('family')}
