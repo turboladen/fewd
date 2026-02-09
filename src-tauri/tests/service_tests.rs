@@ -12,8 +12,9 @@ use fewd_lib::services::recipe_scaler;
 use fewd_lib::services::recipe_service::RecipeService;
 use fewd_lib::services::seed_data;
 use fewd_lib::services::shopping_service::ShoppingService;
+use fewd_lib::services::suggestion_service::SuggestionService;
 use migration::MigratorTrait;
-use sea_orm::{Database, DatabaseConnection};
+use sea_orm::{Database, DatabaseConnection, EntityTrait, IntoActiveModel, Set};
 
 async fn setup_db() -> DatabaseConnection {
     let db = Database::connect("sqlite::memory:").await.unwrap();
@@ -894,4 +895,235 @@ async fn meal_template_create_from_meal() {
         }
         _ => panic!("Expected Recipe serving"),
     }
+}
+
+// --- SuggestionService Tests ---
+
+#[tokio::test]
+async fn suggestion_recent_favorites() {
+    let db = setup_db().await;
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+    let pasta = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let soup = RecipeService::create(&db, test_recipe_dto("Soup"))
+        .await
+        .unwrap();
+
+    let today = chrono::Local::now().date_naive();
+    let yesterday = (today - chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+    let two_days_ago = (today - chrono::Duration::days(2))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    // Pasta used twice, soup once
+    for date in [&yesterday, &two_days_ago] {
+        MealService::create(
+            &db,
+            CreateMealDto {
+                date: date.clone(),
+                meal_type: "Dinner".to_string(),
+                order_index: 2,
+                servings: vec![PersonServingDto::Recipe {
+                    person_id: person.id.clone(),
+                    recipe_id: pasta.id.clone(),
+                    servings_count: 1.0,
+                    notes: None,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    }
+    MealService::create(
+        &db,
+        CreateMealDto {
+            date: yesterday.clone(),
+            meal_type: "Lunch".to_string(),
+            order_index: 1,
+            servings: vec![PersonServingDto::Recipe {
+                person_id: person.id.clone(),
+                recipe_id: soup.id.clone(),
+                servings_count: 1.0,
+                notes: None,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+
+    let suggestions = SuggestionService::get_suggestions(&db, vec![person.id.clone()], today)
+        .await
+        .unwrap();
+
+    assert_eq!(suggestions.recent_favorites.len(), 2);
+    // Pasta should be first (used 2 times vs 1)
+    assert_eq!(suggestions.recent_favorites[0].recipe_name, "Pasta");
+    assert_eq!(suggestions.recent_favorites[1].recipe_name, "Soup");
+}
+
+#[tokio::test]
+async fn suggestion_forgotten_hits() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Old Favorite"))
+        .await
+        .unwrap();
+
+    // Manually set times_made, rating, and an old last_made via update
+    let update = UpdateRecipeDto {
+        name: None,
+        description: None,
+        prep_time: None,
+        cook_time: None,
+        total_time: None,
+        servings: None,
+        portion_size: None,
+        instructions: None,
+        ingredients: None,
+        nutrition_per_serving: None,
+        tags: None,
+        notes: None,
+        icon: None,
+        is_favorite: None,
+        rating: Some(5.0),
+    };
+    RecipeService::update(&db, recipe.id.clone(), update)
+        .await
+        .unwrap();
+
+    // We need times_made >= 3. Create 3 meals to trigger increment_recipe_usage.
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+
+    let old_date = (chrono::Local::now().date_naive() - chrono::Duration::days(60))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    for i in 0..3 {
+        MealService::create(
+            &db,
+            CreateMealDto {
+                date: old_date.clone(),
+                meal_type: "Dinner".to_string(),
+                order_index: i,
+                servings: vec![PersonServingDto::Recipe {
+                    person_id: person.id.clone(),
+                    recipe_id: recipe.id.clone(),
+                    servings_count: 1.0,
+                    notes: None,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    // increment_recipe_usage sets last_made to Utc::now(), so we need to
+    // manually push it back to 60 days ago for the forgotten-hits filter
+    let old_last_made = chrono::Utc::now() - chrono::Duration::days(60);
+    let fetched = RecipeService::get_by_id(&db, recipe.id.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut active: fewd_lib::entities::recipe::ActiveModel = fetched.into_active_model();
+    active.last_made = Set(Some(old_last_made));
+    fewd_lib::entities::recipe::Entity::update(active)
+        .exec(&db)
+        .await
+        .unwrap();
+
+    let today = chrono::Local::now().date_naive();
+    let suggestions = SuggestionService::get_suggestions(&db, vec![person.id.clone()], today)
+        .await
+        .unwrap();
+
+    assert!(!suggestions.forgotten_hits.is_empty());
+    assert_eq!(suggestions.forgotten_hits[0].recipe_name, "Old Favorite");
+}
+
+#[tokio::test]
+async fn suggestion_untried() {
+    let db = setup_db().await;
+    let alice = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+    let bob = PersonService::create(&db, test_person_dto("Bob"))
+        .await
+        .unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+
+    // Alice has had this recipe, Bob hasn't
+    let today_str = chrono::Local::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string();
+    MealService::create(
+        &db,
+        CreateMealDto {
+            date: today_str,
+            meal_type: "Dinner".to_string(),
+            order_index: 2,
+            servings: vec![PersonServingDto::Recipe {
+                person_id: alice.id.clone(),
+                recipe_id: recipe.id.clone(),
+                servings_count: 1.0,
+                notes: None,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+
+    let today = chrono::Local::now().date_naive();
+
+    // For Bob, the recipe should appear as untried
+    let bob_suggestions = SuggestionService::get_suggestions(&db, vec![bob.id.clone()], today)
+        .await
+        .unwrap();
+    let untried_ids: Vec<&str> = bob_suggestions
+        .untried
+        .iter()
+        .map(|s| s.recipe_id.as_str())
+        .collect();
+    assert!(untried_ids.contains(&recipe.id.as_str()));
+
+    // For Alice, the recipe should NOT appear as untried
+    let alice_suggestions = SuggestionService::get_suggestions(&db, vec![alice.id.clone()], today)
+        .await
+        .unwrap();
+    let alice_untried_ids: Vec<&str> = alice_suggestions
+        .untried
+        .iter()
+        .map(|s| s.recipe_id.as_str())
+        .collect();
+    assert!(!alice_untried_ids.contains(&recipe.id.as_str()));
+}
+
+#[tokio::test]
+async fn suggestion_empty_history() {
+    let db = setup_db().await;
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+
+    let today = chrono::Local::now().date_naive();
+    let suggestions = SuggestionService::get_suggestions(&db, vec![person.id.clone()], today)
+        .await
+        .unwrap();
+
+    // No meals → no recent favorites
+    assert!(suggestions.recent_favorites.is_empty());
+    // Recipe should appear as untried
+    assert_eq!(suggestions.untried.len(), 1);
+    assert_eq!(suggestions.untried[0].recipe_id, recipe.id);
 }

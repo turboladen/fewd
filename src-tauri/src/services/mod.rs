@@ -7,6 +7,7 @@ pub mod recipe_scaler;
 pub mod recipe_service;
 pub mod seed_data;
 pub mod shopping_service;
+pub mod suggestion_service;
 pub mod unit_converter;
 
 pub fn to_json<T: serde::Serialize>(value: &T) -> Result<String, sea_orm::DbErr> {

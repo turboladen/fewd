@@ -27,6 +27,7 @@ import {
   isToday,
 } from '../utils/dates'
 import { IngredientInput } from './IngredientInput'
+import { SuggestionPanel } from './SuggestionPanel'
 
 const DEFAULT_MEALS = [
   { type: 'Breakfast', order: 0 },
@@ -410,6 +411,7 @@ function MealEditor({
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
   const [templateName, setTemplateName] = useState('')
   const [showSaveTemplate, setShowSaveTemplate] = useState(false)
+  const [showSuggestionPanel, setShowSuggestionPanel] = useState(false)
   const isCustom = orderIndex >= 3
 
   const handleApplyTemplate = (template: ParsedMealTemplate) => {
@@ -420,6 +422,21 @@ function MealEditor({
     }
     setServingsMap(newMap)
     setShowTemplatePicker(false)
+  }
+
+  const handleApplySuggestion = (recipeId: string, personIds: string[]) => {
+    const newMap = new Map(servingsMap)
+    for (const personId of personIds) {
+      newMap.set(personId, {
+        food_type: 'recipe',
+        person_id: personId,
+        recipe_id: recipeId,
+        servings_count: 1,
+        notes: null,
+      })
+    }
+    setServingsMap(newMap)
+    setShowSuggestionPanel(false)
   }
 
   const handleSaveAsTemplate = () => {
@@ -539,6 +556,15 @@ function MealEditor({
         />
       )}
 
+      {showSuggestionPanel && (
+        <SuggestionPanel
+          people={people}
+          date={date}
+          onApply={handleApplySuggestion}
+          onClose={() => setShowSuggestionPanel(false)}
+        />
+      )}
+
       <div className='space-y-2 mb-4'>
         {people.map((person) => (
           <PersonServingEditor
@@ -593,10 +619,22 @@ function MealEditor({
           {existingMeal ? 'Save Changes' : 'Create Meal'}
         </button>
         <button
-          onClick={() => setShowTemplatePicker(!showTemplatePicker)}
+          onClick={() => {
+            setShowTemplatePicker(!showTemplatePicker)
+            setShowSuggestionPanel(false)
+          }}
           className='border border-green-300 text-green-700 px-4 py-2 rounded text-sm hover:bg-green-50'
         >
           Use Template
+        </button>
+        <button
+          onClick={() => {
+            setShowSuggestionPanel(!showSuggestionPanel)
+            setShowTemplatePicker(false)
+          }}
+          className='border border-purple-300 text-purple-700 px-4 py-2 rounded text-sm hover:bg-purple-50'
+        >
+          Suggest
         </button>
         {existingMeal && onSaveAsTemplate && (
           <button

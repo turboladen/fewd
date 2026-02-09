@@ -240,11 +240,11 @@
 
 **Verify Phase 10:**
 
-- [ ] "Recent favorites" shows most-used recipes from past 2 weeks
-- [ ] "Forgotten hits" shows well-rated recipes not used recently
-- [ ] "Something different" shows recipes never assigned to selected people
-- [ ] Clicking a suggestion populates the meal editor
-- [ ] Suggestions respect person selection (only consider selected people's history)
+- [x] "Recent favorites" shows most-used recipes from past 2 weeks
+- [x] "Forgotten hits" shows well-rated recipes not used recently
+- [x] "Something different" shows recipes never assigned to selected people
+- [x] Clicking a suggestion populates the meal editor
+- [x] Suggestions respect person selection (only consider selected people's history)
 
 **Deliverable:** Data-driven meal suggestion engine
 

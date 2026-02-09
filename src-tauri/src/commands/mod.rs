@@ -3,3 +3,4 @@ pub mod meal_template;
 pub mod person;
 pub mod recipe;
 pub mod shopping;
+pub mod suggestion;
