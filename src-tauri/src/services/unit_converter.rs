@@ -186,7 +186,7 @@ mod tests {
         assert_eq!(unit, "kg");
         assert!((val - 2.0).abs() < 0.001);
 
-        let (val, unit) = best_display_unit(473.176, "volume");
+        let (_val, unit) = best_display_unit(473.176, "volume");
         assert_eq!(unit, "cup");
     }
 }

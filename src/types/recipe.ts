@@ -47,6 +47,7 @@ export interface Recipe {
   is_favorite: boolean
   times_made: number
   last_made: string | null
+  rating: number | null
   created_at: string
   updated_at: string
 }
@@ -84,6 +85,7 @@ export interface UpdateRecipeDto {
   notes?: string
   icon?: string
   is_favorite?: boolean
+  rating?: number
 }
 
 export interface ImportRecipeDto {

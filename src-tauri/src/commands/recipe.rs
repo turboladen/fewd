@@ -83,6 +83,7 @@ pub struct UpdateRecipeDto {
     pub notes: Option<String>,
     pub icon: Option<String>,
     pub is_favorite: Option<bool>,
+    pub rating: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

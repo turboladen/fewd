@@ -1,6 +1,14 @@
 # fewd
 
-A family meal planning desktop app built with Tauri (Rust + React). Plan meals, manage recipes, and generate shopping lists.
+A family meal planning desktop app built with Tauri (Rust + React). Plan weekly meals for each family member, manage recipes (including markdown import), and generate aggregated shopping lists with unit conversion.
+
+## Features
+
+- **Family Members** — Track each person's dietary goals, favorites, and dislikes
+- **Recipe Management** — Create recipes manually or import from markdown; tag, favorite, and search
+- **Meal Planning** — Weekly calendar view with per-person meal assignment (recipe or ad-hoc items)
+- **Shopping Lists** — Aggregated ingredient list for any week, with automatic unit conversion and source tracking
+- **Seed Data** — Pre-populates family members on first run
 
 ## Quick Start
 
@@ -36,17 +44,32 @@ Output will be in `src-tauri/target/release/bundle/`.
 
 ## Current Status
 
-- [x] Project scaffolding (Tauri + React + SeaORM)
-- [x] Family member management (create, edit, delete)
-- [ ] Recipe management
-- [ ] Meal planning calendar
-- [ ] Shopping list generation
+### Completed (MVP)
+
+- [x] Project scaffolding (Tauri 2 + React 18 + SeaORM + SQLite)
+- [x] Family member management (CRUD with dietary goals, favorites, dislikes)
+- [x] Recipe management (CRUD, markdown import, search, favorites, usage tracking)
+- [x] Meal planning calendar (weekly view, per-person recipe/ad-hoc assignment)
+- [x] Shopping list generation (ingredient aggregation with unit conversion)
+- [x] Polish (seed data, ESC key support, loading states, form validation, error display)
+- [x] Test suite (45 Rust tests, 36 frontend tests)
+
+### Planned
+
+See `IMPLEMENTATION_PLAN.md` for upcoming features:
+
+- Recipe scaling and derivation
+- Recipe rating system
+- Inline ingredient enhancement (Caroline Chambers style)
+- Meal templates
+- AI-powered recipe adaptation (via Claude API)
+- AI-powered meal suggestions
 
 ## Documentation
 
-- **REQUIREMENTS.md** - Full specifications and data models
-- **IMPLEMENTATION_PLAN.md** - Step-by-step build guide
-- **CLAUDE.md** - Development guide for AI assistants
+- **REQUIREMENTS.md** — Full specifications and data models
+- **IMPLEMENTATION_PLAN.md** — Step-by-step build guide for upcoming features
+- **CLAUDE.md** — Development guide for AI assistants
 
 ## Tech Stack
 
@@ -85,6 +108,7 @@ fewd/
 │   ├── components/        # UI components
 │   ├── hooks/             # TanStack Query hooks
 │   ├── types/             # TypeScript type definitions
+│   ├── utils/             # Date helpers and utilities
 │   └── App.tsx
 ├── src-tauri/             # Rust backend
 │   ├── src/
@@ -93,7 +117,9 @@ fewd/
 │   │   ├── services/      # Business logic
 │   │   ├── db.rs          # Database initialization
 │   │   └── main.rs
-│   └── migration/         # SeaORM database migrations
+│   ├── migration/         # SeaORM database migrations
+│   ├── capabilities/      # Tauri 2 ACL permissions
+│   └── tests/             # Integration tests
 ├── .github/workflows/     # CI/CD
 └── scripts/               # Development scripts
 ```

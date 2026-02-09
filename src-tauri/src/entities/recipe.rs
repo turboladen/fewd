@@ -32,6 +32,7 @@ pub struct Model {
     pub is_favorite: bool,
     pub times_made: i32,
     pub last_made: Option<DateTimeUtc>,
+    pub rating: Option<f64>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

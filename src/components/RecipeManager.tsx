@@ -16,6 +16,7 @@ import type {
 } from '../types/recipe'
 import { formatAmount, formatTime, parseRecipe } from '../types/recipe'
 import { IngredientInput } from './IngredientInput'
+import { StarRating } from './StarRating'
 
 // --- Sub-components ---
 
@@ -377,6 +378,7 @@ function RecipeDetail({
   onEdit,
   onDelete,
   onToggleFavorite,
+  onRatingChange,
   onClose,
   confirmingDelete,
   onConfirmDelete,
@@ -386,6 +388,7 @@ function RecipeDetail({
   onEdit: () => void
   onDelete: () => void
   onToggleFavorite: () => void
+  onRatingChange: (rating: number) => void
   onClose: () => void
   confirmingDelete: boolean
   onConfirmDelete: () => void
@@ -407,6 +410,9 @@ function RecipeDetail({
             >
               {parsed.is_favorite ? '\u2605' : '\u2606'}
             </button>
+          </div>
+          <div className='flex items-center gap-2 mt-1'>
+            <StarRating value={parsed.rating} onChange={onRatingChange} size='md' />
           </div>
           {parsed.description && <p className='text-gray-600 mt-1'>{parsed.description}</p>}
         </div>
@@ -766,6 +772,8 @@ export function RecipeManager() {
                 }}
                 onDelete={() => setConfirmingDeleteId(recipe.id)}
                 onToggleFavorite={() => toggleFavoriteMutation.mutate(recipe.id)}
+                onRatingChange={(rating) =>
+                  updateMutation.mutate({ id: recipe.id, data: { rating } })}
                 onClose={() => {
                   setViewingId(null)
                   setConfirmingDeleteId(null)
@@ -803,6 +811,7 @@ export function RecipeManager() {
                   >
                     {recipe.is_favorite ? '\u2605' : '\u2606'}
                   </button>
+                  <StarRating value={recipe.rating} size='sm' />
                 </div>
               </div>
 

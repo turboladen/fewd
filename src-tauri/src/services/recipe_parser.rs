@@ -326,3 +326,203 @@ fn get_section_lines<'a>(lines: &'a [&str], section_name: &str) -> Vec<&'a str> 
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(md: &str) -> CreateRecipeDto {
+        RecipeParser::parse_markdown(md).unwrap()
+    }
+
+    #[test]
+    fn test_basic_recipe() {
+        let md = "\
+# Chicken Tacos
+A simple weeknight dinner
+
+Prep time: 10 minutes
+Cook time: 20 minutes
+Servings: 4
+
+## Ingredients
+- 1 lb chicken
+- 8 tortillas
+- 1 cup salsa
+
+## Instructions
+1. Cook the chicken
+2. Warm tortillas
+3. Assemble tacos
+
+## Tags
+dinner, quick, mexican";
+
+        let recipe = parse(md);
+        assert_eq!(recipe.name, "Chicken Tacos");
+        assert_eq!(recipe.description, Some("A simple weeknight dinner".to_string()));
+        assert_eq!(recipe.servings, 4);
+        assert_eq!(recipe.source, "markdown_import");
+        assert_eq!(recipe.parent_recipe_id, None);
+
+        let prep = recipe.prep_time.unwrap();
+        assert_eq!(prep.value, 10);
+        assert_eq!(prep.unit, "minutes");
+
+        let cook = recipe.cook_time.unwrap();
+        assert_eq!(cook.value, 20);
+        assert_eq!(cook.unit, "minutes");
+
+        assert_eq!(recipe.ingredients.len(), 3);
+        assert_eq!(recipe.tags, vec!["dinner", "quick", "mexican"]);
+    }
+
+    #[test]
+    fn test_empty_markdown_fails() {
+        assert!(RecipeParser::parse_markdown("").is_err());
+    }
+
+    #[test]
+    fn test_no_name_fails() {
+        let md = "Just some text\nwithout a heading";
+        assert!(RecipeParser::parse_markdown(md).is_err());
+    }
+
+    #[test]
+    fn test_minimal_recipe() {
+        let md = "# Toast\n\n## Instructions\nPut bread in toaster";
+        let recipe = parse(md);
+        assert_eq!(recipe.name, "Toast");
+        assert_eq!(recipe.servings, 4); // default
+        assert!(recipe.prep_time.is_none());
+        assert!(recipe.cook_time.is_none());
+        assert_eq!(recipe.ingredients.len(), 0);
+    }
+
+    #[test]
+    fn test_time_parsing_hours() {
+        let md = "# Stew\nCook time: 3 hours\n\n## Instructions\nSimmer";
+        let recipe = parse(md);
+        let cook = recipe.cook_time.unwrap();
+        assert_eq!(cook.value, 3);
+        assert_eq!(cook.unit, "hours");
+    }
+
+    #[test]
+    fn test_time_parsing_range() {
+        let md = "# Bread\nTotal time: 35-40 minutes\n\n## Instructions\nBake";
+        let recipe = parse(md);
+        let total = recipe.total_time.unwrap();
+        assert_eq!(total.value, 35); // takes first number
+        assert_eq!(total.unit, "minutes");
+    }
+
+    #[test]
+    fn test_time_parsing_parenthetical() {
+        let md = "# Marinade\nPrep time: 15 minutes (plus 4 hours marinating)\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let prep = recipe.prep_time.unwrap();
+        assert_eq!(prep.value, 15); // ignores parenthetical
+    }
+
+    #[test]
+    fn test_servings_range() {
+        let md = "# Wings\nServings: 12-15 pieces\n\n## Instructions\nFry";
+        let recipe = parse(md);
+        assert_eq!(recipe.servings, 12); // takes first number
+    }
+
+    #[test]
+    fn test_ingredient_amount_unit_name() {
+        let md = "# Test\n\n## Ingredients\n- 2 cups flour\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        assert_eq!(recipe.ingredients.len(), 1);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "flour");
+        assert_eq!(ing.unit, "cups");
+        assert!(matches!(ing.amount, IngredientAmountDto::Single { value } if (value - 2.0).abs() < 0.001));
+    }
+
+    #[test]
+    fn test_ingredient_fraction() {
+        let md = "# Test\n\n## Ingredients\n- 1/2 cup sugar\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert!(matches!(ing.amount, IngredientAmountDto::Single { value } if (value - 0.5).abs() < 0.001));
+    }
+
+    #[test]
+    fn test_ingredient_range() {
+        let md = "# Test\n\n## Ingredients\n- 1-2 eggs\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert!(matches!(ing.amount, IngredientAmountDto::Range { min, max } if (min - 1.0).abs() < 0.001 && (max - 2.0).abs() < 0.001));
+    }
+
+    #[test]
+    fn test_ingredient_name_only() {
+        let md = "# Test\n\n## Ingredients\n- salt\n\n## Instructions\nSeason";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "salt");
+        assert_eq!(ing.unit, "to taste");
+    }
+
+    #[test]
+    fn test_ingredient_with_notes() {
+        let md = "# Test\n\n## Ingredients\n- 1 cup orange juice (fresh is best)\n\n## Instructions\nPour";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.notes, Some("fresh is best".to_string()));
+    }
+
+    #[test]
+    fn test_ingredient_two_word_name() {
+        let md = "# Test\n\n## Ingredients\n- black pepper\n\n## Instructions\nSeason";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "black pepper");
+        assert_eq!(ing.unit, "to taste");
+    }
+
+    #[test]
+    fn test_tags_comma_separated() {
+        let md = "# Test\n\n## Instructions\nDo it\n\n## Tags\ndinner, quick, easy";
+        let recipe = parse(md);
+        assert_eq!(recipe.tags, vec!["dinner", "quick", "easy"]);
+    }
+
+    #[test]
+    fn test_notes_section() {
+        let md = "# Test\n\n## Instructions\nDo it\n\n## Notes\nServe with rice";
+        let recipe = parse(md);
+        assert_eq!(recipe.notes, Some("Serve with rice".to_string()));
+    }
+
+    #[test]
+    fn test_section_case_insensitive() {
+        let md = "# Test\n\n## INGREDIENTS\n- 1 cup flour\n\n## INSTRUCTIONS\nMix";
+        let recipe = parse(md);
+        assert_eq!(recipe.ingredients.len(), 1);
+        assert!(recipe.instructions.contains("Mix"));
+    }
+
+    #[test]
+    fn test_extract_notes_helper() {
+        let (name, notes) = extract_notes("orange juice (fresh is best)");
+        assert_eq!(name, "orange juice");
+        assert_eq!(notes, Some("fresh is best".to_string()));
+
+        let (name, notes) = extract_notes("plain text");
+        assert_eq!(name, "plain text");
+        assert_eq!(notes, None);
+    }
+
+    #[test]
+    fn test_try_parse_amount() {
+        assert!(matches!(try_parse_amount("2"), Some(IngredientAmountDto::Single { value }) if (value - 2.0).abs() < 0.001));
+        assert!(matches!(try_parse_amount("1/4"), Some(IngredientAmountDto::Single { value }) if (value - 0.25).abs() < 0.001));
+        assert!(matches!(try_parse_amount("2-3"), Some(IngredientAmountDto::Range { min, max }) if (min - 2.0).abs() < 0.001 && (max - 3.0).abs() < 0.001));
+        assert!(try_parse_amount("flour").is_none());
+    }
+}

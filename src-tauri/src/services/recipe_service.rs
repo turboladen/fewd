@@ -50,6 +50,7 @@ impl RecipeService {
             is_favorite: Set(false),
             times_made: Set(0),
             last_made: Set(None),
+            rating: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -110,6 +111,14 @@ impl RecipeService {
         }
         if let Some(is_favorite) = data.is_favorite {
             recipe.is_favorite = Set(is_favorite);
+        }
+        if let Some(rating) = data.rating {
+            if !(1.0..=5.0).contains(&rating) || rating.fract() != 0.0 {
+                return Err(DbErr::Custom(
+                    "Rating must be a whole number from 1 to 5".to_string(),
+                ));
+            }
+            recipe.rating = Set(Some(rating));
         }
 
         recipe.updated_at = Set(chrono::Utc::now());
