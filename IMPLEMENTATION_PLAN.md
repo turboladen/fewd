@@ -408,12 +408,12 @@
 
 **Verify Phase 13:**
 
-- [ ] Deterministic suggestions show first, AI option follows
-- [ ] Can select people and toggle profile fields
-- [ ] Can choose meal character (balanced, indulgent, etc.)
-- [ ] AI generates 3-5 contextual meal suggestions
-- [ ] Each suggestion can be saved as a recipe and assigned to the meal
-- [ ] Tags are auto-suggested on AI-created recipes
+- [x] Deterministic suggestions show first, AI option follows
+- [x] Can select people and toggle profile fields
+- [x] Can choose meal character (balanced, indulgent, etc.)
+- [x] AI generates 3-5 contextual meal suggestions
+- [x] Each suggestion can be saved as a recipe and assigned to the meal
+- [x] Tags are auto-suggested on AI-created recipes
 
 **Deliverable:** Full AI-powered meal suggestion engine
 

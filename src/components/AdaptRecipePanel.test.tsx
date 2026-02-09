@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import type { CreateRecipeDto, ParsedRecipe } from '../types/recipe'
+import type { ParsedRecipe } from '../types/recipe'
 
 // Mock the hooks
 const mockUsePeople = vi.fn()

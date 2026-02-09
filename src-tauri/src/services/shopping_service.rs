@@ -77,6 +77,8 @@ impl ShoppingService {
                                     meal_id: meal.id.clone(),
                                     meal_date: meal_date.clone(),
                                     meal_type: meal.meal_type.clone(),
+                                    recipe_servings: Some(recipe.servings),
+                                    person_servings: Some(*servings_count),
                                 };
 
                                 all_items.push(IngredientWithSource {
@@ -96,6 +98,8 @@ impl ShoppingService {
                                 meal_id: meal.id.clone(),
                                 meal_date: meal_date.clone(),
                                 meal_type: meal.meal_type.clone(),
+                                recipe_servings: None,
+                                person_servings: None,
                             };
 
                             all_items.push(IngredientWithSource {
@@ -108,18 +112,21 @@ impl ShoppingService {
             }
         }
 
-        // 3. Group by ingredient name (case-insensitive)
+        // 3. Merge sources from the same meal+recipe+ingredient into one line
+        let all_items = merge_same_meal_sources(all_items);
+
+        // 4. Group by ingredient name (case-insensitive)
         let mut groups: HashMap<String, Vec<IngredientWithSource>> = HashMap::new();
         for item in all_items {
             let key = item.ingredient.name.to_lowercase();
             groups.entry(key).or_default().push(item);
         }
 
-        // 4. Aggregate each group
+        // 5. Aggregate each group
         let mut result: Vec<AggregatedIngredientDto> =
             groups.into_values().map(aggregate_group).collect();
 
-        // 5. Sort alphabetically
+        // 6. Sort alphabetically
         result.sort_by(|a, b| {
             a.ingredient_name
                 .to_lowercase()
@@ -141,6 +148,94 @@ fn scale_amount(amount: &IngredientAmountDto, scale: f64) -> IngredientAmountDto
             max: max * scale,
         },
     }
+}
+
+/// Merge sources that share the same meal + recipe + ingredient into a single line.
+/// E.g., two people eating the same recipe in one meal → one combined source row.
+fn merge_same_meal_sources(items: Vec<IngredientWithSource>) -> Vec<IngredientWithSource> {
+    // Key: (ingredient_name_lower, meal_id, source_name)
+    let mut groups: HashMap<(String, String, Option<String>), Vec<IngredientWithSource>> =
+        HashMap::new();
+
+    for item in items {
+        let key = (
+            item.ingredient.name.to_lowercase(),
+            item.source.meal_id.clone(),
+            item.source.source_name.clone(),
+        );
+        groups.entry(key).or_default().push(item);
+    }
+
+    let mut merged = Vec::new();
+    for (_, group) in groups {
+        if group.len() <= 1 {
+            merged.extend(group);
+            continue;
+        }
+
+        // Check all amounts are the same variant (all Single or all Range)
+        let all_single = group
+            .iter()
+            .all(|i| matches!(i.ingredient.amount, IngredientAmountDto::Single { .. }));
+        let all_range = group
+            .iter()
+            .all(|i| matches!(i.ingredient.amount, IngredientAmountDto::Range { .. }));
+
+        if !all_single && !all_range {
+            // Mixed single/range from same recipe shouldn't happen; keep separate
+            merged.extend(group);
+            continue;
+        }
+
+        let mut total_person_servings: f64 = 0.0;
+        let merged_amount = if all_single {
+            let total: f64 = group
+                .iter()
+                .filter_map(|i| match &i.ingredient.amount {
+                    IngredientAmountDto::Single { value } => Some(value),
+                    _ => None,
+                })
+                .sum();
+            IngredientAmountDto::Single { value: total }
+        } else {
+            let min_total: f64 = group
+                .iter()
+                .filter_map(|i| match &i.ingredient.amount {
+                    IngredientAmountDto::Range { min, .. } => Some(min),
+                    _ => None,
+                })
+                .sum();
+            let max_total: f64 = group
+                .iter()
+                .filter_map(|i| match &i.ingredient.amount {
+                    IngredientAmountDto::Range { max, .. } => Some(max),
+                    _ => None,
+                })
+                .sum();
+            IngredientAmountDto::Range {
+                min: min_total,
+                max: max_total,
+            }
+        };
+
+        for item in &group {
+            if let Some(ps) = item.source.person_servings {
+                total_person_servings += ps;
+            }
+        }
+
+        let mut base = group.into_iter().next().unwrap();
+        base.ingredient.amount = merged_amount.clone();
+        base.source.amount = merged_amount;
+        base.source.person_servings = if base.source.recipe_servings.is_some() {
+            Some(total_person_servings)
+        } else {
+            None
+        };
+        merged.push(base);
+    }
+
+    merged
 }
 
 /// Aggregate a group of same-name ingredients into one AggregatedIngredientDto
@@ -230,9 +325,23 @@ fn try_sum_amounts(
     }
 }
 
+/// Find the most common normalized unit among the items.
+fn most_common_unit(items: &[IngredientWithSource]) -> String {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for item in items {
+        let normalized = unit_converter::normalize_unit(&item.ingredient.unit);
+        *counts.entry(normalized).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(unit, _)| unit)
+        .unwrap_or_default()
+}
+
 fn sum_singles_with_conversion(
     items: &[IngredientWithSource],
-    category: &str,
+    _category: &str,
 ) -> (Option<IngredientAmountDto>, Option<String>) {
     let mut base_total = 0.0;
 
@@ -246,7 +355,9 @@ fn sum_singles_with_conversion(
         }
     }
 
-    let (display_value, display_unit) = unit_converter::best_display_unit(base_total, category);
+    // Display in the most common input unit for consistency
+    let display_unit = most_common_unit(items);
+    let display_value = unit_converter::from_base(base_total, &display_unit).unwrap_or(base_total);
 
     (
         Some(IngredientAmountDto::Single {
@@ -258,7 +369,7 @@ fn sum_singles_with_conversion(
 
 fn sum_ranges_with_conversion(
     items: &[IngredientWithSource],
-    category: &str,
+    _category: &str,
 ) -> (Option<IngredientAmountDto>, Option<String>) {
     let mut base_min_total = 0.0;
     let mut base_max_total = 0.0;
@@ -278,9 +389,8 @@ fn sum_ranges_with_conversion(
         }
     }
 
-    // Use max total to pick display unit (the larger value determines best unit)
-    let (_, display_unit) = unit_converter::best_display_unit(base_max_total, category);
-
+    // Display in the most common input unit for consistency
+    let display_unit = most_common_unit(items);
     let display_min =
         unit_converter::from_base(base_min_total, &display_unit).unwrap_or(base_min_total);
     let display_max =

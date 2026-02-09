@@ -8,6 +8,8 @@ export interface IngredientSource {
   meal_id: string
   meal_date: string
   meal_type: string
+  recipe_servings: number | null
+  person_servings: number | null
 }
 
 export interface AggregatedIngredient {

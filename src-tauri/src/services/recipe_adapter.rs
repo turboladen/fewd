@@ -181,7 +181,7 @@ Rules:
 }
 
 /// Strip markdown code fences (```json ... ``` or ``` ... ```) from text
-fn strip_code_fences(text: &str) -> String {
+pub fn strip_code_fences(text: &str) -> String {
     let trimmed = text.trim();
 
     // Check for ```json or ``` prefix

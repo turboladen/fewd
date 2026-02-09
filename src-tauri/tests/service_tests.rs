@@ -1372,3 +1372,176 @@ async fn settings_increment_token_usage() {
     assert_eq!(output, "125");
     assert_eq!(requests, "4");
 }
+
+// ===== AI Suggestion Service Tests =====
+
+#[test]
+fn ai_suggestion_meal_character_deserialize() {
+    use fewd_lib::services::ai_suggestion_service::MealCharacter;
+
+    let balanced: MealCharacter = serde_json::from_str(r#"{"type":"balanced"}"#).unwrap();
+    assert!(matches!(balanced, MealCharacter::Balanced));
+
+    let indulgent: MealCharacter = serde_json::from_str(r#"{"type":"indulgent"}"#).unwrap();
+    assert!(matches!(indulgent, MealCharacter::Indulgent));
+
+    let quick: MealCharacter = serde_json::from_str(r#"{"type":"quick"}"#).unwrap();
+    assert!(matches!(quick, MealCharacter::Quick));
+
+    let custom: MealCharacter =
+        serde_json::from_str(r#"{"type":"custom","text":"high protein"}"#).unwrap();
+    assert!(matches!(custom, MealCharacter::Custom { text } if text == "high protein"));
+}
+
+#[test]
+fn ai_suggestion_build_system_prompt_contains_schema() {
+    use fewd_lib::services::ai_suggestion_service::AiSuggestionService;
+
+    let prompt = AiSuggestionService::build_system_prompt();
+    assert!(prompt.contains("ai_suggested"));
+    assert!(prompt.contains("ingredients"));
+    assert!(prompt.contains("3-5"));
+    assert!(prompt.contains("Return ONLY a valid JSON array"));
+}
+
+#[test]
+fn ai_suggestion_build_user_message_includes_context() {
+    use fewd_lib::services::ai_suggestion_service::{
+        AiSuggestionService, MealCharacter, SuggestionContext,
+    };
+
+    let ctx = SuggestionContext {
+        people: &[],
+        person_options: &[],
+        meal_type: "Dinner",
+        character: &MealCharacter::Indulgent,
+        meals: &[],
+        recipes: &[],
+        feedback: None,
+        previous_suggestions: None,
+    };
+    let message = AiSuggestionService::build_user_message(&ctx);
+
+    assert!(message.contains("Dinner"));
+    assert!(message.contains("Indulgent"));
+}
+
+// --- Shopping List Serving Mismatch Tests ---
+
+#[tokio::test]
+async fn shopping_list_recipe_source_has_serving_info() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Tacos"))
+        .await
+        .unwrap();
+    let person = PersonService::create(&db, test_person_dto("Bob"))
+        .await
+        .unwrap();
+
+    let meal_dto = CreateMealDto {
+        date: "2025-06-10".to_string(),
+        meal_type: "Dinner".to_string(),
+        order_index: 2,
+        servings: vec![PersonServingDto::Recipe {
+            person_id: person.id,
+            recipe_id: recipe.id,
+            servings_count: 1.0,
+            notes: None,
+        }],
+    };
+    MealService::create(&db, meal_dto).await.unwrap();
+
+    let list =
+        ShoppingService::get_shopping_list(&db, "2025-06-09".to_string(), "2025-06-15".to_string())
+            .await
+            .unwrap();
+
+    assert!(!list.is_empty());
+    for agg in &list {
+        for source in &agg.items {
+            assert_eq!(source.recipe_servings, Some(4));
+            assert_eq!(source.person_servings, Some(1.0));
+        }
+    }
+}
+
+#[tokio::test]
+async fn shopping_list_adhoc_source_has_no_serving_info() {
+    let db = setup_db().await;
+    let person = PersonService::create(&db, test_person_dto("Carol"))
+        .await
+        .unwrap();
+
+    let meal_dto = CreateMealDto {
+        date: "2025-06-10".to_string(),
+        meal_type: "Snack".to_string(),
+        order_index: 3,
+        servings: vec![PersonServingDto::Adhoc {
+            person_id: person.id,
+            adhoc_items: vec![IngredientDto {
+                name: "apple".to_string(),
+                amount: IngredientAmountDto::Single { value: 1.0 },
+                unit: "whole".to_string(),
+                notes: None,
+            }],
+            notes: None,
+        }],
+    };
+    MealService::create(&db, meal_dto).await.unwrap();
+
+    let list =
+        ShoppingService::get_shopping_list(&db, "2025-06-09".to_string(), "2025-06-15".to_string())
+            .await
+            .unwrap();
+
+    assert_eq!(list.len(), 1);
+    assert!(list[0].items[0].recipe_servings.is_none());
+    assert!(list[0].items[0].person_servings.is_none());
+}
+
+#[tokio::test]
+async fn shopping_list_multiple_people_same_recipe() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Curry"))
+        .await
+        .unwrap();
+    let alice = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+    let bob = PersonService::create(&db, test_person_dto("Bob"))
+        .await
+        .unwrap();
+
+    let meal_dto = CreateMealDto {
+        date: "2025-06-10".to_string(),
+        meal_type: "Dinner".to_string(),
+        order_index: 2,
+        servings: vec![
+            PersonServingDto::Recipe {
+                person_id: alice.id,
+                recipe_id: recipe.id.clone(),
+                servings_count: 1.0,
+                notes: None,
+            },
+            PersonServingDto::Recipe {
+                person_id: bob.id,
+                recipe_id: recipe.id,
+                servings_count: 1.5,
+                notes: None,
+            },
+        ],
+    };
+    MealService::create(&db, meal_dto).await.unwrap();
+
+    let list =
+        ShoppingService::get_shopping_list(&db, "2025-06-09".to_string(), "2025-06-15".to_string())
+            .await
+            .unwrap();
+
+    // Sources from same meal+recipe are merged into one line
+    for agg in &list {
+        assert_eq!(agg.items.len(), 1);
+        assert_eq!(agg.items[0].person_servings, Some(2.5)); // 1.0 + 1.5
+        assert_eq!(agg.items[0].recipe_servings, Some(4));
+    }
+}

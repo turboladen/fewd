@@ -6,6 +6,7 @@ import { parsePerson } from '../types/person'
 import type { CreateRecipeDto, ParsedRecipe, PersonAdaptOptions } from '../types/recipe'
 import { formatAmount } from '../types/recipe'
 import { DraftReview } from './DraftReview'
+import { FieldToggle, PersonSummary } from './PersonFieldToggles'
 
 interface AdaptRecipePanelProps {
   parsed: ParsedRecipe
@@ -281,52 +282,6 @@ export function AdaptRecipePanel({
 }
 
 // --- Sub-components ---
-
-function FieldToggle({
-  label,
-  enabled,
-  onToggle,
-}: {
-  label: string
-  enabled: boolean
-  onToggle: () => void
-}) {
-  return (
-    <button
-      onClick={onToggle}
-      className={`text-xs px-2 py-0.5 rounded border ${
-        enabled
-          ? 'bg-teal-50 border-teal-300 text-teal-700'
-          : 'bg-gray-50 border-gray-200 text-gray-400 line-through'
-      }`}
-    >
-      {label}
-    </button>
-  )
-}
-
-function PersonSummary({
-  goals,
-  dislikes,
-  favorites,
-}: {
-  goals: string | null
-  dislikes: string[]
-  favorites: string[]
-}) {
-  const parts: string[] = []
-  if (goals) parts.push(`Goals: ${goals}`)
-  if (dislikes.length > 0) parts.push(`Dislikes: ${dislikes.join(', ')}`)
-  if (favorites.length > 0) parts.push(`Favorites: ${favorites.join(', ')}`)
-
-  if (parts.length === 0) return null
-
-  return (
-    <p className='text-xs text-gray-500 italic'>
-      {parts.join(' | ')}
-    </p>
-  )
-}
 
 function RecipePreview({ draft }: { draft: CreateRecipeDto }) {
   return (

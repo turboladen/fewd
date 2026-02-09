@@ -45,6 +45,7 @@ fn main() {
             meal_template::delete_meal_template,
             meal_template::create_template_from_meal,
             suggestion::get_meal_suggestions,
+            suggestion::ai_suggest_meals,
             settings::get_setting,
             settings::set_setting,
             settings::get_available_models,

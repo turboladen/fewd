@@ -29,6 +29,8 @@ struct MessageResponse {
     content: Vec<ContentBlock>,
     #[serde(default)]
     usage: Option<UsageInfo>,
+    #[serde(default)]
+    stop_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -188,11 +190,29 @@ impl ClaudeClient {
         system_prompt: Option<&str>,
         user_message: &str,
     ) -> Result<SendMessageResponse, ClaudeError> {
+        Self::send_message_with_max_tokens(
+            api_key,
+            model,
+            system_prompt,
+            user_message,
+            DEFAULT_MAX_TOKENS,
+        )
+        .await
+    }
+
+    /// Send a message with a custom max_tokens limit
+    pub async fn send_message_with_max_tokens(
+        api_key: &str,
+        model: &str,
+        system_prompt: Option<&str>,
+        user_message: &str,
+        max_tokens: u32,
+    ) -> Result<SendMessageResponse, ClaudeError> {
         let client = reqwest::Client::new();
 
         let request = MessageRequest {
             model: model.to_string(),
-            max_tokens: DEFAULT_MAX_TOKENS,
+            max_tokens,
             system: system_prompt.map(|s| s.to_string()),
             messages: vec![Message {
                 role: "user".to_string(),
@@ -231,6 +251,13 @@ impl ClaudeClient {
             .json()
             .await
             .map_err(|e| ClaudeError::ParseError(e.to_string()))?;
+
+        if msg_response.stop_reason.as_deref() == Some("max_tokens") {
+            eprintln!(
+                "Warning: Claude response was truncated (hit max_tokens={})",
+                max_tokens
+            );
+        }
 
         let text = msg_response
             .content

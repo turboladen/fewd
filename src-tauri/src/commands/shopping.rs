@@ -24,6 +24,10 @@ pub struct IngredientSourceDto {
     pub meal_id: String,
     pub meal_date: String,
     pub meal_type: String,
+    /// How many servings the recipe makes (None for ad-hoc)
+    pub recipe_servings: Option<i32>,
+    /// How many servings this person planned (None for ad-hoc)
+    pub person_servings: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

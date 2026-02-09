@@ -1,3 +1,4 @@
+pub mod ai_suggestion_service;
 pub mod claude_client;
 pub mod meal_service;
 pub mod meal_template_service;

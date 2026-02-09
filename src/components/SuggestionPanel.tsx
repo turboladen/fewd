@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMealSuggestions } from '../hooks/useSuggestions'
 import type { Person } from '../types/person'
 import type { SuggestionItem } from '../types/suggestion'
+import { AiSuggestionSection } from './AiSuggestionSection'
 import { StarRating } from './StarRating'
 
 function SuggestionSection({
@@ -55,11 +56,13 @@ function SuggestionSection({
 export function SuggestionPanel({
   people,
   date,
+  mealType,
   onApply,
   onClose,
 }: {
   people: Person[]
   date: string
+  mealType: string
   onApply: (recipeId: string, personIds: string[]) => void
   onClose: () => void
 }) {
@@ -166,11 +169,14 @@ export function SuggestionPanel({
         </div>
       )}
 
-      {/* AI placeholder */}
+      {/* AI suggestions */}
       <div className='mt-2 pt-2 border-t border-purple-200'>
-        <p className='text-xs text-gray-400 italic'>
-          Want AI suggestions? Coming soon...
-        </p>
+        <AiSuggestionSection
+          people={people}
+          selectedPersonIds={selectedPersonIds}
+          mealType={mealType}
+          onApply={onApply}
+        />
       </div>
     </div>
   )

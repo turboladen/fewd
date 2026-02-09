@@ -14,6 +14,12 @@ function formatSourceLabel(source: IngredientSource): string {
   return `${dayName} ${source.meal_type} \u2014 ${typeLabel}`
 }
 
+function isPartialSource(source: IngredientSource): boolean {
+  return source.recipe_servings != null
+    && source.person_servings != null
+    && source.person_servings < source.recipe_servings
+}
+
 function IngredientCard({
   ingredient,
   isExpanded,
@@ -24,6 +30,7 @@ function IngredientCard({
   onToggle: () => void
 }) {
   const hasTotals = ingredient.total_amount !== null && ingredient.total_unit !== null
+  const hasPartialRecipe = ingredient.items.some(isPartialSource)
 
   return (
     <div className='border border-gray-200 rounded-lg bg-white'>
@@ -43,6 +50,11 @@ function IngredientCard({
           {!hasTotals && ingredient.items.length > 1 && (
             <span className='text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded'>
               Mixed units
+            </span>
+          )}
+          {hasPartialRecipe && (
+            <span className='text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded'>
+              Partial recipe
             </span>
           )}
         </div>
@@ -65,6 +77,11 @@ function IngredientCard({
                   {formatAmount(source.amount)} {source.unit}
                 </span>
                 <span className='text-gray-400'>{formatSourceLabel(source)}</span>
+                {isPartialSource(source) && (
+                  <span className='text-xs text-amber-500'>
+                    ({source.person_servings} of {source.recipe_servings} servings)
+                  </span>
+                )}
               </div>
             ))}
           </div>

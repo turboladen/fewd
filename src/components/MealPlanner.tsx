@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   useCreateMeal,
   useDeleteMeal,
@@ -27,6 +27,7 @@ import {
   isToday,
 } from '../utils/dates'
 import { IngredientInput } from './IngredientInput'
+import { ServingMismatchBanner } from './ServingMismatchBanner'
 import { SuggestionPanel } from './SuggestionPanel'
 
 const DEFAULT_MEALS = [
@@ -45,7 +46,7 @@ function PersonServingEditor({
 }: {
   person: Person
   serving: PersonServing | undefined
-  recipes: { id: string; name: string }[]
+  recipes: { id: string; name: string; servings: number }[]
   onChange: (serving: PersonServing | undefined) => void
 }) {
   const mode: 'skip' | 'recipe' | 'adhoc' = !serving
@@ -387,7 +388,7 @@ function MealEditor({
   orderIndex: number
   existingMeal: ParsedMeal | undefined
   people: Person[]
-  recipes: { id: string; name: string }[]
+  recipes: { id: string; name: string; servings: number }[]
   templates: ParsedMealTemplate[]
   recipeNames: Map<string, string>
   onSave: (data: CreateMealDto) => void
@@ -413,6 +414,56 @@ function MealEditor({
   const [showSaveTemplate, setShowSaveTemplate] = useState(false)
   const [showSuggestionPanel, setShowSuggestionPanel] = useState(false)
   const isCustom = orderIndex >= 3
+  const [dismissedMismatches, setDismissedMismatches] = useState<Set<string>>(new Set())
+
+  // Detect serving mismatches: recipe makes X servings but planned total < X
+  const servingMismatches = useMemo(() => {
+    const recipeGroups = new Map<
+      string,
+      { totalPlanned: number; recipeName: string; recipeServings: number; personIds: string[] }
+    >()
+
+    for (const [personId, serving] of servingsMap) {
+      if (serving.food_type !== 'recipe') continue
+      const recipe = recipes.find((r) => r.id === serving.recipe_id)
+      if (!recipe) continue
+
+      const existing = recipeGroups.get(serving.recipe_id)
+      if (existing) {
+        existing.totalPlanned += serving.servings_count
+        existing.personIds.push(personId)
+      } else {
+        recipeGroups.set(serving.recipe_id, {
+          totalPlanned: serving.servings_count,
+          recipeName: recipe.name,
+          recipeServings: recipe.servings,
+          personIds: [personId],
+        })
+      }
+    }
+
+    return [...recipeGroups.entries()]
+      .filter(([, info]) => info.totalPlanned < info.recipeServings - 0.01)
+      .map(([recipeId, info]) => ({ recipeId, ...info }))
+  }, [servingsMap, recipes])
+
+  const handleAdjustServings = (recipeId: string) => {
+    const mismatch = servingMismatches.find((m) => m.recipeId === recipeId)
+    if (!mismatch) return
+
+    const perPerson = mismatch.recipeServings / mismatch.personIds.length
+    const newMap = new Map(servingsMap)
+    for (const [personId, serving] of newMap) {
+      if (serving.food_type === 'recipe' && serving.recipe_id === recipeId) {
+        newMap.set(personId, { ...serving, servings_count: perPerson })
+      }
+    }
+    setServingsMap(newMap)
+  }
+
+  const handleDismissMismatch = (recipeId: string) => {
+    setDismissedMismatches((prev) => new Set(prev).add(recipeId))
+  }
 
   const handleApplyTemplate = (template: ParsedMealTemplate) => {
     const newMap = new Map(servingsMap)
@@ -560,6 +611,7 @@ function MealEditor({
         <SuggestionPanel
           people={people}
           date={date}
+          mealType={isCustom ? customMealType : mealType}
           onApply={handleApplySuggestion}
           onClose={() => setShowSuggestionPanel(false)}
         />
@@ -576,6 +628,21 @@ function MealEditor({
           />
         ))}
       </div>
+
+      {servingMismatches
+        .filter((m) => !dismissedMismatches.has(m.recipeId))
+        .map((m) => (
+          <div key={m.recipeId} className='mb-2'>
+            <ServingMismatchBanner
+              recipeName={m.recipeName}
+              recipeServings={m.recipeServings}
+              totalPlanned={m.totalPlanned}
+              numPeople={m.personIds.length}
+              onAdjust={() => handleAdjustServings(m.recipeId)}
+              onDismiss={() => handleDismissMismatch(m.recipeId)}
+            />
+          </div>
+        ))}
 
       {validationError && (
         <div className='mb-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
@@ -697,14 +764,17 @@ export function MealPlanner() {
   }, [editingSlot])
 
   // Build recipe name lookup
-  const recipes = rawRecipes?.map((r) => ({ id: r.id, name: r.name })) ?? []
+  const recipes = useMemo(
+    () => rawRecipes?.map((r) => ({ id: r.id, name: r.name, servings: r.servings })) ?? [],
+    [rawRecipes],
+  )
   const recipeNames = new Map(recipes.map((r) => [r.id, r.name]))
 
   // Parse templates
   const templates: ParsedMealTemplate[] = rawTemplates?.map(parseMealTemplate) ?? []
 
   // Parse and group meals by date
-  const parsedMeals = meals?.map(parseMeal) ?? []
+  const parsedMeals = useMemo(() => meals?.map(parseMeal) ?? [], [meals])
   const mealsByDate = new Map<string, ParsedMeal[]>()
   for (const m of parsedMeals) {
     const key = m.date
@@ -715,6 +785,60 @@ export function MealPlanner() {
   }
 
   const activePeople = people?.filter((p) => p.is_active) ?? []
+
+  // Compute serving mismatches across all meals this week
+  const weeklyMismatches = useMemo(() => {
+    const mismatches: {
+      date: string
+      mealType: string
+      recipeName: string
+      recipeServings: number
+      totalPlanned: number
+    }[] = []
+
+    for (const meal of parsedMeals) {
+      // Group recipe servings by recipe_id within this meal
+      const recipeGroups = new Map<
+        string,
+        { totalPlanned: number; recipeServings: number; recipeName: string }
+      >()
+
+      for (const s of meal.servings) {
+        if (s.food_type !== 'recipe') continue
+        const recipe = recipes.find((r) => r.id === s.recipe_id)
+        if (!recipe) continue
+
+        const existing = recipeGroups.get(s.recipe_id)
+        if (existing) {
+          existing.totalPlanned += s.servings_count
+        } else {
+          recipeGroups.set(s.recipe_id, {
+            totalPlanned: s.servings_count,
+            recipeName: recipe.name,
+            recipeServings: recipe.servings,
+          })
+        }
+      }
+
+      for (const info of recipeGroups.values()) {
+        if (info.totalPlanned < info.recipeServings - 0.01) {
+          const dateObj = new Date(meal.date + 'T00:00:00')
+          const dayLabel = dateObj.toLocaleDateString('en-US', {
+            weekday: 'short',
+          })
+          mismatches.push({
+            date: `${dayLabel} ${meal.meal_type}`,
+            mealType: meal.meal_type,
+            recipeName: info.recipeName,
+            recipeServings: info.recipeServings,
+            totalPlanned: info.totalPlanned,
+          })
+        }
+      }
+    }
+
+    return mismatches
+  }, [parsedMeals, recipes])
 
   const prevWeek = () => setCurrentMonday(addDays(currentMonday, -7))
   const nextWeek = () => setCurrentMonday(addDays(currentMonday, 7))
@@ -888,6 +1012,30 @@ export function MealPlanner() {
           )
         })}
       </div>
+
+      {/* Serving mismatch warnings */}
+      {weeklyMismatches.length > 0 && (
+        <div className='mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3'>
+          <div className='flex items-center gap-2 text-sm text-amber-800'>
+            <span>{'\u26A0'}</span>
+            <span className='font-medium'>
+              {weeklyMismatches.length} partial recipe{weeklyMismatches.length !== 1 ? 's' : ''}
+            </span>
+            <span className='text-amber-600'>
+              {'\u2014'} shopping list amounts are less than full recipes
+            </span>
+          </div>
+          <div className='mt-2 space-y-1'>
+            {weeklyMismatches.map((m, i) => (
+              <div key={i} className='text-xs text-amber-700 ml-6'>
+                <span className='text-amber-500'>{m.date}:</span>{' '}
+                <span className='font-medium'>{m.recipeName}</span> ({m.totalPlanned} of{' '}
+                {m.recipeServings} servings planned)
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Meal Editor */}
       {editingSlot && (
