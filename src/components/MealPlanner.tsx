@@ -225,8 +225,23 @@ function MealEditor({
       setValidationError('Assign food to at least one person')
       return
     }
+
+    // Filter out empty-name ingredients from ad-hoc servings
+    const servings: PersonServing[] = []
+    for (const serving of servingsMap.values()) {
+      if (serving.food_type === 'adhoc') {
+        const validItems = serving.adhoc_items.filter((item) => item.name.trim() !== '')
+        if (validItems.length === 0) {
+          setValidationError('Ad-hoc items must have at least one ingredient with a name')
+          return
+        }
+        servings.push({ ...serving, adhoc_items: validItems })
+      } else {
+        servings.push(serving)
+      }
+    }
+
     setValidationError(null)
-    const servings = Array.from(servingsMap.values())
     onSave({
       date,
       meal_type: isCustom ? customMealType : mealType,
