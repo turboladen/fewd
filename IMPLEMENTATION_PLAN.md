@@ -189,12 +189,12 @@
 
 **Verify Phase 9:**
 
-- [ ] Can save an existing meal as a template
-- [ ] Can browse templates filtered by meal type
-- [ ] Applying a template fills in the correct people with correct food
-- [ ] Template only affects the people it's defined for
-- [ ] Can edit and delete templates
-- [ ] Templates persist across app restarts
+- [x] Can save an existing meal as a template
+- [x] Can browse templates filtered by meal type
+- [x] Applying a template fills in the correct people with correct food
+- [x] Template only affects the people it's defined for
+- [x] Can edit and delete templates
+- [x] Templates persist across app restarts
 
 **Deliverable:** Reusable meal templates
 

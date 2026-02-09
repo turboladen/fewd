@@ -5,10 +5,17 @@ import {
   useMealsForDateRange,
   useUpdateMeal,
 } from '../hooks/useMeals'
+import {
+  useCreateTemplateFromMeal,
+  useDeleteMealTemplate,
+  useMealTemplates,
+} from '../hooks/useMealTemplates'
 import { usePeople } from '../hooks/usePeople'
 import { useRecipes } from '../hooks/useRecipes'
 import type { CreateMealDto, ParsedMeal, PersonServing } from '../types/meal'
 import { parseMeal } from '../types/meal'
+import type { ParsedMealTemplate } from '../types/mealTemplate'
+import { parseMealTemplate } from '../types/mealTemplate'
 import type { Person } from '../types/person'
 import type { Ingredient } from '../types/recipe'
 import {
@@ -173,6 +180,190 @@ function MealSlot({
   )
 }
 
+// --- TemplatePicker ---
+
+function TemplateRow({
+  template,
+  people,
+  recipeNames,
+  confirmingDelete,
+  onApply,
+  onRequestDelete,
+  onConfirmDelete,
+  onCancelDelete,
+}: {
+  template: ParsedMealTemplate
+  people: Person[]
+  recipeNames: Map<string, string>
+  confirmingDelete: boolean
+  onApply: (template: ParsedMealTemplate) => void
+  onRequestDelete: () => void
+  onConfirmDelete: () => void
+  onCancelDelete: () => void
+}) {
+  return (
+    <div className='flex items-center justify-between bg-white border border-gray-200 rounded p-2'>
+      <button
+        onClick={() => onApply(template)}
+        className='flex-1 text-left text-sm hover:text-green-700'
+      >
+        <span className='font-medium'>{template.name}</span>
+        <div className='text-xs text-gray-500 mt-0.5'>
+          {template.servings.map((s) => {
+            const name = people.find((p) => p.id === s.person_id)?.name ?? '?'
+            const food = s.food_type === 'recipe'
+              ? (recipeNames.get(s.recipe_id) ?? '?')
+              : `${s.adhoc_items.length} items`
+            return `${name}: ${food}`
+          }).join(', ')}
+        </div>
+      </button>
+      {confirmingDelete
+        ? (
+          <span className='flex gap-1 items-center text-sm ml-2'>
+            <span className='text-red-600'>Delete?</span>
+            <button
+              onClick={onConfirmDelete}
+              className='text-red-700 font-semibold hover:underline'
+            >
+              Yes
+            </button>
+            <button
+              onClick={onCancelDelete}
+              className='text-gray-500 hover:underline'
+            >
+              No
+            </button>
+          </span>
+        )
+        : (
+          <button
+            onClick={onRequestDelete}
+            className='text-red-400 hover:text-red-600 text-xs ml-2 px-1'
+            title='Delete template'
+          >
+            {'\u2715'}
+          </button>
+        )}
+    </div>
+  )
+}
+
+function TemplatePicker({
+  templates,
+  mealType,
+  recipeNames,
+  people,
+  onApply,
+  onDelete,
+  onClose,
+}: {
+  templates: ParsedMealTemplate[]
+  mealType: string
+  recipeNames: Map<string, string>
+  people: Person[]
+  onApply: (template: ParsedMealTemplate) => void
+  onDelete: (id: string) => void
+  onClose: () => void
+}) {
+  const [search, setSearch] = useState('')
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
+  const query = search.trim().toLowerCase()
+
+  // Filter by search term (match name, meal type, or person/food names)
+  const filtered = templates.filter((t) => {
+    if (!query) return true
+    if (t.name.toLowerCase().includes(query)) return true
+    if (t.meal_type.toLowerCase().includes(query)) return true
+    return t.servings.some((s) => {
+      const personName = people.find((p) => p.id === s.person_id)?.name ?? ''
+      if (personName.toLowerCase().includes(query)) return true
+      if (s.food_type === 'recipe') {
+        const recipeName = recipeNames.get(s.recipe_id) ?? ''
+        if (recipeName.toLowerCase().includes(query)) return true
+      }
+      return false
+    })
+  })
+
+  // Group by meal type, current meal type first
+  const groups = new Map<string, ParsedMealTemplate[]>()
+  for (const t of filtered) {
+    const list = groups.get(t.meal_type) ?? []
+    list.push(t)
+    groups.set(t.meal_type, list)
+  }
+  // Sort each group alphabetically by name
+  for (const list of groups.values()) {
+    list.sort((a, b) => a.name.localeCompare(b.name))
+  }
+  // Order groups: current meal type first, then alphabetical
+  const groupOrder = [...groups.keys()].sort((a, b) => {
+    if (a === mealType && b !== mealType) return -1
+    if (a !== mealType && b === mealType) return 1
+    return a.localeCompare(b)
+  })
+
+  return (
+    <div className='border border-green-200 rounded-lg p-3 bg-green-50 mb-3'>
+      <div className='flex items-center justify-between mb-2'>
+        <h4 className='font-medium text-sm text-green-800'>Choose a Template</h4>
+        <button onClick={onClose} className='text-gray-400 hover:text-gray-600 text-sm'>
+          {'\u2715'}
+        </button>
+      </div>
+
+      {templates.length > 0 && (
+        <input
+          type='text'
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value)
+            setConfirmingDeleteId(null)
+          }}
+          placeholder='Search templates...'
+          className='w-full border border-gray-300 rounded px-2 py-1 text-sm mb-2 bg-white'
+          autoFocus
+        />
+      )}
+
+      {templates.length === 0
+        ? <p className='text-sm text-gray-500'>No templates saved yet.</p>
+        : filtered.length === 0
+        ? <p className='text-sm text-gray-500'>No templates match &ldquo;{search}&rdquo;</p>
+        : (
+          <div className='space-y-3 max-h-64 overflow-y-auto'>
+            {groupOrder.map((type) => (
+              <div key={type}>
+                <div className='text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1'>
+                  {type}
+                </div>
+                <div className='space-y-1'>
+                  {groups.get(type)!.map((t) => (
+                    <TemplateRow
+                      key={t.id}
+                      template={t}
+                      people={people}
+                      recipeNames={recipeNames}
+                      confirmingDelete={confirmingDeleteId === t.id}
+                      onApply={onApply}
+                      onRequestDelete={() => setConfirmingDeleteId(t.id)}
+                      onConfirmDelete={() => {
+                        onDelete(t.id)
+                        setConfirmingDeleteId(null)
+                      }}
+                      onCancelDelete={() => setConfirmingDeleteId(null)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+    </div>
+  )
+}
+
 // --- MealEditor ---
 
 function MealEditor({
@@ -182,9 +373,13 @@ function MealEditor({
   existingMeal,
   people,
   recipes,
+  templates,
+  recipeNames,
   onSave,
   onCancel,
   onDelete,
+  onSaveAsTemplate,
+  onDeleteTemplate,
 }: {
   date: string
   mealType: string
@@ -192,9 +387,13 @@ function MealEditor({
   existingMeal: ParsedMeal | undefined
   people: Person[]
   recipes: { id: string; name: string }[]
+  templates: ParsedMealTemplate[]
+  recipeNames: Map<string, string>
   onSave: (data: CreateMealDto) => void
   onCancel: () => void
   onDelete?: () => void
+  onSaveAsTemplate?: (mealId: string, name: string) => void
+  onDeleteTemplate: (id: string) => void
 }) {
   const [servingsMap, setServingsMap] = useState<Map<string, PersonServing>>(() => {
     const map = new Map<string, PersonServing>()
@@ -208,7 +407,27 @@ function MealEditor({
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [customMealType, setCustomMealType] = useState(mealType)
   const [validationError, setValidationError] = useState<string | null>(null)
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false)
+  const [templateName, setTemplateName] = useState('')
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false)
   const isCustom = orderIndex >= 3
+
+  const handleApplyTemplate = (template: ParsedMealTemplate) => {
+    const newMap = new Map(servingsMap)
+    // Only fill in people defined in the template; leave others untouched
+    for (const s of template.servings) {
+      newMap.set(s.person_id, s)
+    }
+    setServingsMap(newMap)
+    setShowTemplatePicker(false)
+  }
+
+  const handleSaveAsTemplate = () => {
+    if (!existingMeal || !templateName.trim()) return
+    onSaveAsTemplate?.(existingMeal.id, templateName.trim())
+    setShowSaveTemplate(false)
+    setTemplateName('')
+  }
 
   const handlePersonChange = (personId: string, serving: PersonServing | undefined) => {
     const newMap = new Map(servingsMap)
@@ -308,6 +527,18 @@ function MealEditor({
         </div>
       </div>
 
+      {showTemplatePicker && (
+        <TemplatePicker
+          templates={templates}
+          mealType={isCustom ? customMealType : mealType}
+          recipeNames={recipeNames}
+          people={people}
+          onApply={handleApplyTemplate}
+          onDelete={onDeleteTemplate}
+          onClose={() => setShowTemplatePicker(false)}
+        />
+      )}
+
       <div className='space-y-2 mb-4'>
         {people.map((person) => (
           <PersonServingEditor
@@ -326,6 +557,34 @@ function MealEditor({
         </div>
       )}
 
+      {showSaveTemplate && (
+        <div className='mb-2 flex gap-2 items-center'>
+          <input
+            type='text'
+            value={templateName}
+            onChange={(e) => setTemplateName(e.target.value)}
+            placeholder='Template name...'
+            className='border border-gray-300 p-1 rounded text-sm flex-1'
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleSaveAsTemplate()
+            }}
+          />
+          <button
+            onClick={handleSaveAsTemplate}
+            disabled={!templateName.trim()}
+            className='bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 disabled:opacity-50'
+          >
+            Save
+          </button>
+          <button
+            onClick={() => setShowSaveTemplate(false)}
+            className='text-gray-500 text-sm hover:underline'
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
       <div className='flex gap-2'>
         <button
           onClick={handleSave}
@@ -333,6 +592,20 @@ function MealEditor({
         >
           {existingMeal ? 'Save Changes' : 'Create Meal'}
         </button>
+        <button
+          onClick={() => setShowTemplatePicker(!showTemplatePicker)}
+          className='border border-green-300 text-green-700 px-4 py-2 rounded text-sm hover:bg-green-50'
+        >
+          Use Template
+        </button>
+        {existingMeal && onSaveAsTemplate && (
+          <button
+            onClick={() => setShowSaveTemplate(!showSaveTemplate)}
+            className='border border-gray-300 text-gray-600 px-4 py-2 rounded text-sm hover:bg-gray-50'
+          >
+            Save as Template
+          </button>
+        )}
         <button
           onClick={onCancel}
           className='border border-gray-300 px-4 py-2 rounded text-sm text-gray-600 hover:bg-gray-50'
@@ -367,6 +640,10 @@ export function MealPlanner() {
   const { data: people } = usePeople()
   const { data: rawRecipes } = useRecipes()
 
+  const { data: rawTemplates } = useMealTemplates()
+  const createTemplateMutation = useCreateTemplateFromMeal()
+  const deleteTemplateMutation = useDeleteMealTemplate()
+
   const createMutation = useCreateMeal()
   const updateMutation = useUpdateMeal()
   const deleteMutation = useDeleteMeal()
@@ -384,6 +661,9 @@ export function MealPlanner() {
   // Build recipe name lookup
   const recipes = rawRecipes?.map((r) => ({ id: r.id, name: r.name })) ?? []
   const recipeNames = new Map(recipes.map((r) => [r.id, r.name]))
+
+  // Parse templates
+  const templates: ParsedMealTemplate[] = rawTemplates?.map(parseMealTemplate) ?? []
 
   // Parse and group meals by date
   const parsedMeals = meals?.map(parseMeal) ?? []
@@ -443,6 +723,14 @@ export function MealPlanner() {
     const dateMeals = mealsByDate.get(dateKey) ?? []
     const maxOrder = dateMeals.reduce((max, m) => Math.max(max, m.order_index), 2)
     setEditingSlot({ date: dateKey, mealType: 'Snack', orderIndex: maxOrder + 1 })
+  }
+
+  const handleSaveAsTemplate = (mealId: string, name: string) => {
+    createTemplateMutation.mutate({ meal_id: mealId, name })
+  }
+
+  const handleDeleteTemplate = (id: string) => {
+    deleteTemplateMutation.mutate(id)
   }
 
   const weekRangeLabel = `${
@@ -577,6 +865,8 @@ export function MealPlanner() {
             )}
             people={activePeople}
             recipes={recipes}
+            templates={templates}
+            recipeNames={recipeNames}
             onSave={handleSave}
             onCancel={() => setEditingSlot(null)}
             onDelete={(mealsByDate.get(editingSlot.date) ?? []).find(
@@ -586,6 +876,8 @@ export function MealPlanner() {
               )
               ? handleDelete
               : undefined}
+            onSaveAsTemplate={handleSaveAsTemplate}
+            onDeleteTemplate={handleDeleteTemplate}
           />
           {(createMutation.error || updateMutation.error) && (
             <div className='mt-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>

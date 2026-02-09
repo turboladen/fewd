@@ -1,3 +1,4 @@
 pub mod meal;
+pub mod meal_template;
 pub mod person;
 pub mod recipe;

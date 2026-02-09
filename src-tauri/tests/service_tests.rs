@@ -1,9 +1,11 @@
 use fewd_lib::commands::meal::{CreateMealDto, PersonServingDto};
+use fewd_lib::commands::meal_template::CreateMealTemplateDto;
 use fewd_lib::commands::person::CreatePersonDto;
 use fewd_lib::commands::recipe::{
     CreateRecipeDto, IngredientAmountDto, IngredientDto, UpdateRecipeDto,
 };
 use fewd_lib::services::meal_service::MealService;
+use fewd_lib::services::meal_template_service::MealTemplateService;
 use fewd_lib::services::person_service::PersonService;
 use fewd_lib::services::recipe_enhancer;
 use fewd_lib::services::recipe_scaler;
@@ -757,4 +759,139 @@ async fn seed_data_skips_nonempty_db() {
     let people = PersonService::get_all(&db).await.unwrap();
     assert_eq!(people.len(), 1);
     assert_eq!(people[0].name, "Existing");
+}
+
+// --- MealTemplateService Tests ---
+
+#[tokio::test]
+async fn meal_template_create_and_get_all() {
+    let db = setup_db().await;
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+
+    let dto = CreateMealTemplateDto {
+        name: "Weeknight Pasta".to_string(),
+        meal_type: "Dinner".to_string(),
+        servings: vec![PersonServingDto::Recipe {
+            person_id: person.id.clone(),
+            recipe_id: recipe.id.clone(),
+            servings_count: 1.0,
+            notes: None,
+        }],
+    };
+    let template = MealTemplateService::create(&db, dto).await.unwrap();
+    assert_eq!(template.name, "Weeknight Pasta");
+    assert_eq!(template.meal_type, "Dinner");
+
+    let all = MealTemplateService::get_all(&db).await.unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].name, "Weeknight Pasta");
+}
+
+#[tokio::test]
+async fn meal_template_update() {
+    let db = setup_db().await;
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+
+    let dto = CreateMealTemplateDto {
+        name: "Quick Brekkie".to_string(),
+        meal_type: "Breakfast".to_string(),
+        servings: vec![PersonServingDto::Adhoc {
+            person_id: person.id.clone(),
+            adhoc_items: vec![IngredientDto {
+                name: "toast".to_string(),
+                amount: IngredientAmountDto::Single { value: 2.0 },
+                unit: "slices".to_string(),
+                notes: None,
+            }],
+            notes: None,
+        }],
+    };
+    let template = MealTemplateService::create(&db, dto).await.unwrap();
+
+    let update = fewd_lib::commands::meal_template::UpdateMealTemplateDto {
+        name: Some("Sunday Brekkie".to_string()),
+        meal_type: None,
+        servings: None,
+    };
+    let updated = MealTemplateService::update(&db, template.id, update)
+        .await
+        .unwrap();
+    assert_eq!(updated.name, "Sunday Brekkie");
+    assert_eq!(updated.meal_type, "Breakfast");
+}
+
+#[tokio::test]
+async fn meal_template_delete() {
+    let db = setup_db().await;
+
+    let dto = CreateMealTemplateDto {
+        name: "To Delete".to_string(),
+        meal_type: "Lunch".to_string(),
+        servings: vec![],
+    };
+    let template = MealTemplateService::create(&db, dto).await.unwrap();
+    MealTemplateService::delete(&db, template.id.clone())
+        .await
+        .unwrap();
+    let found = MealTemplateService::get_by_id(&db, template.id)
+        .await
+        .unwrap();
+    assert!(found.is_none());
+}
+
+#[tokio::test]
+async fn meal_template_create_from_meal() {
+    let db = setup_db().await;
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+
+    // Create a meal first
+    let meal_dto = CreateMealDto {
+        date: "2025-06-10".to_string(),
+        meal_type: "Dinner".to_string(),
+        order_index: 2,
+        servings: vec![PersonServingDto::Recipe {
+            person_id: person.id.clone(),
+            recipe_id: recipe.id.clone(),
+            servings_count: 2.0,
+            notes: Some("extra cheese".to_string()),
+        }],
+    };
+    let meal = MealService::create(&db, meal_dto).await.unwrap();
+
+    // Create template from meal
+    let template = MealTemplateService::create_from_meal(&db, meal.id, "Pasta Night".to_string())
+        .await
+        .unwrap();
+    assert_eq!(template.name, "Pasta Night");
+    assert_eq!(template.meal_type, "Dinner");
+
+    // Verify servings were copied correctly
+    let servings: Vec<PersonServingDto> = serde_json::from_str(&template.servings).unwrap();
+    assert_eq!(servings.len(), 1);
+    match &servings[0] {
+        PersonServingDto::Recipe {
+            person_id,
+            recipe_id,
+            servings_count,
+            notes,
+        } => {
+            assert_eq!(person_id, &person.id);
+            assert_eq!(recipe_id, &recipe.id);
+            assert_eq!(*servings_count, 2.0);
+            assert_eq!(notes, &Some("extra cheese".to_string()));
+        }
+        _ => panic!("Expected Recipe serving"),
+    }
 }

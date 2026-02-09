@@ -4,10 +4,11 @@ import { FamilyManager } from './components/FamilyManager'
 import { MealPlanner } from './components/MealPlanner'
 import { RecipeManager } from './components/RecipeManager'
 import { ShoppingList } from './components/ShoppingList'
+import { TemplateManager } from './components/TemplateManager'
 
 const queryClient = new QueryClient()
 
-type Tab = 'family' | 'recipes' | 'planner' | 'shopping'
+type Tab = 'family' | 'recipes' | 'planner' | 'templates' | 'shopping'
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('family')
@@ -52,6 +53,16 @@ function App() {
               Planner
             </button>
             <button
+              onClick={() => setActiveTab('templates')}
+              className={`px-6 py-3 font-medium text-sm ${
+                activeTab === 'templates'
+                  ? 'text-blue-600 border-b-2 border-blue-600'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Templates
+            </button>
+            <button
               onClick={() => setActiveTab('shopping')}
               className={`px-6 py-3 font-medium text-sm ${
                 activeTab === 'shopping'
@@ -67,6 +78,7 @@ function App() {
           {activeTab === 'family' && <FamilyManager />}
           {activeTab === 'recipes' && <RecipeManager />}
           {activeTab === 'planner' && <MealPlanner />}
+          {activeTab === 'templates' && <TemplateManager />}
           {activeTab === 'shopping' && <ShoppingList />}
         </main>
       </div>

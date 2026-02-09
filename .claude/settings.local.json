@@ -29,7 +29,11 @@
       "Bash(cargo test:*)",
       "Bash(ls:*)",
       "Bash(bun test:*)",
-      "Bash(typos:*)"
+      "Bash(typos:*)",
+      "Bash(bunx dprint fmt:*)",
+      "Bash(cd:*)",
+      "Bash(bunx dprint check:*)",
+      "Bash(bunx tsc:*)"
     ]
   }
 }
