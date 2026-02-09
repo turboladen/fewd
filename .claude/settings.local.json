@@ -26,7 +26,10 @@
       "Bash(cargo build:*)",
       "Bash(cargo run:*)",
       "WebFetch(domain:v2.tauri.app)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "Bash(ls:*)",
+      "Bash(bun test:*)",
+      "Bash(typos:*)"
     ]
   }
 }

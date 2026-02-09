@@ -5,6 +5,7 @@ use fewd_lib::commands::recipe::{
 };
 use fewd_lib::services::meal_service::MealService;
 use fewd_lib::services::person_service::PersonService;
+use fewd_lib::services::recipe_scaler;
 use fewd_lib::services::recipe_service::RecipeService;
 use fewd_lib::services::seed_data;
 use fewd_lib::services::shopping_service::ShoppingService;
@@ -559,6 +560,68 @@ async fn shopping_list_includes_adhoc() {
 
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].ingredient_name, "banana");
+}
+
+// --- Recipe Scaling Tests ---
+
+#[tokio::test]
+async fn recipe_scale_preview_doubles_ingredients() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta")).await.unwrap();
+
+    let ingredients: Vec<IngredientDto> =
+        serde_json::from_str(&recipe.ingredients).unwrap();
+    let ratio = 8.0 / recipe.servings as f64; // 4 → 8 servings
+    let result = recipe_scaler::scale_ingredients(&ingredients, ratio);
+
+    assert_eq!(result.ingredients.len(), 2);
+    match &result.ingredients[0].amount {
+        IngredientAmountDto::Single { value } => assert_eq!(*value, 4.0), // 2 cups * 2
+        _ => panic!("expected Single"),
+    }
+    match &result.ingredients[1].amount {
+        IngredientAmountDto::Single { value } => assert_eq!(*value, 6.0), // 3 eggs * 2
+        _ => panic!("expected Single"),
+    }
+    // Eggs are "whole" (discrete), but 6.0 is whole → no flag
+    assert!(result.flagged.is_empty());
+}
+
+#[tokio::test]
+async fn recipe_scale_flags_fractional_discrete() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta")).await.unwrap();
+
+    let ingredients: Vec<IngredientDto> =
+        serde_json::from_str(&recipe.ingredients).unwrap();
+    let ratio = 6.0 / recipe.servings as f64; // 4 → 6 servings (1.5x)
+    let result = recipe_scaler::scale_ingredients(&ingredients, ratio);
+
+    // Flour: 2 * 1.5 = 3.0 cups → no flag (continuous unit)
+    // Eggs: 3 * 1.5 = 4.5 whole → flagged
+    assert_eq!(result.flagged.len(), 1);
+    assert_eq!(result.flagged[0].name, "eggs");
+    assert_eq!(result.flagged[0].scaled_value, 4.5);
+}
+
+#[tokio::test]
+async fn recipe_create_with_parent_id() {
+    let db = setup_db().await;
+    let parent = RecipeService::create(&db, test_recipe_dto("Original")).await.unwrap();
+
+    let mut child_dto = test_recipe_dto("Original (8 servings)");
+    child_dto.parent_recipe_id = Some(parent.id.clone());
+    child_dto.source = "scaled".to_string();
+    child_dto.servings = 8;
+
+    let child = RecipeService::create(&db, child_dto).await.unwrap();
+    assert_eq!(child.parent_recipe_id, Some(parent.id.clone()));
+    assert_eq!(child.source, "scaled");
+    assert_eq!(child.servings, 8);
+
+    // Verify persists on re-fetch
+    let fetched = RecipeService::get_by_id(&db, child.id).await.unwrap().unwrap();
+    assert_eq!(fetched.parent_recipe_id, Some(parent.id));
 }
 
 // --- SeedData Tests ---

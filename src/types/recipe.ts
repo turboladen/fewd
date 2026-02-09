@@ -92,6 +92,18 @@ export interface ImportRecipeDto {
   markdown: string
 }
 
+export interface FlaggedIngredient {
+  index: number
+  name: string
+  scaled_value: number
+  unit: string
+}
+
+export interface ScaleResult {
+  ingredients: Ingredient[]
+  flagged: FlaggedIngredient[]
+}
+
 export interface ParsedRecipe extends
   Omit<
     Recipe,

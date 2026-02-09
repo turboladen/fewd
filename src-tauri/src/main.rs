@@ -30,6 +30,7 @@ fn main() {
             recipe::search_recipes,
             recipe::toggle_favorite_recipe,
             recipe::import_recipe_from_markdown,
+            recipe::preview_scale_recipe,
             meal::get_meals_for_date_range,
             meal::get_meal,
             meal::create_meal,

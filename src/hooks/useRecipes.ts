@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { invoke } from '@tauri-apps/api/core'
-import type { CreateRecipeDto, ImportRecipeDto, Recipe, UpdateRecipeDto } from '../types/recipe'
+import type {
+  CreateRecipeDto,
+  ImportRecipeDto,
+  Recipe,
+  ScaleResult,
+  UpdateRecipeDto,
+} from '../types/recipe'
 
 export function useRecipes() {
   return useQuery({
@@ -67,6 +73,13 @@ export function useToggleFavorite() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['recipes'] })
     },
+  })
+}
+
+export function usePreviewScaleRecipe() {
+  return useMutation({
+    mutationFn: ({ id, newServings }: { id: string; newServings: number }) =>
+      invoke<ScaleResult>('preview_scale_recipe', { id, newServings }),
   })
 }
 

@@ -3,6 +3,7 @@ use tauri::State;
 
 use crate::entities::recipe;
 use crate::services::recipe_parser::RecipeParser;
+use crate::services::recipe_scaler;
 use crate::services::recipe_service::RecipeService;
 use crate::AppState;
 
@@ -181,4 +182,32 @@ pub async fn import_recipe_from_markdown(
         eprintln!("Failed to import recipe: {}", e);
         format!("Could not import recipe: {}", e)
     })
+}
+
+#[tauri::command]
+pub async fn preview_scale_recipe(
+    state: State<'_, AppState>,
+    id: String,
+    new_servings: i32,
+) -> Result<recipe_scaler::ScaleResult, String> {
+    if new_servings < 1 {
+        return Err("Servings must be at least 1".to_string());
+    }
+
+    let recipe = RecipeService::get_by_id(&state.db, id)
+        .await
+        .map_err(|e| {
+            eprintln!("Failed to get recipe for scaling: {}", e);
+            format!("Could not get recipe: {}", e)
+        })?
+        .ok_or_else(|| "Recipe not found".to_string())?;
+
+    let ingredients: Vec<IngredientDto> =
+        serde_json::from_str(&recipe.ingredients).map_err(|e| {
+            eprintln!("Failed to parse recipe ingredients: {}", e);
+            format!("Could not parse ingredients: {}", e)
+        })?;
+
+    let ratio = new_servings as f64 / recipe.servings as f64;
+    Ok(recipe_scaler::scale_ingredients(&ingredients, ratio))
 }

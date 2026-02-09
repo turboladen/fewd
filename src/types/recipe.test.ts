@@ -103,4 +103,14 @@ describe('parseRecipe', () => {
     const parsed = parseRecipe(makeRecipe({ rating: null }))
     expect(parsed.rating).toBeNull()
   })
+
+  it('preserves parent_recipe_id', () => {
+    const parsed = parseRecipe(makeRecipe({ parent_recipe_id: 'parent-123' }))
+    expect(parsed.parent_recipe_id).toBe('parent-123')
+  })
+
+  it('handles null parent_recipe_id', () => {
+    const parsed = parseRecipe(makeRecipe({ parent_recipe_id: null }))
+    expect(parsed.parent_recipe_id).toBeNull()
+  })
 })

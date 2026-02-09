@@ -3,6 +3,7 @@ import {
   useCreateRecipe,
   useDeleteRecipe,
   useImportRecipe,
+  usePreviewScaleRecipe,
   useRecipes,
   useToggleFavorite,
   useUpdateRecipe,
@@ -11,6 +12,7 @@ import type {
   CreateRecipeDto,
   Ingredient,
   ParsedRecipe,
+  ScaleResult,
   TimeValue,
   UpdateRecipeDto,
 } from '../types/recipe'
@@ -371,11 +373,176 @@ function ImportRecipeForm({
   )
 }
 
+// --- Scale Recipe Panel ---
+
+function ScaleRecipePanel({
+  parsed,
+  onSaveAsNew,
+  onUpdateInPlace,
+  onCancel,
+  error,
+}: {
+  parsed: ParsedRecipe
+  onSaveAsNew: (ingredients: Ingredient[], servings: number) => void
+  onUpdateInPlace: (ingredients: Ingredient[], servings: number) => void
+  onCancel: () => void
+  error?: string
+}) {
+  const [targetServings, setTargetServings] = useState(parsed.servings)
+  const [preview, setPreview] = useState<ScaleResult | null>(null)
+  const [editedIngredients, setEditedIngredients] = useState<Ingredient[] | null>(null)
+  const previewMutation = usePreviewScaleRecipe()
+
+  const handlePreview = () => {
+    if (targetServings < 1 || targetServings === parsed.servings) return
+    setEditedIngredients(null)
+    previewMutation.mutate(
+      { id: parsed.id, newServings: targetServings },
+      {
+        onSuccess: (result) => {
+          setPreview(result)
+          setEditedIngredients(result.ingredients)
+        },
+      },
+    )
+  }
+
+  const flaggedIndices = new Set(preview?.flagged.map((f) => f.index) ?? [])
+
+  const handleIngredientChange = (index: number, updated: Ingredient) => {
+    if (!editedIngredients) return
+    const newList = [...editedIngredients]
+    newList[index] = updated
+    setEditedIngredients(newList)
+  }
+
+  return (
+    <div className='border border-purple-200 rounded-lg p-4 bg-purple-50'>
+      <h3 className='font-semibold text-lg mb-3'>Scale: {parsed.name}</h3>
+
+      <div className='flex items-center gap-3 mb-4'>
+        <span className='text-sm text-gray-600'>
+          Current: {parsed.servings} serving{parsed.servings !== 1 ? 's' : ''}
+        </span>
+        <span className='text-gray-400'>{'\u2192'}</span>
+        <input
+          type='number'
+          min={1}
+          value={targetServings}
+          onChange={(e) => setTargetServings(parseInt(e.target.value) || 1)}
+          className='border border-gray-300 p-1 rounded w-20 text-sm'
+        />
+        <span className='text-sm text-gray-600'>servings</span>
+        <button
+          onClick={handlePreview}
+          disabled={targetServings < 1 || targetServings === parsed.servings}
+          className='bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed'
+        >
+          Preview
+        </button>
+      </div>
+
+      {previewMutation.error && (
+        <div className='mb-3 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+          {String(previewMutation.error)}
+        </div>
+      )}
+
+      {preview && editedIngredients && (
+        <>
+          {preview.flagged.length > 0 && (
+            <div className='mb-3 bg-amber-50 border border-amber-200 rounded p-3 text-amber-800 text-sm'>
+              Some ingredients have fractional amounts for discrete units. You can adjust them
+              below.
+            </div>
+          )}
+
+          <div className='space-y-1 mb-4'>
+            {editedIngredients.map((ing, i) => (
+              <div
+                key={i}
+                className={`flex gap-2 items-center text-sm ${
+                  flaggedIndices.has(i) ? 'bg-amber-50 border border-amber-200 rounded p-1' : 'p-1'
+                }`}
+              >
+                {flaggedIndices.has(i)
+                  ? (
+                    <input
+                      type='number'
+                      step='any'
+                      value={ing.amount.type === 'single'
+                        ? ing.amount.value
+                        : (ing.amount as { type: 'range'; min: number; max: number }).min}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0
+                        handleIngredientChange(i, {
+                          ...ing,
+                          amount: { type: 'single', value: val },
+                        })
+                      }}
+                      className='border border-amber-300 p-1 rounded w-16 text-sm bg-white'
+                    />
+                  )
+                  : <span className='font-medium w-16 text-right'>{formatAmount(ing.amount)}</span>}
+                <span className='text-gray-500 w-12'>{ing.unit}</span>
+                <span>{ing.name}</span>
+                {flaggedIndices.has(i) && (
+                  <span className='text-amber-600 text-xs ml-auto'>fractional</span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {error && (
+            <div className='mb-3 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+              {error}
+            </div>
+          )}
+
+          <div className='flex gap-2'>
+            <button
+              onClick={() => onSaveAsNew(editedIngredients, targetServings)}
+              className='bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700'
+            >
+              Save as New Recipe
+            </button>
+            <button
+              onClick={() => onUpdateInPlace(editedIngredients, targetServings)}
+              className='border border-gray-300 px-4 py-2 rounded text-sm hover:bg-gray-50'
+            >
+              Update This Recipe
+            </button>
+            <button
+              onClick={onCancel}
+              className='border border-gray-300 px-4 py-2 rounded text-sm text-gray-600 hover:bg-gray-50'
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+
+      {!preview && (
+        <div className='flex gap-2'>
+          <button
+            onClick={onCancel}
+            className='border border-gray-300 px-4 py-2 rounded text-sm text-gray-600 hover:bg-gray-50'
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // --- Recipe Detail View ---
 
 function RecipeDetail({
   parsed,
+  parentName,
   onEdit,
+  onScale,
   onDelete,
   onToggleFavorite,
   onRatingChange,
@@ -385,7 +552,9 @@ function RecipeDetail({
   onCancelDelete,
 }: {
   parsed: ParsedRecipe
+  parentName: string | null
   onEdit: () => void
+  onScale: () => void
   onDelete: () => void
   onToggleFavorite: () => void
   onRatingChange: (rating: number) => void
@@ -423,6 +592,12 @@ function RecipeDetail({
           >
             Edit
           </button>
+          <button
+            onClick={onScale}
+            className='text-purple-600 text-sm hover:underline'
+          >
+            Scale
+          </button>
           {confirmingDelete
             ? (
               <span className='flex gap-1 items-center text-sm'>
@@ -458,6 +633,13 @@ function RecipeDetail({
           </button>
         </div>
       </div>
+
+      {/* Parent recipe link */}
+      {parentName && (
+        <div className='text-sm text-gray-500 mb-2'>
+          Scaled from: <span className='text-purple-600 font-medium'>{parentName}</span>
+        </div>
+      )}
 
       {/* Meta row */}
       <div className='flex flex-wrap gap-4 text-sm text-gray-500 mb-4 pb-4 border-b border-gray-100'>
@@ -563,12 +745,16 @@ export function RecipeManager() {
   const [viewMode, setViewMode] = useState<'list' | 'add' | 'import'>('list')
   const [viewingId, setViewingId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [scalingId, setScalingId] = useState<string | null>(null)
+  const [scaleError, setScaleError] = useState<string | null>(null)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (editingId) {
+        if (scalingId) {
+          setScalingId(null)
+        } else if (editingId) {
           setEditingId(null)
         } else if (viewingId) {
           setViewingId(null)
@@ -580,7 +766,7 @@ export function RecipeManager() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [editingId, viewingId, viewMode])
+  }, [scalingId, editingId, viewingId, viewMode])
 
   const filteredRecipes = recipes?.filter((r) =>
     r.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -634,6 +820,49 @@ export function RecipeManager() {
   const handleImport = (markdown: string) => {
     importMutation.mutate({ markdown }, {
       onSuccess: () => setViewMode('list'),
+    })
+  }
+
+  const handleScaleSaveAsNew = (
+    recipeId: string,
+    ingredients: Ingredient[],
+    servings: number,
+  ) => {
+    const source = recipes?.find((r) => r.id === recipeId)
+    if (!source) return
+    const parsed = parseRecipe(source)
+    const dto: CreateRecipeDto = {
+      name: `${source.name} (${servings} servings)`,
+      source: 'scaled',
+      parent_recipe_id: recipeId,
+      servings,
+      instructions: source.instructions,
+      ingredients,
+      tags: parsed.tags,
+      description: source.description || undefined,
+      prep_time: parsed.prep_time ?? undefined,
+      cook_time: parsed.cook_time ?? undefined,
+      total_time: parsed.total_time ?? undefined,
+      notes: source.notes || undefined,
+      icon: source.icon || undefined,
+    }
+    setScaleError(null)
+    createMutation.mutate(dto, {
+      onSuccess: () => setScalingId(null),
+      onError: (err) => setScaleError(String(err)),
+    })
+  }
+
+  const handleScaleUpdateInPlace = (
+    recipeId: string,
+    ingredients: Ingredient[],
+    servings: number,
+  ) => {
+    const dto: UpdateRecipeDto = { ingredients, servings }
+    setScaleError(null)
+    updateMutation.mutate({ id: recipeId, data: dto }, {
+      onSuccess: () => setScalingId(null),
+      onError: (err) => setScaleError(String(err)),
     })
   }
 
@@ -761,14 +990,41 @@ export function RecipeManager() {
             )
           }
 
+          if (scalingId === recipe.id) {
+            return (
+              <div key={recipe.id} className='md:col-span-2'>
+                <ScaleRecipePanel
+                  parsed={parsed}
+                  onSaveAsNew={(ingredients, servings) =>
+                    handleScaleSaveAsNew(recipe.id, ingredients, servings)}
+                  onUpdateInPlace={(ingredients, servings) =>
+                    handleScaleUpdateInPlace(recipe.id, ingredients, servings)}
+                  onCancel={() => {
+                    setScalingId(null)
+                    setScaleError(null)
+                  }}
+                  error={scaleError ?? undefined}
+                />
+              </div>
+            )
+          }
+
           if (viewingId === recipe.id) {
+            const parentName = parsed.parent_recipe_id
+              ? recipes?.find((r) => r.id === parsed.parent_recipe_id)?.name ?? null
+              : null
             return (
               <RecipeDetail
                 key={recipe.id}
                 parsed={parsed}
+                parentName={parentName}
                 onEdit={() => {
                   setViewingId(null)
                   setEditingId(recipe.id)
+                }}
+                onScale={() => {
+                  setViewingId(null)
+                  setScalingId(recipe.id)
                 }}
                 onDelete={() => setConfirmingDeleteId(recipe.id)}
                 onToggleFavorite={() => toggleFavoriteMutation.mutate(recipe.id)}
