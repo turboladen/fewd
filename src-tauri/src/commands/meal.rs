@@ -88,12 +88,10 @@ pub async fn update_meal(
     id: String,
     data: UpdateMealDto,
 ) -> Result<meal::Model, String> {
-    MealService::update(&state.db, id, data)
-        .await
-        .map_err(|e| {
-            eprintln!("Failed to update meal: {}", e);
-            format!("Could not update meal: {}", e)
-        })
+    MealService::update(&state.db, id, data).await.map_err(|e| {
+        eprintln!("Failed to update meal: {}", e);
+        format!("Could not update meal: {}", e)
+    })
 }
 
 #[tauri::command]

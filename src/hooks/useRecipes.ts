@@ -83,6 +83,12 @@ export function usePreviewScaleRecipe() {
   })
 }
 
+export function useEnhanceInstructions() {
+  return useMutation({
+    mutationFn: (id: string) => invoke<string>('enhance_recipe_instructions', { id }),
+  })
+}
+
 export function useImportRecipe() {
   const queryClient = useQueryClient()
 

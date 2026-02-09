@@ -24,8 +24,7 @@ impl ShoppingService {
         end_date: String,
     ) -> Result<Vec<AggregatedIngredientDto>, DbErr> {
         // 1. Fetch all meals in range
-        let meals =
-            MealService::get_all_for_date_range(db, start_date, end_date).await?;
+        let meals = MealService::get_all_for_date_range(db, start_date, end_date).await?;
 
         // 2. Collect all ingredients with source info
         let mut all_items: Vec<IngredientWithSource> = Vec::new();
@@ -48,22 +47,18 @@ impl ShoppingService {
                         servings_count,
                         ..
                     } => {
-                        let recipe = Recipe::find_by_id(recipe_id)
-                            .one(db)
-                            .await?;
+                        let recipe = Recipe::find_by_id(recipe_id).one(db).await?;
 
                         if let Some(recipe) = recipe {
                             let ingredients: Vec<IngredientDto> =
-                                serde_json::from_str(&recipe.ingredients)
-                                    .map_err(|e| {
-                                        DbErr::Custom(format!(
-                                            "Failed to parse ingredients for recipe {}: {}",
-                                            recipe.id, e
-                                        ))
-                                    })?;
+                                serde_json::from_str(&recipe.ingredients).map_err(|e| {
+                                    DbErr::Custom(format!(
+                                        "Failed to parse ingredients for recipe {}: {}",
+                                        recipe.id, e
+                                    ))
+                                })?;
 
-                            let scale =
-                                servings_count / recipe.servings as f64;
+                            let scale = servings_count / recipe.servings as f64;
 
                             for ing in ingredients {
                                 let scaled_amount = scale_amount(&ing.amount, scale);
@@ -121,13 +116,15 @@ impl ShoppingService {
         }
 
         // 4. Aggregate each group
-        let mut result: Vec<AggregatedIngredientDto> = groups
-            .into_values()
-            .map(aggregate_group)
-            .collect();
+        let mut result: Vec<AggregatedIngredientDto> =
+            groups.into_values().map(aggregate_group).collect();
 
         // 5. Sort alphabetically
-        result.sort_by(|a, b| a.ingredient_name.to_lowercase().cmp(&b.ingredient_name.to_lowercase()));
+        result.sort_by(|a, b| {
+            a.ingredient_name
+                .to_lowercase()
+                .cmp(&b.ingredient_name.to_lowercase())
+        });
 
         Ok(result)
     }
@@ -154,8 +151,7 @@ fn aggregate_group(items: Vec<IngredientWithSource>) -> AggregatedIngredientDto 
         .map(|i| i.ingredient.name.clone())
         .unwrap_or_default();
 
-    let sources: Vec<IngredientSourceDto> =
-        items.iter().map(|i| i.source.clone()).collect();
+    let sources: Vec<IngredientSourceDto> = items.iter().map(|i| i.source.clone()).collect();
 
     // Try to sum amounts if units are compatible
     let (total_amount, total_unit) = try_sum_amounts(&items);
@@ -250,8 +246,7 @@ fn sum_singles_with_conversion(
         }
     }
 
-    let (display_value, display_unit) =
-        unit_converter::best_display_unit(base_total, category);
+    let (display_value, display_unit) = unit_converter::best_display_unit(base_total, category);
 
     (
         Some(IngredientAmountDto::Single {
@@ -284,8 +279,7 @@ fn sum_ranges_with_conversion(
     }
 
     // Use max total to pick display unit (the larger value determines best unit)
-    let (_, display_unit) =
-        unit_converter::best_display_unit(base_max_total, category);
+    let (_, display_unit) = unit_converter::best_display_unit(base_max_total, category);
 
     let display_min =
         unit_converter::from_base(base_min_total, &display_unit).unwrap_or(base_min_total);

@@ -5,6 +5,7 @@ use fewd_lib::commands::recipe::{
 };
 use fewd_lib::services::meal_service::MealService;
 use fewd_lib::services::person_service::PersonService;
+use fewd_lib::services::recipe_enhancer;
 use fewd_lib::services::recipe_scaler;
 use fewd_lib::services::recipe_service::RecipeService;
 use fewd_lib::services::seed_data;
@@ -67,7 +68,9 @@ fn test_recipe_dto(name: &str) -> CreateRecipeDto {
 #[tokio::test]
 async fn person_create_and_get_all() {
     let db = setup_db().await;
-    let person = PersonService::create(&db, test_person_dto("Alice")).await.unwrap();
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
 
     assert_eq!(person.name, "Alice");
     assert!(person.is_active);
@@ -81,7 +84,9 @@ async fn person_create_and_get_all() {
 #[tokio::test]
 async fn person_get_all_filters_inactive() {
     let db = setup_db().await;
-    let person = PersonService::create(&db, test_person_dto("Bob")).await.unwrap();
+    let person = PersonService::create(&db, test_person_dto("Bob"))
+        .await
+        .unwrap();
 
     // Deactivate via update
     let update = fewd_lib::commands::person::UpdatePersonDto {
@@ -93,7 +98,9 @@ async fn person_get_all_filters_inactive() {
         notes: None,
         is_active: Some(false),
     };
-    PersonService::update(&db, person.id.clone(), update).await.unwrap();
+    PersonService::update(&db, person.id.clone(), update)
+        .await
+        .unwrap();
 
     let all = PersonService::get_all(&db).await.unwrap();
     assert_eq!(all.len(), 0);
@@ -106,9 +113,15 @@ async fn person_get_all_filters_inactive() {
 #[tokio::test]
 async fn person_get_all_ordered_by_name() {
     let db = setup_db().await;
-    PersonService::create(&db, test_person_dto("Zara")).await.unwrap();
-    PersonService::create(&db, test_person_dto("Alice")).await.unwrap();
-    PersonService::create(&db, test_person_dto("Mia")).await.unwrap();
+    PersonService::create(&db, test_person_dto("Zara"))
+        .await
+        .unwrap();
+    PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+    PersonService::create(&db, test_person_dto("Mia"))
+        .await
+        .unwrap();
 
     let all = PersonService::get_all(&db).await.unwrap();
     assert_eq!(all[0].name, "Alice");
@@ -119,7 +132,9 @@ async fn person_get_all_ordered_by_name() {
 #[tokio::test]
 async fn person_update_partial_fields() {
     let db = setup_db().await;
-    let person = PersonService::create(&db, test_person_dto("Alice")).await.unwrap();
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
 
     let update = fewd_lib::commands::person::UpdatePersonDto {
         name: Some("Alice Updated".to_string()),
@@ -155,7 +170,9 @@ async fn person_invalid_birthdate_fails() {
 #[tokio::test]
 async fn person_delete() {
     let db = setup_db().await;
-    let person = PersonService::create(&db, test_person_dto("Alice")).await.unwrap();
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
     PersonService::delete(&db, person.id.clone()).await.unwrap();
     let found = PersonService::get_by_id(&db, person.id).await.unwrap();
     assert!(found.is_none());
@@ -185,7 +202,9 @@ async fn person_json_fields_roundtrip() {
 #[tokio::test]
 async fn recipe_create_and_get_all() {
     let db = setup_db().await;
-    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta")).await.unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
 
     assert_eq!(recipe.name, "Pasta");
     assert!(!recipe.is_favorite);
@@ -199,31 +218,47 @@ async fn recipe_create_and_get_all() {
 #[tokio::test]
 async fn recipe_toggle_favorite() {
     let db = setup_db().await;
-    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta")).await.unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
     assert!(!recipe.is_favorite);
 
-    let toggled = RecipeService::toggle_favorite(&db, recipe.id.clone()).await.unwrap();
+    let toggled = RecipeService::toggle_favorite(&db, recipe.id.clone())
+        .await
+        .unwrap();
     assert!(toggled.is_favorite);
 
-    let toggled_back = RecipeService::toggle_favorite(&db, recipe.id).await.unwrap();
+    let toggled_back = RecipeService::toggle_favorite(&db, recipe.id)
+        .await
+        .unwrap();
     assert!(!toggled_back.is_favorite);
 }
 
 #[tokio::test]
 async fn recipe_search() {
     let db = setup_db().await;
-    RecipeService::create(&db, test_recipe_dto("Chicken Tacos")).await.unwrap();
-    RecipeService::create(&db, test_recipe_dto("Beef Stew")).await.unwrap();
-    RecipeService::create(&db, test_recipe_dto("Chicken Soup")).await.unwrap();
+    RecipeService::create(&db, test_recipe_dto("Chicken Tacos"))
+        .await
+        .unwrap();
+    RecipeService::create(&db, test_recipe_dto("Beef Stew"))
+        .await
+        .unwrap();
+    RecipeService::create(&db, test_recipe_dto("Chicken Soup"))
+        .await
+        .unwrap();
 
-    let results = RecipeService::search(&db, "Chicken".to_string()).await.unwrap();
+    let results = RecipeService::search(&db, "Chicken".to_string())
+        .await
+        .unwrap();
     assert_eq!(results.len(), 2);
 }
 
 #[tokio::test]
 async fn recipe_update_partial() {
     let db = setup_db().await;
-    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta")).await.unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
 
     let update = UpdateRecipeDto {
         name: Some("Pasta Carbonara".to_string()),
@@ -252,7 +287,9 @@ async fn recipe_update_partial() {
 #[tokio::test]
 async fn recipe_delete() {
     let db = setup_db().await;
-    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta")).await.unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
     RecipeService::delete(&db, recipe.id.clone()).await.unwrap();
     let found = RecipeService::get_by_id(&db, recipe.id).await.unwrap();
     assert!(found.is_none());
@@ -268,7 +305,9 @@ async fn recipe_not_found_error() {
 #[tokio::test]
 async fn recipe_set_rating() {
     let db = setup_db().await;
-    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta")).await.unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
     assert!(recipe.rating.is_none());
 
     let update = UpdateRecipeDto {
@@ -288,18 +327,25 @@ async fn recipe_set_rating() {
         is_favorite: None,
         rating: Some(4.0),
     };
-    let updated = RecipeService::update(&db, recipe.id.clone(), update).await.unwrap();
+    let updated = RecipeService::update(&db, recipe.id.clone(), update)
+        .await
+        .unwrap();
     assert_eq!(updated.rating, Some(4.0));
 
     // Verify persisted after re-fetch
-    let fetched = RecipeService::get_by_id(&db, recipe.id).await.unwrap().unwrap();
+    let fetched = RecipeService::get_by_id(&db, recipe.id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(fetched.rating, Some(4.0));
 }
 
 #[tokio::test]
 async fn recipe_rating_rejects_invalid_values() {
     let db = setup_db().await;
-    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta")).await.unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
 
     // Too low
     let update = UpdateRecipeDto {
@@ -319,7 +365,9 @@ async fn recipe_rating_rejects_invalid_values() {
         is_favorite: None,
         rating: Some(0.0),
     };
-    assert!(RecipeService::update(&db, recipe.id.clone(), update).await.is_err());
+    assert!(RecipeService::update(&db, recipe.id.clone(), update)
+        .await
+        .is_err());
 
     // Too high
     let update = UpdateRecipeDto {
@@ -339,7 +387,9 @@ async fn recipe_rating_rejects_invalid_values() {
         is_favorite: None,
         rating: Some(5.5),
     };
-    assert!(RecipeService::update(&db, recipe.id.clone(), update).await.is_err());
+    assert!(RecipeService::update(&db, recipe.id.clone(), update)
+        .await
+        .is_err());
 
     // Not a whole number
     let update = UpdateRecipeDto {
@@ -367,8 +417,12 @@ async fn recipe_rating_rejects_invalid_values() {
 #[tokio::test]
 async fn meal_create_and_query_date_range() {
     let db = setup_db().await;
-    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta")).await.unwrap();
-    let person = PersonService::create(&db, test_person_dto("Alice")).await.unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
 
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
@@ -408,8 +462,12 @@ async fn meal_create_and_query_date_range() {
 #[tokio::test]
 async fn meal_increments_recipe_times_made() {
     let db = setup_db().await;
-    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta")).await.unwrap();
-    let person = PersonService::create(&db, test_person_dto("Alice")).await.unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
     assert_eq!(recipe.times_made, 0);
 
     let meal_dto = CreateMealDto {
@@ -425,7 +483,10 @@ async fn meal_increments_recipe_times_made() {
     };
     MealService::create(&db, meal_dto).await.unwrap();
 
-    let updated_recipe = RecipeService::get_by_id(&db, recipe.id).await.unwrap().unwrap();
+    let updated_recipe = RecipeService::get_by_id(&db, recipe.id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(updated_recipe.times_made, 1);
     assert!(updated_recipe.last_made.is_some());
 }
@@ -433,7 +494,9 @@ async fn meal_increments_recipe_times_made() {
 #[tokio::test]
 async fn meal_with_adhoc_items() {
     let db = setup_db().await;
-    let person = PersonService::create(&db, test_person_dto("Alice")).await.unwrap();
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
 
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
@@ -457,7 +520,9 @@ async fn meal_with_adhoc_items() {
 #[tokio::test]
 async fn meal_delete() {
     let db = setup_db().await;
-    let person = PersonService::create(&db, test_person_dto("Alice")).await.unwrap();
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
 
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
@@ -480,21 +545,22 @@ async fn meal_delete() {
 #[tokio::test]
 async fn shopping_list_empty_range() {
     let db = setup_db().await;
-    let list = ShoppingService::get_shopping_list(
-        &db,
-        "2025-06-09".to_string(),
-        "2025-06-15".to_string(),
-    )
-    .await
-    .unwrap();
+    let list =
+        ShoppingService::get_shopping_list(&db, "2025-06-09".to_string(), "2025-06-15".to_string())
+            .await
+            .unwrap();
     assert!(list.is_empty());
 }
 
 #[tokio::test]
 async fn shopping_list_aggregates_recipe_ingredients() {
     let db = setup_db().await;
-    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta")).await.unwrap();
-    let person = PersonService::create(&db, test_person_dto("Alice")).await.unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
 
     // Create a meal with 1 serving (recipe has 4 servings, so scale = 0.25)
     let meal_dto = CreateMealDto {
@@ -510,13 +576,10 @@ async fn shopping_list_aggregates_recipe_ingredients() {
     };
     MealService::create(&db, meal_dto).await.unwrap();
 
-    let list = ShoppingService::get_shopping_list(
-        &db,
-        "2025-06-09".to_string(),
-        "2025-06-15".to_string(),
-    )
-    .await
-    .unwrap();
+    let list =
+        ShoppingService::get_shopping_list(&db, "2025-06-09".to_string(), "2025-06-15".to_string())
+            .await
+            .unwrap();
 
     // Should have 2 ingredients (flour, eggs) scaled to 1/4
     assert_eq!(list.len(), 2);
@@ -531,7 +594,9 @@ async fn shopping_list_aggregates_recipe_ingredients() {
 #[tokio::test]
 async fn shopping_list_includes_adhoc() {
     let db = setup_db().await;
-    let person = PersonService::create(&db, test_person_dto("Alice")).await.unwrap();
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
 
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
@@ -550,13 +615,10 @@ async fn shopping_list_includes_adhoc() {
     };
     MealService::create(&db, meal_dto).await.unwrap();
 
-    let list = ShoppingService::get_shopping_list(
-        &db,
-        "2025-06-09".to_string(),
-        "2025-06-15".to_string(),
-    )
-    .await
-    .unwrap();
+    let list =
+        ShoppingService::get_shopping_list(&db, "2025-06-09".to_string(), "2025-06-15".to_string())
+            .await
+            .unwrap();
 
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].ingredient_name, "banana");
@@ -567,10 +629,11 @@ async fn shopping_list_includes_adhoc() {
 #[tokio::test]
 async fn recipe_scale_preview_doubles_ingredients() {
     let db = setup_db().await;
-    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta")).await.unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
 
-    let ingredients: Vec<IngredientDto> =
-        serde_json::from_str(&recipe.ingredients).unwrap();
+    let ingredients: Vec<IngredientDto> = serde_json::from_str(&recipe.ingredients).unwrap();
     let ratio = 8.0 / recipe.servings as f64; // 4 → 8 servings
     let result = recipe_scaler::scale_ingredients(&ingredients, ratio);
 
@@ -590,10 +653,11 @@ async fn recipe_scale_preview_doubles_ingredients() {
 #[tokio::test]
 async fn recipe_scale_flags_fractional_discrete() {
     let db = setup_db().await;
-    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta")).await.unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
 
-    let ingredients: Vec<IngredientDto> =
-        serde_json::from_str(&recipe.ingredients).unwrap();
+    let ingredients: Vec<IngredientDto> = serde_json::from_str(&recipe.ingredients).unwrap();
     let ratio = 6.0 / recipe.servings as f64; // 4 → 6 servings (1.5x)
     let result = recipe_scaler::scale_ingredients(&ingredients, ratio);
 
@@ -607,7 +671,9 @@ async fn recipe_scale_flags_fractional_discrete() {
 #[tokio::test]
 async fn recipe_create_with_parent_id() {
     let db = setup_db().await;
-    let parent = RecipeService::create(&db, test_recipe_dto("Original")).await.unwrap();
+    let parent = RecipeService::create(&db, test_recipe_dto("Original"))
+        .await
+        .unwrap();
 
     let mut child_dto = test_recipe_dto("Original (8 servings)");
     child_dto.parent_recipe_id = Some(parent.id.clone());
@@ -620,8 +686,46 @@ async fn recipe_create_with_parent_id() {
     assert_eq!(child.servings, 8);
 
     // Verify persists on re-fetch
-    let fetched = RecipeService::get_by_id(&db, child.id).await.unwrap().unwrap();
+    let fetched = RecipeService::get_by_id(&db, child.id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(fetched.parent_recipe_id, Some(parent.id));
+}
+
+// --- Recipe Enhancement Tests ---
+
+#[tokio::test]
+async fn recipe_enhance_injects_amounts() {
+    let db = setup_db().await;
+
+    let mut dto = test_recipe_dto("Pancakes");
+    dto.instructions = "Mix flour until smooth.\nAdd eggs and stir.".to_string();
+    let recipe = RecipeService::create(&db, dto).await.unwrap();
+
+    let ingredients: Vec<IngredientDto> = serde_json::from_str(&recipe.ingredients).unwrap();
+    let enhanced = recipe_enhancer::enhance_instructions(&ingredients, &recipe.instructions);
+
+    // flour (2 cups) should be injected in first line
+    assert!(enhanced.contains("**2 cups flour**"));
+    // eggs (3 whole) should be injected in second line
+    assert!(enhanced.contains("**3 whole eggs**"));
+}
+
+#[tokio::test]
+async fn recipe_enhance_skips_already_numbered() {
+    let db = setup_db().await;
+
+    let mut dto = test_recipe_dto("Pancakes");
+    dto.instructions = "Add 2 cups flour to bowl.".to_string();
+    let recipe = RecipeService::create(&db, dto).await.unwrap();
+
+    let ingredients: Vec<IngredientDto> = serde_json::from_str(&recipe.ingredients).unwrap();
+    let enhanced = recipe_enhancer::enhance_instructions(&ingredients, &recipe.instructions);
+
+    // Should NOT inject because "flour" already has "2 cups" before it
+    assert!(!enhanced.contains("**"));
+    assert_eq!(enhanced, "Add 2 cups flour to bowl.");
 }
 
 // --- SeedData Tests ---
@@ -644,7 +748,9 @@ async fn seed_data_populates_empty_db() {
 #[tokio::test]
 async fn seed_data_skips_nonempty_db() {
     let db = setup_db().await;
-    PersonService::create(&db, test_person_dto("Existing")).await.unwrap();
+    PersonService::create(&db, test_person_dto("Existing"))
+        .await
+        .unwrap();
 
     seed_data::seed_if_empty(&db).await.unwrap();
 

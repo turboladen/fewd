@@ -152,10 +152,7 @@ mod tests {
     fn scales_range_amounts() {
         let ingredients = vec![IngredientDto {
             name: "garlic".to_string(),
-            amount: IngredientAmountDto::Range {
-                min: 2.0,
-                max: 3.0,
-            },
+            amount: IngredientAmountDto::Range { min: 2.0, max: 3.0 },
             unit: "clove".to_string(),
             notes: None,
         }];
@@ -173,10 +170,7 @@ mod tests {
     fn flags_range_with_fractional_discrete() {
         let ingredients = vec![IngredientDto {
             name: "garlic".to_string(),
-            amount: IngredientAmountDto::Range {
-                min: 2.0,
-                max: 3.0,
-            },
+            amount: IngredientAmountDto::Range { min: 2.0, max: 3.0 },
             unit: "clove".to_string(),
             notes: None,
         }];

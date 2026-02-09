@@ -1,5 +1,6 @@
 pub mod meal_service;
 pub mod person_service;
+pub mod recipe_enhancer;
 pub mod recipe_parser;
 pub mod recipe_scaler;
 pub mod recipe_service;

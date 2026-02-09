@@ -91,13 +91,13 @@
 
 **Verify Phase 7:**
 
-- [ ] Can scale a 4-serving recipe to 6 servings
-- [ ] Ingredient amounts are multiplied correctly
-- [ ] Fractional "whole" items (e.g., 2.25 eggs) are flagged in the UI
-- [ ] User can adjust flagged amounts before saving
-- [ ] "Save as new" creates a derived recipe with parent_recipe_id
-- [ ] "Update this recipe" modifies in place
-- [ ] Derived recipes show link to parent in detail view
+- [x] Can scale a 4-serving recipe to 6 servings
+- [x] Ingredient amounts are multiplied correctly
+- [x] Fractional "whole" items (e.g., 2.25 eggs) are flagged in the UI
+- [x] User can adjust flagged amounts before saving
+- [x] "Save as new" creates a derived recipe with parent_recipe_id
+- [x] "Update this recipe" modifies in place
+- [x] Derived recipes show link to parent in detail view
 
 **Deliverable:** Recipe scaling with smart fractional ingredient handling
 
@@ -139,11 +139,11 @@
 
 **Verify Phase 8:**
 
-- [ ] Toggle shows enhanced instructions with inline amounts
-- [ ] Already-numbered ingredients are left alone
-- [ ] Multi-step ingredients get amount on first occurrence
-- [ ] Toggle off returns to original text
-- [ ] Bold formatting is visible and readable
+- [x] Toggle shows enhanced instructions with inline amounts
+- [x] Already-numbered ingredients are left alone
+- [x] Multi-step ingredients get amount on first occurrence
+- [x] Toggle off returns to original text
+- [x] Bold formatting is visible and readable
 
 **Deliverable:** Caroline Chambers-style enhanced recipe view
 

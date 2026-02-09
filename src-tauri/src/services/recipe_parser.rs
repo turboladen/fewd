@@ -360,7 +360,10 @@ dinner, quick, mexican";
 
         let recipe = parse(md);
         assert_eq!(recipe.name, "Chicken Tacos");
-        assert_eq!(recipe.description, Some("A simple weeknight dinner".to_string()));
+        assert_eq!(
+            recipe.description,
+            Some("A simple weeknight dinner".to_string())
+        );
         assert_eq!(recipe.servings, 4);
         assert_eq!(recipe.source, "markdown_import");
         assert_eq!(recipe.parent_recipe_id, None);
@@ -419,7 +422,8 @@ dinner, quick, mexican";
 
     #[test]
     fn test_time_parsing_parenthetical() {
-        let md = "# Marinade\nPrep time: 15 minutes (plus 4 hours marinating)\n\n## Instructions\nMix";
+        let md =
+            "# Marinade\nPrep time: 15 minutes (plus 4 hours marinating)\n\n## Instructions\nMix";
         let recipe = parse(md);
         let prep = recipe.prep_time.unwrap();
         assert_eq!(prep.value, 15); // ignores parenthetical
@@ -440,7 +444,9 @@ dinner, quick, mexican";
         let ing = &recipe.ingredients[0];
         assert_eq!(ing.name, "flour");
         assert_eq!(ing.unit, "cups");
-        assert!(matches!(ing.amount, IngredientAmountDto::Single { value } if (value - 2.0).abs() < 0.001));
+        assert!(
+            matches!(ing.amount, IngredientAmountDto::Single { value } if (value - 2.0).abs() < 0.001)
+        );
     }
 
     #[test]
@@ -448,7 +454,9 @@ dinner, quick, mexican";
         let md = "# Test\n\n## Ingredients\n- 1/2 cup sugar\n\n## Instructions\nMix";
         let recipe = parse(md);
         let ing = &recipe.ingredients[0];
-        assert!(matches!(ing.amount, IngredientAmountDto::Single { value } if (value - 0.5).abs() < 0.001));
+        assert!(
+            matches!(ing.amount, IngredientAmountDto::Single { value } if (value - 0.5).abs() < 0.001)
+        );
     }
 
     #[test]
@@ -456,7 +464,9 @@ dinner, quick, mexican";
         let md = "# Test\n\n## Ingredients\n- 1-2 eggs\n\n## Instructions\nMix";
         let recipe = parse(md);
         let ing = &recipe.ingredients[0];
-        assert!(matches!(ing.amount, IngredientAmountDto::Range { min, max } if (min - 1.0).abs() < 0.001 && (max - 2.0).abs() < 0.001));
+        assert!(
+            matches!(ing.amount, IngredientAmountDto::Range { min, max } if (min - 1.0).abs() < 0.001 && (max - 2.0).abs() < 0.001)
+        );
     }
 
     #[test]
@@ -520,9 +530,15 @@ dinner, quick, mexican";
 
     #[test]
     fn test_try_parse_amount() {
-        assert!(matches!(try_parse_amount("2"), Some(IngredientAmountDto::Single { value }) if (value - 2.0).abs() < 0.001));
-        assert!(matches!(try_parse_amount("1/4"), Some(IngredientAmountDto::Single { value }) if (value - 0.25).abs() < 0.001));
-        assert!(matches!(try_parse_amount("2-3"), Some(IngredientAmountDto::Range { min, max }) if (min - 2.0).abs() < 0.001 && (max - 3.0).abs() < 0.001));
+        assert!(
+            matches!(try_parse_amount("2"), Some(IngredientAmountDto::Single { value }) if (value - 2.0).abs() < 0.001)
+        );
+        assert!(
+            matches!(try_parse_amount("1/4"), Some(IngredientAmountDto::Single { value }) if (value - 0.25).abs() < 0.001)
+        );
+        assert!(
+            matches!(try_parse_amount("2-3"), Some(IngredientAmountDto::Range { min, max }) if (min - 2.0).abs() < 0.001 && (max - 3.0).abs() < 0.001)
+        );
         assert!(try_parse_amount("flour").is_none());
     }
 }

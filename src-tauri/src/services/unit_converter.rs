@@ -54,11 +54,7 @@ pub fn normalize_unit(unit: &str) -> String {
     }
     // Strip trailing 's' for simple plurals (cups→cup, grams→gram, tbsps→tbsp)
     // But not for units that naturally end in 's'
-    let no_plural = if s.ends_with('s')
-        && s != "to taste"
-        && s != "fl oz"
-        && s.len() > 2
-    {
+    let no_plural = if s.ends_with('s') && s != "to taste" && s != "fl oz" && s.len() > 2 {
         &s[..s.len() - 1]
     } else {
         &s

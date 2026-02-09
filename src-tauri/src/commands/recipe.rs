@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::entities::recipe;
+use crate::services::recipe_enhancer;
 use crate::services::recipe_parser::RecipeParser;
 use crate::services::recipe_scaler;
 use crate::services::recipe_service::RecipeService;
@@ -210,4 +211,29 @@ pub async fn preview_scale_recipe(
 
     let ratio = new_servings as f64 / recipe.servings as f64;
     Ok(recipe_scaler::scale_ingredients(&ingredients, ratio))
+}
+
+#[tauri::command]
+pub async fn enhance_recipe_instructions(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<String, String> {
+    let recipe = RecipeService::get_by_id(&state.db, id)
+        .await
+        .map_err(|e| {
+            eprintln!("Failed to get recipe for enhancement: {}", e);
+            format!("Could not get recipe: {}", e)
+        })?
+        .ok_or_else(|| "Recipe not found".to_string())?;
+
+    let ingredients: Vec<IngredientDto> =
+        serde_json::from_str(&recipe.ingredients).map_err(|e| {
+            eprintln!("Failed to parse recipe ingredients: {}", e);
+            format!("Could not parse ingredients: {}", e)
+        })?;
+
+    Ok(recipe_enhancer::enhance_instructions(
+        &ingredients,
+        &recipe.instructions,
+    ))
 }

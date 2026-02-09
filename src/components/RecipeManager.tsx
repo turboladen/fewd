@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   useCreateRecipe,
   useDeleteRecipe,
+  useEnhanceInstructions,
   useImportRecipe,
   usePreviewScaleRecipe,
   useRecipes,
@@ -536,6 +537,54 @@ function ScaleRecipePanel({
   )
 }
 
+// --- Enhanced Instructions Renderer ---
+
+function EnhancedInstructions({ text }: { text: string }) {
+  // Render **bold** markdown as <strong> elements
+  const renderLine = (line: string, lineIdx: number) => {
+    const parts: React.ReactNode[] = []
+    let remaining = line
+    let key = 0
+
+    while (remaining.length > 0) {
+      const boldStart = remaining.indexOf('**')
+      if (boldStart === -1) {
+        parts.push(remaining)
+        break
+      }
+      const boldEnd = remaining.indexOf('**', boldStart + 2)
+      if (boldEnd === -1) {
+        parts.push(remaining)
+        break
+      }
+      // Text before bold
+      if (boldStart > 0) {
+        parts.push(remaining.slice(0, boldStart))
+      }
+      // Bold text
+      parts.push(
+        <strong key={`${lineIdx}-${key++}`} className='text-green-700 font-semibold'>
+          {remaining.slice(boldStart + 2, boldEnd)}
+        </strong>,
+      )
+      remaining = remaining.slice(boldEnd + 2)
+    }
+
+    return parts
+  }
+
+  return (
+    <>
+      {text.split('\n').map((line, i) => (
+        <span key={i}>
+          {renderLine(line, i)}
+          {i < text.split('\n').length - 1 && '\n'}
+        </span>
+      ))}
+    </>
+  )
+}
+
 // --- Recipe Detail View ---
 
 function RecipeDetail({
@@ -563,6 +612,28 @@ function RecipeDetail({
   onConfirmDelete: () => void
   onCancelDelete: () => void
 }) {
+  const [enhancedMode, setEnhancedMode] = useState(false)
+  const [enhancedText, setEnhancedText] = useState<string | null>(null)
+  const enhanceMutation = useEnhanceInstructions()
+
+  const handleToggleEnhanced = () => {
+    if (enhancedMode) {
+      setEnhancedMode(false)
+      return
+    }
+    // Fetch enhanced instructions if not cached
+    if (enhancedText) {
+      setEnhancedMode(true)
+      return
+    }
+    enhanceMutation.mutate(parsed.id, {
+      onSuccess: (text) => {
+        setEnhancedText(text)
+        setEnhancedMode(true)
+      },
+    })
+  }
+
   return (
     <div className='border border-gray-200 p-6 rounded-lg bg-white md:col-span-2'>
       {/* Header */}
@@ -674,14 +745,40 @@ function RecipeDetail({
 
         {/* Instructions */}
         <div className='md:col-span-2'>
-          <h3 className='font-semibold mb-2'>Instructions</h3>
+          <div className='flex items-center gap-2 mb-2'>
+            <h3 className='font-semibold'>Instructions</h3>
+            {parsed.instructions && (
+              <button
+                onClick={handleToggleEnhanced}
+                disabled={enhanceMutation.isPending}
+                className={`text-xs px-2 py-0.5 rounded border ${
+                  enhancedMode
+                    ? 'bg-green-100 border-green-300 text-green-700'
+                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                } ${enhanceMutation.isPending ? 'opacity-50 cursor-wait' : ''}`}
+              >
+                {enhanceMutation.isPending
+                  ? 'Loading...'
+                  : enhancedMode
+                  ? 'Enhanced \u2713'
+                  : 'Enhanced view'}
+              </button>
+            )}
+          </div>
           {parsed.instructions
             ? (
               <div className='text-sm whitespace-pre-wrap leading-relaxed'>
-                {parsed.instructions}
+                {enhancedMode && enhancedText
+                  ? <EnhancedInstructions text={enhancedText} />
+                  : parsed.instructions}
               </div>
             )
             : <p className='text-sm text-gray-400'>No instructions</p>}
+          {enhanceMutation.error && (
+            <p className='text-sm text-red-600 mt-1'>
+              {String(enhanceMutation.error)}
+            </p>
+          )}
         </div>
       </div>
 
