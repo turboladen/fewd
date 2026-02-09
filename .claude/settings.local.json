@@ -33,7 +33,9 @@
       "Bash(bunx dprint fmt:*)",
       "Bash(cd:*)",
       "Bash(bunx dprint check:*)",
-      "Bash(bunx tsc:*)"
+      "Bash(bunx tsc:*)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "Bash(echo:*)"
     ]
   }
 }

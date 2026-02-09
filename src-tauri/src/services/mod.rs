@@ -1,11 +1,14 @@
+pub mod claude_client;
 pub mod meal_service;
 pub mod meal_template_service;
 pub mod person_service;
+pub mod prompt_builder;
 pub mod recipe_enhancer;
 pub mod recipe_parser;
 pub mod recipe_scaler;
 pub mod recipe_service;
 pub mod seed_data;
+pub mod settings_service;
 pub mod shopping_service;
 pub mod suggestion_service;
 pub mod unit_converter;

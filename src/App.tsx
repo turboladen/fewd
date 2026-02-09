@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { FamilyManager } from './components/FamilyManager'
 import { MealPlanner } from './components/MealPlanner'
 import { RecipeManager } from './components/RecipeManager'
+import { SettingsPanel } from './components/SettingsPanel'
 import { ShoppingList } from './components/ShoppingList'
 import { TemplateManager } from './components/TemplateManager'
 
@@ -12,6 +13,7 @@ type Tab = 'family' | 'recipes' | 'planner' | 'templates' | 'shopping'
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('family')
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -72,6 +74,15 @@ function App() {
             >
               Shopping
             </button>
+            <div className='ml-auto pr-4 flex items-center'>
+              <button
+                onClick={() => setIsSettingsOpen(true)}
+                className='text-gray-400 hover:text-gray-600 p-2 text-lg'
+                title='Settings'
+              >
+                {'\u2699'}
+              </button>
+            </div>
           </div>
         </nav>
         <main className='flex-1 overflow-y-auto'>
@@ -81,6 +92,7 @@ function App() {
           {activeTab === 'templates' && <TemplateManager />}
           {activeTab === 'shopping' && <ShoppingList />}
         </main>
+        {isSettingsOpen && <SettingsPanel onClose={() => setIsSettingsOpen(false)} />}
       </div>
     </QueryClientProvider>
   )

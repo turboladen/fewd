@@ -7,10 +7,12 @@ use fewd_lib::commands::recipe::{
 use fewd_lib::services::meal_service::MealService;
 use fewd_lib::services::meal_template_service::MealTemplateService;
 use fewd_lib::services::person_service::PersonService;
+use fewd_lib::services::prompt_builder::PromptBuilder;
 use fewd_lib::services::recipe_enhancer;
 use fewd_lib::services::recipe_scaler;
 use fewd_lib::services::recipe_service::RecipeService;
 use fewd_lib::services::seed_data;
+use fewd_lib::services::settings_service::SettingsService;
 use fewd_lib::services::shopping_service::ShoppingService;
 use fewd_lib::services::suggestion_service::SuggestionService;
 use migration::MigratorTrait;
@@ -1126,4 +1128,114 @@ async fn suggestion_empty_history() {
     // Recipe should appear as untried
     assert_eq!(suggestions.untried.len(), 1);
     assert_eq!(suggestions.untried[0].recipe_id, recipe.id);
+}
+
+// --- SettingsService Tests ---
+
+#[tokio::test]
+async fn settings_set_and_get() {
+    let db = setup_db().await;
+    SettingsService::set(&db, "test_key".to_string(), "test_value".to_string())
+        .await
+        .unwrap();
+    let value = SettingsService::get(&db, "test_key".to_string())
+        .await
+        .unwrap();
+    assert_eq!(value, Some("test_value".to_string()));
+}
+
+#[tokio::test]
+async fn settings_get_nonexistent_returns_none() {
+    let db = setup_db().await;
+    let value = SettingsService::get(&db, "missing_key".to_string())
+        .await
+        .unwrap();
+    assert!(value.is_none());
+}
+
+#[tokio::test]
+async fn settings_set_overwrites_existing() {
+    let db = setup_db().await;
+    SettingsService::set(&db, "key".to_string(), "old_value".to_string())
+        .await
+        .unwrap();
+    SettingsService::set(&db, "key".to_string(), "new_value".to_string())
+        .await
+        .unwrap();
+    let value = SettingsService::get(&db, "key".to_string()).await.unwrap();
+    assert_eq!(value, Some("new_value".to_string()));
+}
+
+#[tokio::test]
+async fn settings_delete() {
+    let db = setup_db().await;
+    SettingsService::set(&db, "key".to_string(), "value".to_string())
+        .await
+        .unwrap();
+    SettingsService::delete(&db, "key".to_string())
+        .await
+        .unwrap();
+    let value = SettingsService::get(&db, "key".to_string()).await.unwrap();
+    assert!(value.is_none());
+}
+
+// --- PromptBuilder Tests ---
+
+#[tokio::test]
+async fn prompt_builder_person_context() {
+    let db = setup_db().await;
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+
+    let context = PromptBuilder::build_person_context(&[person]);
+
+    assert!(context.contains("Alice"));
+    assert!(context.contains("olives"));
+    assert!(context.contains("pasta"));
+}
+
+#[tokio::test]
+async fn prompt_builder_recipe_context() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Chicken Tacos"))
+        .await
+        .unwrap();
+
+    let context = PromptBuilder::build_recipe_context(&recipe);
+
+    assert!(context.contains("Chicken Tacos"));
+    assert!(context.contains("flour"));
+    assert!(context.contains("eggs"));
+    assert!(context.contains("4")); // servings
+}
+
+#[tokio::test]
+async fn prompt_builder_meal_history_context() {
+    let db = setup_db().await;
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+
+    let meal_dto = CreateMealDto {
+        date: "2025-06-10".to_string(),
+        meal_type: "Dinner".to_string(),
+        order_index: 2,
+        servings: vec![PersonServingDto::Recipe {
+            person_id: person.id.clone(),
+            recipe_id: recipe.id.clone(),
+            servings_count: 1.0,
+            notes: None,
+        }],
+    };
+    let meal = MealService::create(&db, meal_dto).await.unwrap();
+
+    let context = PromptBuilder::build_meal_history_context(&[meal], &[recipe]);
+
+    assert!(context.contains("2025-06-10"));
+    assert!(context.contains("Dinner"));
+    assert!(context.contains("Pasta"));
 }

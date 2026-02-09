@@ -304,12 +304,12 @@
 
 **Verify Phase 11:**
 
-- [ ] Can set/get Anthropic API key in settings
-- [ ] Can select which Claude model to use from a dropdown
-- [ ] API key is stored locally and displays masked
-- [ ] Test connection works with valid key and selected model
-- [ ] DraftReview component shows accept/edit/reject flow
-- [ ] Prompt builder produces well-formatted context strings
+- [x] Can set/get Anthropic API key in settings
+- [x] Can select which Claude model to use from a dropdown
+- [x] API key is stored locally and displays masked
+- [x] Test connection works with valid key and selected model
+- [x] DraftReview component shows accept/edit/reject flow
+- [x] Prompt builder produces well-formatted context strings
 
 **Deliverable:** AI integration infrastructure ready for feature development
 

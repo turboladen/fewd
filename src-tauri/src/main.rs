@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use fewd_lib::commands::{meal, meal_template, person, recipe, shopping, suggestion};
+use fewd_lib::commands::{meal, meal_template, person, recipe, settings, shopping, suggestion};
 use fewd_lib::{db, AppState};
 use tauri::Manager;
 
@@ -44,6 +44,11 @@ fn main() {
             meal_template::delete_meal_template,
             meal_template::create_template_from_meal,
             suggestion::get_meal_suggestions,
+            settings::get_setting,
+            settings::set_setting,
+            settings::get_available_models,
+            settings::test_claude_connection,
+            settings::get_token_usage,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
