@@ -351,12 +351,12 @@
 
 **Verify Phase 12:**
 
-- [ ] Can select people to adapt a recipe for
-- [ ] Can toggle which profile fields are included per person
-- [ ] Can add free-text instructions
-- [ ] AI generates an adapted recipe (shown in draft review)
-- [ ] Accepted recipe is saved with parent_recipe_id link
-- [ ] Adapted recipe appears in recipe list
+- [x] Can select people to adapt a recipe for
+- [x] Can toggle which profile fields are included per person
+- [x] Can add free-text instructions
+- [x] AI generates an adapted recipe (shown in draft review)
+- [x] Accepted recipe is saved with parent_recipe_id link
+- [x] Adapted recipe appears in recipe list
 
 **Deliverable:** AI-powered recipe adaptation
 

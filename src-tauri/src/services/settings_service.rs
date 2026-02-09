@@ -36,4 +36,49 @@ impl SettingsService {
         Setting::delete_by_id(key).exec(db).await?;
         Ok(())
     }
+
+    /// Increment cumulative token usage counters. Errors are silently ignored (non-critical).
+    pub async fn increment_token_usage(
+        db: &DatabaseConnection,
+        input_tokens: u64,
+        output_tokens: u64,
+    ) {
+        let current_input: u64 = Self::get(db, "token_usage_input".to_string())
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let current_output: u64 = Self::get(db, "token_usage_output".to_string())
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let current_requests: u64 = Self::get(db, "token_usage_requests".to_string())
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
+        let _ = Self::set(
+            db,
+            "token_usage_input".to_string(),
+            (current_input + input_tokens).to_string(),
+        )
+        .await;
+        let _ = Self::set(
+            db,
+            "token_usage_output".to_string(),
+            (current_output + output_tokens).to_string(),
+        )
+        .await;
+        let _ = Self::set(
+            db,
+            "token_usage_requests".to_string(),
+            (current_requests + 1).to_string(),
+        )
+        .await;
+    }
 }

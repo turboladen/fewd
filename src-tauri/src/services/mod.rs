@@ -3,6 +3,7 @@ pub mod meal_service;
 pub mod meal_template_service;
 pub mod person_service;
 pub mod prompt_builder;
+pub mod recipe_adapter;
 pub mod recipe_enhancer;
 pub mod recipe_parser;
 pub mod recipe_scaler;

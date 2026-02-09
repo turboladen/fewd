@@ -104,6 +104,21 @@ export interface ScaleResult {
   flagged: FlaggedIngredient[]
 }
 
+// --- AI Adaptation ---
+
+export interface PersonAdaptOptions {
+  person_id: string
+  include_dietary_goals: boolean
+  include_dislikes: boolean
+  include_favorites: boolean
+}
+
+export interface AdaptRecipeDto {
+  recipe_id: string
+  person_options: PersonAdaptOptions[]
+  user_instructions: string
+}
+
 export interface ParsedRecipe extends
   Omit<
     Recipe,

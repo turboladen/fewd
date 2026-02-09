@@ -8,6 +8,7 @@ use fewd_lib::services::meal_service::MealService;
 use fewd_lib::services::meal_template_service::MealTemplateService;
 use fewd_lib::services::person_service::PersonService;
 use fewd_lib::services::prompt_builder::PromptBuilder;
+use fewd_lib::services::recipe_adapter::{PersonAdaptOptions, RecipeAdapter};
 use fewd_lib::services::recipe_enhancer;
 use fewd_lib::services::recipe_scaler;
 use fewd_lib::services::recipe_service::RecipeService;
@@ -1238,4 +1239,136 @@ async fn prompt_builder_meal_history_context() {
     assert!(context.contains("2025-06-10"));
     assert!(context.contains("Dinner"));
     assert!(context.contains("Pasta"));
+}
+
+// --- Recipe Adapter Tests ---
+
+#[test]
+fn adapter_build_system_prompt_contains_schema() {
+    let prompt = RecipeAdapter::build_system_prompt();
+    assert!(prompt.contains("Return ONLY valid JSON"));
+    assert!(prompt.contains("\"source\": \"ai_adapted\""));
+    assert!(prompt.contains("\"ingredients\""));
+    assert!(prompt.contains("\"instructions\""));
+    assert!(prompt.contains("\"tags\""));
+}
+
+#[tokio::test]
+async fn adapter_build_user_message_includes_context() {
+    let db = setup_db().await;
+    let person = PersonService::create(&db, test_person_dto("Steve"))
+        .await
+        .unwrap();
+    let recipe = RecipeService::create(&db, test_recipe_dto("Tacos"))
+        .await
+        .unwrap();
+
+    let options = vec![PersonAdaptOptions {
+        person_id: person.id.clone(),
+        include_dietary_goals: true,
+        include_dislikes: true,
+        include_favorites: true,
+    }];
+
+    let message = RecipeAdapter::build_user_message(&recipe, &[person], &options, "Make it spicy");
+
+    assert!(message.contains("Tacos"));
+    assert!(message.contains("Steve"));
+    assert!(message.contains("Make it spicy"));
+}
+
+#[tokio::test]
+async fn adapter_filtered_people_excludes_dislikes() {
+    let db = setup_db().await;
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+
+    let options = vec![PersonAdaptOptions {
+        person_id: person.id.clone(),
+        include_dietary_goals: true,
+        include_dislikes: false,
+        include_favorites: true,
+    }];
+
+    let filtered = RecipeAdapter::build_filtered_people(&[person], &options);
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].dislikes, "[]");
+}
+
+#[test]
+fn adapter_parse_response_valid_json() {
+    let json = r#"{
+        "name": "Keto Tacos",
+        "description": "Low-carb tacos",
+        "source": "something_wrong",
+        "parent_recipe_id": null,
+        "servings": 4,
+        "instructions": "Step 1: Cook meat",
+        "ingredients": [{"name": "ground beef", "amount": {"type": "single", "value": 1.0}, "unit": "lb", "notes": null}],
+        "tags": ["keto"],
+        "notes": "Adapted for keto",
+        "icon": null,
+        "nutrition_per_serving": null,
+        "prep_time": null,
+        "cook_time": null,
+        "total_time": null,
+        "portion_size": null
+    }"#;
+
+    let result = RecipeAdapter::parse_response(json, "original-123").unwrap();
+    assert_eq!(result.name, "Keto Tacos");
+    assert_eq!(result.source, "ai_adapted");
+    assert_eq!(result.parent_recipe_id, Some("original-123".to_string()));
+}
+
+#[test]
+fn adapter_parse_response_strips_markdown_fences() {
+    let json = "```json\n{\"name\": \"Test\", \"source\": \"x\", \"servings\": 2, \"instructions\": \"Do it\", \"ingredients\": [], \"tags\": []}\n```";
+
+    let result = RecipeAdapter::parse_response(json, "parent-1").unwrap();
+    assert_eq!(result.name, "Test");
+    assert_eq!(result.source, "ai_adapted");
+}
+
+#[test]
+fn adapter_parse_response_invalid_json() {
+    let result = RecipeAdapter::parse_response("not json at all", "id-1");
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn settings_increment_token_usage() {
+    let db = setup_db().await;
+
+    // Set initial values
+    SettingsService::set(&db, "token_usage_input".to_string(), "100".to_string())
+        .await
+        .unwrap();
+    SettingsService::set(&db, "token_usage_output".to_string(), "50".to_string())
+        .await
+        .unwrap();
+    SettingsService::set(&db, "token_usage_requests".to_string(), "3".to_string())
+        .await
+        .unwrap();
+
+    // Increment
+    SettingsService::increment_token_usage(&db, 200, 75).await;
+
+    let input = SettingsService::get(&db, "token_usage_input".to_string())
+        .await
+        .unwrap()
+        .unwrap();
+    let output = SettingsService::get(&db, "token_usage_output".to_string())
+        .await
+        .unwrap()
+        .unwrap();
+    let requests = SettingsService::get(&db, "token_usage_requests".to_string())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(input, "300");
+    assert_eq!(output, "125");
+    assert_eq!(requests, "4");
 }

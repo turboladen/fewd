@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { invoke } from '@tauri-apps/api/core'
 import type {
+  AdaptRecipeDto,
   CreateRecipeDto,
   ImportRecipeDto,
   Recipe,
@@ -86,6 +87,12 @@ export function usePreviewScaleRecipe() {
 export function useEnhanceInstructions() {
   return useMutation({
     mutationFn: (id: string) => invoke<string>('enhance_recipe_instructions', { id }),
+  })
+}
+
+export function useAdaptRecipe() {
+  return useMutation({
+    mutationFn: (data: AdaptRecipeDto) => invoke<CreateRecipeDto>('adapt_recipe', { data }),
   })
 }
 

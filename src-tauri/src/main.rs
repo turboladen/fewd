@@ -32,6 +32,7 @@ fn main() {
             recipe::import_recipe_from_markdown,
             recipe::preview_scale_recipe,
             recipe::enhance_recipe_instructions,
+            recipe::adapt_recipe,
             meal::get_meals_for_date_range,
             meal::get_meal,
             meal::create_meal,

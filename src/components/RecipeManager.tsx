@@ -18,6 +18,7 @@ import type {
   UpdateRecipeDto,
 } from '../types/recipe'
 import { formatAmount, formatTime, parseRecipe } from '../types/recipe'
+import { AdaptRecipePanel } from './AdaptRecipePanel'
 import { IngredientInput } from './IngredientInput'
 import { StarRating } from './StarRating'
 
@@ -592,6 +593,7 @@ function RecipeDetail({
   parentName,
   onEdit,
   onScale,
+  onAdapt,
   onDelete,
   onToggleFavorite,
   onRatingChange,
@@ -604,6 +606,7 @@ function RecipeDetail({
   parentName: string | null
   onEdit: () => void
   onScale: () => void
+  onAdapt: () => void
   onDelete: () => void
   onToggleFavorite: () => void
   onRatingChange: (rating: number) => void
@@ -669,6 +672,12 @@ function RecipeDetail({
           >
             Scale
           </button>
+          <button
+            onClick={onAdapt}
+            className='text-teal-600 text-sm hover:underline'
+          >
+            Adapt
+          </button>
           {confirmingDelete
             ? (
               <span className='flex gap-1 items-center text-sm'>
@@ -708,7 +717,14 @@ function RecipeDetail({
       {/* Parent recipe link */}
       {parentName && (
         <div className='text-sm text-gray-500 mb-2'>
-          Scaled from: <span className='text-purple-600 font-medium'>{parentName}</span>
+          {parsed.source === 'ai_adapted' ? 'Adapted from' : 'Scaled from'}:{' '}
+          <span
+            className={`font-medium ${
+              parsed.source === 'ai_adapted' ? 'text-teal-600' : 'text-purple-600'
+            }`}
+          >
+            {parentName}
+          </span>
         </div>
       )}
 
@@ -843,16 +859,22 @@ export function RecipeManager() {
   const [viewingId, setViewingId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [scalingId, setScalingId] = useState<string | null>(null)
+  const [adaptingId, setAdaptingId] = useState<string | null>(null)
+  const [adaptDraft, setAdaptDraft] = useState<CreateRecipeDto | null>(null)
   const [scaleError, setScaleError] = useState<string | null>(null)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (scalingId) {
+        if (adaptingId) {
+          setAdaptingId(null)
+          setAdaptDraft(null)
+        } else if (scalingId) {
           setScalingId(null)
         } else if (editingId) {
           setEditingId(null)
+          setAdaptDraft(null)
         } else if (viewingId) {
           setViewingId(null)
           setConfirmingDeleteId(null)
@@ -863,7 +885,7 @@ export function RecipeManager() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [scalingId, editingId, viewingId, viewMode])
+  }, [adaptingId, scalingId, editingId, viewingId, viewMode])
 
   const filteredRecipes = recipes?.filter((r) =>
     r.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -963,6 +985,32 @@ export function RecipeManager() {
     })
   }
 
+  const handleAdaptDraftSave = (formData: RecipeFormData) => {
+    if (!adaptDraft) return
+    const dto: CreateRecipeDto = {
+      name: formData.name,
+      source: adaptDraft.source,
+      parent_recipe_id: adaptDraft.parent_recipe_id,
+      servings: formData.servings,
+      instructions: formData.instructions,
+      ingredients: formData.ingredients,
+      tags: formData.tags,
+      description: formData.description || undefined,
+      prep_time: formData.prep_time,
+      cook_time: formData.cook_time,
+      total_time: formData.total_time,
+      notes: formData.notes || undefined,
+      icon: formData.icon || undefined,
+    }
+    createMutation.mutate(dto, {
+      onSuccess: (recipe) => {
+        setEditingId(null)
+        setAdaptDraft(null)
+        setViewingId(recipe.id)
+      },
+    })
+  }
+
   if (isLoading) {
     return <div className='p-6 text-gray-500 animate-pulse'>Loading recipes...</div>
   }
@@ -1052,35 +1100,58 @@ export function RecipeManager() {
           const parsed = parseRecipe(recipe)
 
           if (editingId === recipe.id) {
+            const isAdaptEdit = !!adaptDraft
+            const formInitial = isAdaptEdit
+              ? {
+                name: adaptDraft.name,
+                description: adaptDraft.description || '',
+                prep_time: adaptDraft.prep_time,
+                cook_time: adaptDraft.cook_time,
+                total_time: adaptDraft.total_time,
+                servings: adaptDraft.servings,
+                instructions: adaptDraft.instructions,
+                ingredients: adaptDraft.ingredients,
+                tags: adaptDraft.tags,
+                notes: adaptDraft.notes || '',
+                icon: adaptDraft.icon || '',
+              }
+              : {
+                name: recipe.name,
+                description: recipe.description || '',
+                prep_time: parsed.prep_time ?? undefined,
+                cook_time: parsed.cook_time ?? undefined,
+                total_time: parsed.total_time ?? undefined,
+                servings: recipe.servings,
+                instructions: recipe.instructions,
+                ingredients: parsed.ingredients,
+                tags: parsed.tags,
+                notes: recipe.notes || '',
+                icon: recipe.icon || '',
+              }
             return (
               <div
                 key={recipe.id}
-                className='border border-blue-200 p-4 rounded-lg bg-blue-50 md:col-span-2'
+                className={`p-4 rounded-lg md:col-span-2 border ${
+                  isAdaptEdit ? 'border-teal-200 bg-teal-50' : 'border-blue-200 bg-blue-50'
+                }`}
               >
                 <h3 className='font-semibold text-lg mb-3'>
-                  Edit {recipe.name}
+                  {isAdaptEdit ? 'Edit Adapted Recipe' : `Edit ${recipe.name}`}
                 </h3>
                 <RecipeForm
-                  initialData={{
-                    name: recipe.name,
-                    description: recipe.description || '',
-                    prep_time: parsed.prep_time ?? undefined,
-                    cook_time: parsed.cook_time ?? undefined,
-                    total_time: parsed.total_time ?? undefined,
-                    servings: recipe.servings,
-                    instructions: recipe.instructions,
-                    ingredients: parsed.ingredients,
-                    tags: parsed.tags,
-                    notes: recipe.notes || '',
-                    icon: recipe.icon || '',
+                  initialData={formInitial}
+                  onSubmit={isAdaptEdit
+                    ? handleAdaptDraftSave
+                    : (data) => handleUpdate(recipe.id, data)}
+                  onCancel={() => {
+                    setEditingId(null)
+                    setAdaptDraft(null)
                   }}
-                  onSubmit={(data) => handleUpdate(recipe.id, data)}
-                  onCancel={() => setEditingId(null)}
-                  submitLabel='Save Changes'
+                  submitLabel={isAdaptEdit ? 'Save Adapted Recipe' : 'Save Changes'}
                 />
-                {updateMutation.error && (
+                {(isAdaptEdit ? createMutation.error : updateMutation.error) && (
                   <div className='mt-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
-                    {String(updateMutation.error)}
+                    {String(isAdaptEdit ? createMutation.error : updateMutation.error)}
                   </div>
                 )}
               </div>
@@ -1106,6 +1177,26 @@ export function RecipeManager() {
             )
           }
 
+          if (adaptingId === recipe.id) {
+            return (
+              <div key={recipe.id} className='md:col-span-2'>
+                <AdaptRecipePanel
+                  parsed={parsed}
+                  onComplete={(newId) => {
+                    setAdaptingId(null)
+                    setViewingId(newId)
+                  }}
+                  onEdit={(draft) => {
+                    setAdaptDraft(draft)
+                    setAdaptingId(null)
+                    setEditingId(recipe.id)
+                  }}
+                  onCancel={() => setAdaptingId(null)}
+                />
+              </div>
+            )
+          }
+
           if (viewingId === recipe.id) {
             const parentName = parsed.parent_recipe_id
               ? recipes?.find((r) => r.id === parsed.parent_recipe_id)?.name ?? null
@@ -1122,6 +1213,10 @@ export function RecipeManager() {
                 onScale={() => {
                   setViewingId(null)
                   setScalingId(recipe.id)
+                }}
+                onAdapt={() => {
+                  setViewingId(null)
+                  setAdaptingId(recipe.id)
                 }}
                 onDelete={() => setConfirmingDeleteId(recipe.id)}
                 onToggleFavorite={() => toggleFavoriteMutation.mutate(recipe.id)}

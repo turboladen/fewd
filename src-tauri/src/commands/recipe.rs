@@ -2,10 +2,14 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::entities::recipe;
+use crate::services::claude_client::ClaudeClient;
+use crate::services::person_service::PersonService;
+use crate::services::recipe_adapter::{PersonAdaptOptions, RecipeAdapter};
 use crate::services::recipe_enhancer;
 use crate::services::recipe_parser::RecipeParser;
 use crate::services::recipe_scaler;
 use crate::services::recipe_service::RecipeService;
+use crate::services::settings_service::SettingsService;
 use crate::AppState;
 
 // --- Nested types ---
@@ -236,4 +240,77 @@ pub async fn enhance_recipe_instructions(
         &ingredients,
         &recipe.instructions,
     ))
+}
+
+// --- AI Adaptation ---
+
+#[derive(Debug, Deserialize)]
+pub struct AdaptRecipeDto {
+    pub recipe_id: String,
+    pub person_options: Vec<PersonAdaptOptions>,
+    pub user_instructions: String,
+}
+
+#[tauri::command]
+pub async fn adapt_recipe(
+    state: State<'_, AppState>,
+    data: AdaptRecipeDto,
+) -> Result<CreateRecipeDto, String> {
+    // Fetch API key
+    let api_key = SettingsService::get(&state.db, "anthropic_api_key".to_string())
+        .await
+        .map_err(|e| format!("Failed to read API key: {}", e))?
+        .ok_or_else(|| "No API key configured. Set it in Settings.".to_string())?;
+    if api_key.is_empty() {
+        return Err("No API key configured. Set it in Settings.".to_string());
+    }
+
+    // Fetch model (or use default)
+    let model = SettingsService::get(&state.db, "claude_model".to_string())
+        .await
+        .map_err(|e| format!("Failed to read model: {}", e))?
+        .unwrap_or_else(|| ClaudeClient::default_model().to_string());
+
+    // Fetch recipe
+    let recipe = RecipeService::get_by_id(&state.db, data.recipe_id.clone())
+        .await
+        .map_err(|e| {
+            eprintln!("Failed to get recipe for adaptation: {}", e);
+            format!("Could not get recipe: {}", e)
+        })?
+        .ok_or_else(|| "Recipe not found".to_string())?;
+
+    // Fetch people
+    let mut people = Vec::new();
+    for opt in &data.person_options {
+        let person = PersonService::get_by_id(&state.db, opt.person_id.clone())
+            .await
+            .map_err(|e| {
+                eprintln!("Failed to get person: {}", e);
+                format!("Could not get person: {}", e)
+            })?
+            .ok_or_else(|| format!("Person {} not found", opt.person_id))?;
+        people.push(person);
+    }
+
+    // Call the adapter
+    let result = RecipeAdapter::adapt_recipe(
+        &api_key,
+        &model,
+        &recipe,
+        &people,
+        &data.person_options,
+        &data.user_instructions,
+    )
+    .await
+    .map_err(|e| {
+        eprintln!("Recipe adaptation failed: {}", e);
+        format!("Adaptation failed: {}", e)
+    })?;
+
+    // Increment token usage
+    SettingsService::increment_token_usage(&state.db, result.input_tokens, result.output_tokens)
+        .await;
+
+    Ok(result.recipe)
 }
