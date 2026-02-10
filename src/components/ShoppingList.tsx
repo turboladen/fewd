@@ -33,17 +33,17 @@ function IngredientCard({
   const hasPartialRecipe = ingredient.items.some(isPartialSource)
 
   return (
-    <div className='border border-gray-200 rounded-lg bg-white'>
+    <div className='border border-stone-200 rounded-lg bg-white shadow-sm'>
       <button
         onClick={onToggle}
-        className='w-full text-left px-4 py-3 flex items-center justify-between hover:bg-gray-50'
+        className='w-full text-left px-4 py-3 flex items-center justify-between hover:bg-stone-50'
       >
         <div className='flex items-center gap-3'>
-          <span className='font-medium text-gray-900'>
+          <span className='font-medium text-stone-900'>
             {ingredient.ingredient_name}
           </span>
           {hasTotals && (
-            <span className='text-sm text-gray-500'>
+            <span className='text-sm text-stone-500'>
               {formatAmount(ingredient.total_amount as IngredientAmount)} {ingredient.total_unit}
             </span>
           )}
@@ -59,24 +59,24 @@ function IngredientCard({
           )}
         </div>
         <div className='flex items-center gap-2'>
-          <span className='text-xs text-gray-400'>
+          <span className='text-xs text-stone-400'>
             {ingredient.items.length} source{ingredient.items.length !== 1 ? 's' : ''}
           </span>
-          <span className='text-gray-400 text-sm'>
+          <span className='text-stone-400 text-sm'>
             {isExpanded ? '\u25B2' : '\u25BC'}
           </span>
         </div>
       </button>
 
       {isExpanded && (
-        <div className='px-4 pb-3 border-t border-gray-100'>
+        <div className='px-4 pb-3 border-t border-stone-100'>
           <div className='mt-2 space-y-1'>
             {ingredient.items.map((source, i) => (
-              <div key={i} className='flex items-center gap-2 text-sm text-gray-600'>
-                <span className='text-gray-900 font-medium min-w-[80px]'>
+              <div key={i} className='flex items-center gap-2 text-sm text-stone-600'>
+                <span className='text-stone-900 font-medium min-w-[80px]'>
                   {formatAmount(source.amount)} {source.unit}
                 </span>
-                <span className='text-gray-400'>{formatSourceLabel(source)}</span>
+                <span className='text-stone-400'>{formatSourceLabel(source)}</span>
                 {isPartialSource(source) && (
                   <span className='text-xs text-amber-500'>
                     ({source.person_servings} of {source.recipe_servings} servings)
@@ -141,26 +141,26 @@ export function ShoppingList() {
     <div className='p-6 max-w-3xl mx-auto'>
       {/* Header */}
       <div className='flex items-center justify-between mb-6'>
-        <h1 className='text-2xl font-bold text-gray-900'>Shopping List</h1>
+        <h1 className='text-2xl font-bold text-stone-900'>Shopping List</h1>
         <div className='flex items-center gap-3'>
           <button
             onClick={prevWeek}
-            className='px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50'
+            className='px-3 py-1 border border-stone-300 rounded text-sm hover:bg-stone-50'
           >
             {'\u2190'} Prev
           </button>
-          <span className='text-sm font-medium text-gray-700 min-w-[180px] text-center'>
+          <span className='text-sm font-medium text-stone-700 min-w-[180px] text-center'>
             {weekRangeLabel}
           </span>
           <button
             onClick={nextWeek}
-            className='px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50'
+            className='px-3 py-1 border border-stone-300 rounded text-sm hover:bg-stone-50'
           >
             Next {'\u2192'}
           </button>
           <button
             onClick={goToThisWeek}
-            className='px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700'
+            className='px-3 py-1 bg-primary-600 text-white rounded text-sm hover:bg-primary-700'
           >
             This Week
           </button>
@@ -168,7 +168,7 @@ export function ShoppingList() {
       </div>
 
       {/* Loading state */}
-      {isLoading && <div className='text-gray-500 animate-pulse'>Loading shopping list...</div>}
+      {isLoading && <div className='text-stone-500 animate-pulse'>Loading shopping list...</div>}
 
       {/* Error state */}
       {error && (
@@ -180,8 +180,8 @@ export function ShoppingList() {
       {/* Empty state */}
       {!isLoading && !error && ingredients && ingredients.length === 0 && (
         <div className='text-center py-12'>
-          <p className='text-gray-500 text-lg mb-2'>No meals planned for this week</p>
-          <p className='text-gray-400 text-sm'>
+          <p className='text-stone-500 text-lg mb-2'>No meals planned for this week</p>
+          <p className='text-stone-400 text-sm'>
             Plan some meals in the Planner tab to see ingredients here.
           </p>
         </div>
@@ -191,19 +191,19 @@ export function ShoppingList() {
       {ingredients && ingredients.length > 0 && (
         <>
           <div className='flex items-center justify-between mb-3'>
-            <span className='text-sm text-gray-500'>
+            <span className='text-sm text-stone-500'>
               {ingredients.length} ingredient{ingredients.length !== 1 ? 's' : ''}
             </span>
             <div className='flex gap-2'>
               <button
                 onClick={expandAll}
-                className='text-xs text-blue-600 hover:underline'
+                className='text-xs text-primary-600 hover:underline'
               >
                 Expand all
               </button>
               <button
                 onClick={collapseAll}
-                className='text-xs text-blue-600 hover:underline'
+                className='text-xs text-primary-600 hover:underline'
               >
                 Collapse all
               </button>

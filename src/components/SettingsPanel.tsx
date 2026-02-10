@@ -180,10 +180,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       {/* Panel */}
       <div className='relative bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto'>
         <div className='flex items-center justify-between mb-4'>
-          <h2 className='text-lg font-semibold text-gray-900'>Settings</h2>
+          <h2 className='text-lg font-semibold text-stone-900'>Settings</h2>
           <button
             onClick={onClose}
-            className='text-gray-400 hover:text-gray-600 text-lg'
+            className='text-stone-400 hover:text-stone-600 text-lg'
           >
             {'\u2715'}
           </button>
@@ -197,7 +197,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               : ''
           }`}
         >
-          <label className='block text-sm font-medium text-gray-700 mb-1'>
+          <label className='block text-sm font-medium text-stone-700 mb-1'>
             Anthropic API Key
           </label>
           <div className='flex gap-2'>
@@ -210,13 +210,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 className={`w-full border rounded px-3 py-1.5 text-sm pr-12 ${
                   highlightApiKey
                     ? 'border-amber-400'
-                    : 'border-gray-300'
+                    : 'border-stone-300'
                 }`}
               />
               <button
                 type='button'
                 onClick={() => setShowKey(!showKey)}
-                className='absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600'
+                className='absolute right-2 top-1/2 -translate-y-1/2 text-xs text-stone-400 hover:text-stone-600'
               >
                 {showKey ? 'Hide' : 'Show'}
               </button>
@@ -224,24 +224,24 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <button
               onClick={handleSaveKey}
               disabled={setSetting.isPending || !apiKeyChanged}
-              className='bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50'
+              className='bg-primary-600 text-white px-3 py-1.5 rounded text-sm hover:bg-primary-700 disabled:opacity-50'
             >
               Save
             </button>
           </div>
-          {keySaved && <p className='text-xs text-green-600 mt-1'>API key saved</p>}
+          {keySaved && <p className='text-xs text-primary-600 mt-1'>API key saved</p>}
         </div>
 
         {/* Model Selector */}
         <div className='mb-4'>
-          <label className='block text-sm font-medium text-gray-700 mb-1'>
+          <label className='block text-sm font-medium text-stone-700 mb-1'>
             Model
           </label>
           <div className='flex gap-2'>
             <select
               value={currentModel}
               onChange={(e) => handleModelChange(e.target.value)}
-              className='flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm'
+              className='flex-1 border border-stone-300 rounded px-3 py-1.5 text-sm'
             >
               {modelsQuery.data?.map((model) => (
                 <option key={model.id} value={model.id}>
@@ -252,13 +252,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <button
               onClick={handleRefreshModels}
               disabled={modelsQuery.isFetching}
-              className='text-gray-400 hover:text-gray-600 px-2 text-sm disabled:opacity-50'
+              className='text-stone-400 hover:text-stone-600 px-2 text-sm disabled:opacity-50'
               title='Refresh models from Anthropic'
             >
               {'\u21BB'}
             </button>
           </div>
-          <p className={`text-xs mt-1 ${highlightApiKey ? 'text-amber-600' : 'text-gray-400'}`}>
+          <p className={`text-xs mt-1 ${highlightApiKey ? 'text-amber-600' : 'text-stone-400'}`}>
             {modelsQuery.isFetching
               ? 'Refreshing models...'
               : highlightApiKey
@@ -272,12 +272,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           <button
             onClick={() => testConnection.mutate()}
             disabled={testConnection.isPending || !apiKeyInput}
-            className='bg-gray-100 border border-gray-300 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-200 disabled:opacity-50'
+            className='bg-stone-100 border border-stone-300 text-stone-700 px-3 py-1.5 rounded text-sm hover:bg-stone-200 disabled:opacity-50'
           >
             {testConnection.isPending ? 'Testing...' : 'Test Connection'}
           </button>
           {testConnection.isSuccess && (
-            <p className='text-xs text-green-600 mt-1'>
+            <p className='text-xs text-primary-600 mt-1'>
               {'\u2713'} Connected — response: &quot;{testConnection.data}&quot;
             </p>
           )}
@@ -289,13 +289,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* Token Usage */}
-        <div className='pt-3 border-t border-gray-200'>
+        <div className='pt-3 border-t border-stone-200'>
           <div className='flex items-center justify-between mb-1'>
-            <span className='text-sm font-medium text-gray-700'>Token Usage</span>
+            <span className='text-sm font-medium text-stone-700'>Token Usage</span>
             {tokenUsageQuery.data && (tokenUsageQuery.data.total_requests > 0) && (
               <button
                 onClick={handleResetUsage}
-                className='text-xs text-gray-400 hover:text-gray-600'
+                className='text-xs text-stone-400 hover:text-stone-600'
               >
                 Reset
               </button>
@@ -303,7 +303,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           </div>
           {tokenUsageQuery.data && tokenUsageQuery.data.total_requests > 0
             ? (
-              <div className='text-xs text-gray-500 space-y-0.5'>
+              <div className='text-xs text-stone-500 space-y-0.5'>
                 <p>{tokenUsageQuery.data.total_requests} requests</p>
                 <p>
                   {tokenUsageQuery.data.input_tokens.toLocaleString()} input tokens
@@ -312,12 +312,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </p>
               </div>
             )
-            : <p className='text-xs text-gray-400 italic'>No usage yet</p>}
+            : <p className='text-xs text-stone-400 italic'>No usage yet</p>}
 
           {/* Cost Calculator */}
           <button
             onClick={() => setShowCostCalc(!showCostCalc)}
-            className='text-xs text-gray-400 hover:text-gray-600 mt-2'
+            className='text-xs text-stone-400 hover:text-stone-600 mt-2'
           >
             {showCostCalc ? '\u25BE' : '\u25B8'} Estimate cost
           </button>
@@ -325,7 +325,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           {showCostCalc && (
             <div className='mt-2 space-y-2'>
               <div className='flex gap-3'>
-                <label className='flex items-center gap-1 text-xs text-gray-500'>
+                <label className='flex items-center gap-1 text-xs text-stone-500'>
                   Input $/MTok
                   <input
                     type='number'
@@ -333,11 +333,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     min='0'
                     value={inputPrice}
                     onChange={(e) => handlePriceChange('input', e.target.value)}
-                    className='w-20 border border-gray-300 rounded px-2 py-0.5 text-xs'
+                    className='w-20 border border-stone-300 rounded px-2 py-0.5 text-xs'
                     placeholder='3.00'
                   />
                 </label>
-                <label className='flex items-center gap-1 text-xs text-gray-500'>
+                <label className='flex items-center gap-1 text-xs text-stone-500'>
                   Output $/MTok
                   <input
                     type='number'
@@ -345,13 +345,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     min='0'
                     value={outputPrice}
                     onChange={(e) => handlePriceChange('output', e.target.value)}
-                    className='w-20 border border-gray-300 rounded px-2 py-0.5 text-xs'
+                    className='w-20 border border-stone-300 rounded px-2 py-0.5 text-xs'
                     placeholder='15.00'
                   />
                 </label>
               </div>
               {estimatedCost !== null && (
-                <p className='text-xs font-medium text-gray-700'>
+                <p className='text-xs font-medium text-stone-700'>
                   Estimated cost: ${estimatedCost.toFixed(2)}
                 </p>
               )}
@@ -360,16 +360,16 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* Database Location */}
-        <div className='pt-3 border-t border-gray-200'>
-          <span className='text-sm font-medium text-gray-700'>Database Location</span>
+        <div className='pt-3 border-t border-stone-200'>
+          <span className='text-sm font-medium text-stone-700'>Database Location</span>
 
           {dbConfigQuery.data && (
             <div className='mt-1'>
-              <p className='text-xs text-gray-500 break-all'>
+              <p className='text-xs text-stone-500 break-all'>
                 {dbConfigQuery.data.active_path}{' '}
                 <span
                   className={`font-medium ${
-                    dbConfigQuery.data.is_default ? 'text-gray-400' : 'text-blue-500'
+                    dbConfigQuery.data.is_default ? 'text-stone-400' : 'text-primary-500'
                   }`}
                 >
                   ({dbConfigQuery.data.is_default ? 'default' : 'custom'})
@@ -380,8 +380,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
           {/* Applied / restart notice */}
           {dbLocationApplied && (
-            <div className='mt-2 bg-blue-50 border border-blue-200 rounded p-2'>
-              <p className='text-xs text-blue-800'>
+            <div className='mt-2 bg-primary-50 border border-primary-200 rounded p-2'>
+              <p className='text-xs text-primary-800'>
                 {'\u21BB'} Restart the app to use the new database location.
               </p>
             </div>
@@ -390,7 +390,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           {/* Pending selection */}
           {pendingDir && validation && (
             <div className='mt-2 space-y-2'>
-              <p className='text-xs text-gray-600 break-all'>
+              <p className='text-xs text-stone-600 break-all'>
                 New location: <span className='font-medium'>{pendingDir}</span>
               </p>
 
@@ -409,13 +409,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               )}
 
               {validation.valid && validation.has_existing_db && (
-                <p className='text-xs text-green-600'>
+                <p className='text-xs text-primary-600'>
                   {'\u2713'} Existing database found — it will be used.
                 </p>
               )}
 
               {validation.valid && !validation.has_existing_db && (
-                <p className='text-xs text-gray-500'>
+                <p className='text-xs text-stone-500'>
                   No database found — your current data will be copied to this location.
                 </p>
               )}
@@ -425,13 +425,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   <button
                     onClick={handleApplyDbLocation}
                     disabled={setDbLocation.isPending || copyDb.isPending}
-                    className='bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 disabled:opacity-50'
+                    className='bg-primary-600 text-white px-3 py-1 rounded text-xs hover:bg-primary-700 disabled:opacity-50'
                   >
                     {copyDb.isPending ? 'Copying...' : 'Apply'}
                   </button>
                   <button
                     onClick={handleCancelDbChange}
-                    className='bg-gray-100 border border-gray-300 text-gray-600 px-3 py-1 rounded text-xs hover:bg-gray-200'
+                    className='bg-stone-100 border border-stone-300 text-stone-600 px-3 py-1 rounded text-xs hover:bg-stone-200'
                   >
                     Cancel
                   </button>
@@ -445,7 +445,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <div className='mt-2 flex gap-2'>
               <button
                 onClick={handlePickFolder}
-                className='bg-gray-100 border border-gray-300 text-gray-700 px-3 py-1 rounded text-xs hover:bg-gray-200'
+                className='bg-stone-100 border border-stone-300 text-stone-700 px-3 py-1 rounded text-xs hover:bg-stone-200'
               >
                 Change Location...
               </button>
@@ -453,7 +453,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <button
                   onClick={handleResetDbLocation}
                   disabled={setDbLocation.isPending}
-                  className='text-xs text-gray-400 hover:text-gray-600 disabled:opacity-50'
+                  className='text-xs text-stone-400 hover:text-stone-600 disabled:opacity-50'
                 >
                   Reset to Default
                 </button>

@@ -18,8 +18,8 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className='h-screen flex flex-col bg-gray-50'>
-        <nav className='flex-none bg-white border-b border-gray-200'>
+      <div className='h-screen flex flex-col bg-surface'>
+        <nav className='flex-none bg-white border-b border-stone-200 shadow-sm'>
           <div
             className='h-7 w-full'
             data-tauri-drag-region
@@ -29,8 +29,8 @@ function App() {
               onClick={() => setActiveTab('family')}
               className={`px-6 py-3 font-medium text-sm ${
                 activeTab === 'family'
-                  ? 'text-blue-600 border-b-2 border-blue-600'
-                  : 'text-gray-600 hover:text-gray-900'
+                  ? 'text-primary-600 border-b-2 border-primary-600'
+                  : 'text-stone-600 hover:text-stone-900'
               }`}
             >
               Family
@@ -39,8 +39,8 @@ function App() {
               onClick={() => setActiveTab('recipes')}
               className={`px-6 py-3 font-medium text-sm ${
                 activeTab === 'recipes'
-                  ? 'text-blue-600 border-b-2 border-blue-600'
-                  : 'text-gray-600 hover:text-gray-900'
+                  ? 'text-primary-600 border-b-2 border-primary-600'
+                  : 'text-stone-600 hover:text-stone-900'
               }`}
             >
               Recipes
@@ -49,8 +49,8 @@ function App() {
               onClick={() => setActiveTab('planner')}
               className={`px-6 py-3 font-medium text-sm ${
                 activeTab === 'planner'
-                  ? 'text-blue-600 border-b-2 border-blue-600'
-                  : 'text-gray-600 hover:text-gray-900'
+                  ? 'text-primary-600 border-b-2 border-primary-600'
+                  : 'text-stone-600 hover:text-stone-900'
               }`}
             >
               Planner
@@ -59,8 +59,8 @@ function App() {
               onClick={() => setActiveTab('templates')}
               className={`px-6 py-3 font-medium text-sm ${
                 activeTab === 'templates'
-                  ? 'text-blue-600 border-b-2 border-blue-600'
-                  : 'text-gray-600 hover:text-gray-900'
+                  ? 'text-primary-600 border-b-2 border-primary-600'
+                  : 'text-stone-600 hover:text-stone-900'
               }`}
             >
               Templates
@@ -69,8 +69,8 @@ function App() {
               onClick={() => setActiveTab('shopping')}
               className={`px-6 py-3 font-medium text-sm ${
                 activeTab === 'shopping'
-                  ? 'text-blue-600 border-b-2 border-blue-600'
-                  : 'text-gray-600 hover:text-gray-900'
+                  ? 'text-primary-600 border-b-2 border-primary-600'
+                  : 'text-stone-600 hover:text-stone-900'
               }`}
             >
               Shopping
@@ -78,7 +78,7 @@ function App() {
             <div className='ml-auto pr-4 flex items-center'>
               <button
                 onClick={() => setIsSettingsOpen(true)}
-                className='text-gray-400 hover:text-gray-600 p-2 text-lg'
+                className='text-stone-400 hover:text-stone-600 p-2 text-lg'
                 title='Settings'
               >
                 {'\u2699'}

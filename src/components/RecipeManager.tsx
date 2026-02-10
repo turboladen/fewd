@@ -52,19 +52,19 @@ function TagInput({
 
   return (
     <div>
-      <label className='block text-sm font-medium text-gray-700 mb-1'>
+      <label className='block text-sm font-medium text-stone-700 mb-1'>
         {label}
       </label>
       <div className='flex flex-wrap gap-1 mb-1'>
         {value.map((tag, i) => (
           <span
             key={i}
-            className='inline-flex items-center bg-gray-100 text-gray-700 text-sm px-2 py-1 rounded'
+            className='inline-flex items-center bg-stone-100 text-stone-700 text-sm px-2 py-1 rounded'
           >
             {tag}
             <button
               onClick={() => handleRemove(i)}
-              className='ml-1 text-gray-400 hover:text-gray-600'
+              className='ml-1 text-stone-400 hover:text-stone-600'
               type='button'
             >
               x
@@ -78,7 +78,7 @@ function TagInput({
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder={`Add ${label.toLowerCase()} (press Enter)`}
-        className='border border-gray-300 p-2 rounded w-full text-sm'
+        className='border border-stone-300 p-2 rounded w-full text-sm'
       />
     </div>
   )
@@ -95,7 +95,7 @@ function TimeInput({
 }) {
   return (
     <div>
-      <label className='block text-sm font-medium text-gray-700 mb-1'>
+      <label className='block text-sm font-medium text-stone-700 mb-1'>
         {label}
       </label>
       <div className='flex gap-2'>
@@ -112,7 +112,7 @@ function TimeInput({
             }
           }}
           placeholder='0'
-          className='border border-gray-300 p-2 rounded w-20 text-sm'
+          className='border border-stone-300 p-2 rounded w-20 text-sm'
         />
         <select
           value={value?.unit ?? 'minutes'}
@@ -121,7 +121,7 @@ function TimeInput({
               onChange({ ...value, unit: e.target.value as TimeValue['unit'] })
             }
           }}
-          className='border border-gray-300 p-2 rounded text-sm'
+          className='border border-stone-300 p-2 rounded text-sm'
         >
           <option value='minutes'>minutes</option>
           <option value='hours'>hours</option>
@@ -189,7 +189,7 @@ function RecipeForm({
     <form onSubmit={handleSubmit} className='space-y-3'>
       <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
         <div>
-          <label className='block text-sm font-medium text-gray-700 mb-1'>
+          <label className='block text-sm font-medium text-stone-700 mb-1'>
             Name
           </label>
           <input
@@ -197,11 +197,11 @@ function RecipeForm({
             required
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
-            className='border border-gray-300 p-2 rounded w-full'
+            className='border border-stone-300 p-2 rounded w-full'
           />
         </div>
         <div>
-          <label className='block text-sm font-medium text-gray-700 mb-1'>
+          <label className='block text-sm font-medium text-stone-700 mb-1'>
             Icon (emoji)
           </label>
           <input
@@ -209,20 +209,20 @@ function RecipeForm({
             value={form.icon}
             onChange={(e) => setForm({ ...form, icon: e.target.value })}
             placeholder='e.g. 🍝'
-            className='border border-gray-300 p-2 rounded w-24'
+            className='border border-stone-300 p-2 rounded w-24'
           />
         </div>
       </div>
 
       <div>
-        <label className='block text-sm font-medium text-gray-700 mb-1'>
+        <label className='block text-sm font-medium text-stone-700 mb-1'>
           Description
         </label>
         <textarea
           value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })}
           placeholder='Brief description of the recipe'
-          className='border border-gray-300 p-2 rounded w-full'
+          className='border border-stone-300 p-2 rounded w-full'
           rows={2}
         />
       </div>
@@ -244,7 +244,7 @@ function RecipeForm({
           onChange={(total_time) => setForm({ ...form, total_time })}
         />
         <div>
-          <label className='block text-sm font-medium text-gray-700 mb-1'>
+          <label className='block text-sm font-medium text-stone-700 mb-1'>
             Servings
           </label>
           <input
@@ -253,7 +253,7 @@ function RecipeForm({
             required
             value={form.servings}
             onChange={(e) => setForm({ ...form, servings: parseInt(e.target.value) || 1 })}
-            className='border border-gray-300 p-2 rounded w-20 text-sm'
+            className='border border-stone-300 p-2 rounded w-20 text-sm'
           />
         </div>
       </div>
@@ -265,14 +265,14 @@ function RecipeForm({
       />
 
       <div>
-        <label className='block text-sm font-medium text-gray-700 mb-1'>
+        <label className='block text-sm font-medium text-stone-700 mb-1'>
           Instructions
         </label>
         <textarea
           required
           value={form.instructions}
           onChange={(e) => setForm({ ...form, instructions: e.target.value })}
-          className='border border-gray-300 p-2 rounded w-full'
+          className='border border-stone-300 p-2 rounded w-full'
           rows={4}
           placeholder='Step-by-step instructions...'
         />
@@ -285,13 +285,13 @@ function RecipeForm({
       />
 
       <div>
-        <label className='block text-sm font-medium text-gray-700 mb-1'>
+        <label className='block text-sm font-medium text-stone-700 mb-1'>
           Notes
         </label>
         <textarea
           value={form.notes}
           onChange={(e) => setForm({ ...form, notes: e.target.value })}
-          className='border border-gray-300 p-2 rounded w-full'
+          className='border border-stone-300 p-2 rounded w-full'
           rows={2}
         />
       </div>
@@ -305,14 +305,14 @@ function RecipeForm({
       <div className='flex gap-2'>
         <button
           type='submit'
-          className='bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700'
+          className='bg-primary-600 text-white px-4 py-2 rounded hover:bg-primary-700'
         >
           {submitLabel}
         </button>
         <button
           type='button'
           onClick={onCancel}
-          className='border border-gray-300 px-4 py-2 rounded hover:bg-gray-50'
+          className='border border-stone-300 px-4 py-2 rounded hover:bg-stone-50'
         >
           Cancel
         </button>
@@ -384,15 +384,15 @@ function ImportRecipeForm({
 
   return (
     <div className='space-y-3'>
-      <div className='flex gap-1 border-b border-gray-200'>
+      <div className='flex gap-1 border-b border-stone-200'>
         {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setImportMode(tab.key)}
             className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
               importMode === tab.key
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                ? 'border-primary-600 text-primary-600'
+                : 'border-transparent text-stone-500 hover:text-stone-700'
             }`}
           >
             {tab.label}
@@ -403,14 +403,14 @@ function ImportRecipeForm({
       {importMode === 'markdown' && (
         <form onSubmit={handleMarkdownSubmit} className='space-y-3'>
           <div>
-            <label className='block text-sm font-medium text-gray-700 mb-1'>
+            <label className='block text-sm font-medium text-stone-700 mb-1'>
               Paste recipe markdown
             </label>
             <textarea
               required
               value={markdown}
               onChange={(e) => setMarkdown(e.target.value)}
-              className='border border-gray-300 p-2 rounded w-full font-mono text-sm'
+              className='border border-stone-300 p-2 rounded w-full font-mono text-sm'
               rows={12}
               placeholder={`# Recipe Name\nDescription here\nPrep time: 15 min\nServings: 4\n\n## Ingredients\n- 2 cups flour\n- 1 tsp salt\n\n## Instructions\n1. Mix ingredients...\n\n## Tags\ndinner, quick`}
             />
@@ -423,14 +423,14 @@ function ImportRecipeForm({
           <div className='flex gap-2'>
             <button
               type='submit'
-              className='bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700'
+              className='bg-primary-600 text-white px-4 py-2 rounded hover:bg-primary-700'
             >
               Import
             </button>
             <button
               type='button'
               onClick={onCancel}
-              className='border border-gray-300 px-4 py-2 rounded hover:bg-gray-50'
+              className='border border-stone-300 px-4 py-2 rounded hover:bg-stone-50'
             >
               Cancel
             </button>
@@ -441,7 +441,7 @@ function ImportRecipeForm({
       {importMode === 'url' && (
         <form onSubmit={handleUrlSubmit} className='space-y-3'>
           <div>
-            <label className='block text-sm font-medium text-gray-700 mb-1'>
+            <label className='block text-sm font-medium text-stone-700 mb-1'>
               Recipe URL
             </label>
             <input
@@ -450,9 +450,9 @@ function ImportRecipeForm({
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder='https://example.com/recipe/...'
-              className='border border-gray-300 p-2 rounded w-full text-sm'
+              className='border border-stone-300 p-2 rounded w-full text-sm'
             />
-            <p className='text-xs text-gray-500 mt-1'>
+            <p className='text-xs text-stone-500 mt-1'>
               Paste a link to a recipe page. AI will extract the recipe automatically.
             </p>
           </div>
@@ -465,7 +465,7 @@ function ImportRecipeForm({
             <button
               type='submit'
               disabled={urlLoading}
-              className='bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-wait'
+              className='bg-primary-600 text-white px-4 py-2 rounded hover:bg-primary-700 disabled:opacity-50 disabled:cursor-wait'
             >
               {urlLoading ? 'Analyzing recipe...' : 'Import'}
             </button>
@@ -473,7 +473,7 @@ function ImportRecipeForm({
               type='button'
               onClick={onCancel}
               disabled={urlLoading}
-              className='border border-gray-300 px-4 py-2 rounded hover:bg-gray-50 disabled:opacity-50'
+              className='border border-stone-300 px-4 py-2 rounded hover:bg-stone-50 disabled:opacity-50'
             >
               Cancel
             </button>
@@ -484,22 +484,22 @@ function ImportRecipeForm({
       {importMode === 'pdf' && (
         <form onSubmit={handleFileSubmit} className='space-y-3'>
           <div>
-            <label className='block text-sm font-medium text-gray-700 mb-1'>
+            <label className='block text-sm font-medium text-stone-700 mb-1'>
               PDF File
             </label>
             <div className='flex gap-2 items-center'>
               <button
                 type='button'
                 onClick={handleChooseFile}
-                className='border border-gray-300 px-3 py-2 rounded text-sm hover:bg-gray-50'
+                className='border border-stone-300 px-3 py-2 rounded text-sm hover:bg-stone-50'
               >
                 Choose File
               </button>
-              <span className='text-sm text-gray-600'>
+              <span className='text-sm text-stone-600'>
                 {selectedFile ? selectedFile.split('/').pop() : 'No file selected'}
               </span>
             </div>
-            <p className='text-xs text-gray-500 mt-1'>
+            <p className='text-xs text-stone-500 mt-1'>
               Select a PDF with recipe text. AI will extract the recipe automatically.
             </p>
           </div>
@@ -512,7 +512,7 @@ function ImportRecipeForm({
             <button
               type='submit'
               disabled={!selectedFile || fileLoading}
-              className='bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-wait'
+              className='bg-primary-600 text-white px-4 py-2 rounded hover:bg-primary-700 disabled:opacity-50 disabled:cursor-wait'
             >
               {fileLoading ? 'Analyzing recipe...' : 'Import'}
             </button>
@@ -520,7 +520,7 @@ function ImportRecipeForm({
               type='button'
               onClick={onCancel}
               disabled={fileLoading}
-              className='border border-gray-300 px-4 py-2 rounded hover:bg-gray-50 disabled:opacity-50'
+              className='border border-stone-300 px-4 py-2 rounded hover:bg-stone-50 disabled:opacity-50'
             >
               Cancel
             </button>
@@ -575,26 +575,26 @@ function ScaleRecipePanel({
   }
 
   return (
-    <div className='border border-purple-200 rounded-lg p-4 bg-purple-50'>
+    <div className='border border-secondary-200 rounded-lg p-4 bg-secondary-50'>
       <h3 className='font-semibold text-lg mb-3'>Scale: {parsed.name}</h3>
 
       <div className='flex items-center gap-3 mb-4'>
-        <span className='text-sm text-gray-600'>
+        <span className='text-sm text-stone-600'>
           Current: {parsed.servings} serving{parsed.servings !== 1 ? 's' : ''}
         </span>
-        <span className='text-gray-400'>{'\u2192'}</span>
+        <span className='text-stone-400'>{'\u2192'}</span>
         <input
           type='number'
           min={1}
           value={targetServings}
           onChange={(e) => setTargetServings(parseInt(e.target.value) || 1)}
-          className='border border-gray-300 p-1 rounded w-20 text-sm'
+          className='border border-stone-300 p-1 rounded w-20 text-sm'
         />
-        <span className='text-sm text-gray-600'>servings</span>
+        <span className='text-sm text-stone-600'>servings</span>
         <button
           onClick={handlePreview}
           disabled={targetServings < 1 || targetServings === parsed.servings}
-          className='bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed'
+          className='bg-secondary-600 text-white px-3 py-1 rounded text-sm hover:bg-secondary-700 disabled:opacity-50 disabled:cursor-not-allowed'
         >
           Preview
         </button>
@@ -642,7 +642,7 @@ function ScaleRecipePanel({
                     />
                   )
                   : <span className='font-medium w-16 text-right'>{formatAmount(ing.amount)}</span>}
-                <span className='text-gray-500 w-12'>{ing.unit}</span>
+                <span className='text-stone-500 w-12'>{ing.unit}</span>
                 <span>{ing.name}</span>
                 {flaggedIndices.has(i) && (
                   <span className='text-amber-600 text-xs ml-auto'>fractional</span>
@@ -660,19 +660,19 @@ function ScaleRecipePanel({
           <div className='flex gap-2'>
             <button
               onClick={() => onSaveAsNew(editedIngredients, targetServings)}
-              className='bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700'
+              className='bg-primary-600 text-white px-4 py-2 rounded text-sm hover:bg-primary-700'
             >
               Save as New Recipe
             </button>
             <button
               onClick={() => onUpdateInPlace(editedIngredients, targetServings)}
-              className='border border-gray-300 px-4 py-2 rounded text-sm hover:bg-gray-50'
+              className='border border-stone-300 px-4 py-2 rounded text-sm hover:bg-stone-50'
             >
               Update This Recipe
             </button>
             <button
               onClick={onCancel}
-              className='border border-gray-300 px-4 py-2 rounded text-sm text-gray-600 hover:bg-gray-50'
+              className='border border-stone-300 px-4 py-2 rounded text-sm text-stone-600 hover:bg-stone-50'
             >
               Cancel
             </button>
@@ -684,7 +684,7 @@ function ScaleRecipePanel({
         <div className='flex gap-2'>
           <button
             onClick={onCancel}
-            className='border border-gray-300 px-4 py-2 rounded text-sm text-gray-600 hover:bg-gray-50'
+            className='border border-stone-300 px-4 py-2 rounded text-sm text-stone-600 hover:bg-stone-50'
           >
             Cancel
           </button>
@@ -720,7 +720,7 @@ function EnhancedInstructions({ text }: { text: string }) {
       }
       // Bold text
       parts.push(
-        <strong key={`${lineIdx}-${key++}`} className='text-green-700 font-semibold'>
+        <strong key={`${lineIdx}-${key++}`} className='text-primary-700 font-semibold'>
           {remaining.slice(boldStart + 2, boldEnd)}
         </strong>,
       )
@@ -794,7 +794,7 @@ function RecipeDetail({
   }
 
   return (
-    <div className='border border-gray-200 p-6 rounded-lg bg-white md:col-span-2'>
+    <div className='border border-stone-200 p-6 rounded-lg bg-white shadow-sm md:col-span-2'>
       {/* Header */}
       <div className='flex items-start justify-between mb-4'>
         <div>
@@ -804,7 +804,7 @@ function RecipeDetail({
             <button
               onClick={onToggleFavorite}
               className={`text-xl ${
-                parsed.is_favorite ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-400'
+                parsed.is_favorite ? 'text-accent-500' : 'text-stone-300 hover:text-accent-400'
               }`}
             >
               {parsed.is_favorite ? '\u2605' : '\u2606'}
@@ -813,24 +813,24 @@ function RecipeDetail({
           <div className='flex items-center gap-2 mt-1'>
             <StarRating value={parsed.rating} onChange={onRatingChange} size='md' />
           </div>
-          {parsed.description && <p className='text-gray-600 mt-1'>{parsed.description}</p>}
+          {parsed.description && <p className='text-stone-600 mt-1'>{parsed.description}</p>}
         </div>
         <div className='flex gap-2 items-center'>
           <button
             onClick={onEdit}
-            className='text-blue-600 text-sm hover:underline'
+            className='text-primary-600 text-sm hover:underline'
           >
             Edit
           </button>
           <button
             onClick={onScale}
-            className='text-purple-600 text-sm hover:underline'
+            className='text-secondary-600 text-sm hover:underline'
           >
             Scale
           </button>
           <button
             onClick={onAdapt}
-            className='text-teal-600 text-sm hover:underline'
+            className='text-secondary-600 text-sm hover:underline'
           >
             Adapt
           </button>
@@ -846,7 +846,7 @@ function RecipeDetail({
                 </button>
                 <button
                   onClick={onCancelDelete}
-                  className='text-gray-500 hover:underline'
+                  className='text-stone-500 hover:underline'
                 >
                   No
                 </button>
@@ -862,7 +862,7 @@ function RecipeDetail({
             )}
           <button
             onClick={onClose}
-            className='ml-2 text-gray-400 hover:text-gray-600 text-lg'
+            className='ml-2 text-stone-400 hover:text-stone-600 text-lg'
             title='Back to list'
           >
             {'\u2715'}
@@ -872,11 +872,11 @@ function RecipeDetail({
 
       {/* Parent recipe link */}
       {parentName && (
-        <div className='text-sm text-gray-500 mb-2'>
+        <div className='text-sm text-stone-500 mb-2'>
           {parsed.source === 'ai_adapted' ? 'Adapted from' : 'Scaled from'}:{' '}
           <span
             className={`font-medium ${
-              parsed.source === 'ai_adapted' ? 'text-teal-600' : 'text-purple-600'
+              parsed.source === 'ai_adapted' ? 'text-secondary-600' : 'text-secondary-600'
             }`}
           >
             {parentName}
@@ -885,7 +885,7 @@ function RecipeDetail({
       )}
 
       {/* Meta row */}
-      <div className='flex flex-wrap gap-4 text-sm text-gray-500 mb-4 pb-4 border-b border-gray-100'>
+      <div className='flex flex-wrap gap-4 text-sm text-stone-500 mb-4 pb-4 border-b border-stone-100'>
         <span>Servings: {parsed.servings}</span>
         {parsed.prep_time && <span>Prep: {formatTime(parsed.prep_time)}</span>}
         {parsed.cook_time && <span>Cook: {formatTime(parsed.cook_time)}</span>}
@@ -905,14 +905,15 @@ function RecipeDetail({
                 {parsed.ingredients.map((ing, i) => (
                   <li key={i} className='text-sm'>
                     <span className='font-medium'>{formatAmount(ing.amount)}</span>
-                    {ing.unit && <span className='text-gray-500'>{` ${ing.unit}`}</span>}
+                    {ing.unit && <span className='text-stone-500'>{` ${ing.unit}`}</span>}
                     <span>{` ${ing.name}`}</span>
-                    {ing.notes && <span className='text-gray-400 italic'>{` (${ing.notes})`}</span>}
+                    {ing.notes && <span className='text-stone-400 italic'>{` (${ing.notes})`}
+                    </span>}
                   </li>
                 ))}
               </ul>
             )
-            : <p className='text-sm text-gray-400'>No ingredients listed</p>}
+            : <p className='text-sm text-stone-400'>No ingredients listed</p>}
         </div>
 
         {/* Instructions */}
@@ -925,8 +926,8 @@ function RecipeDetail({
                 disabled={enhanceMutation.isPending}
                 className={`text-xs px-2 py-0.5 rounded border ${
                   enhancedMode
-                    ? 'bg-green-100 border-green-300 text-green-700'
-                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                    ? 'bg-primary-100 border-primary-300 text-primary-700'
+                    : 'bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100'
                 } ${enhanceMutation.isPending ? 'opacity-50 cursor-wait' : ''}`}
               >
                 {enhanceMutation.isPending
@@ -945,7 +946,7 @@ function RecipeDetail({
                   : parsed.instructions}
               </div>
             )
-            : <p className='text-sm text-gray-400'>No instructions</p>}
+            : <p className='text-sm text-stone-400'>No instructions</p>}
           {enhanceMutation.error && (
             <p className='text-sm text-red-600 mt-1'>
               {String(enhanceMutation.error)}
@@ -956,7 +957,7 @@ function RecipeDetail({
 
       {/* Nutrition */}
       {parsed.nutrition_per_serving && (
-        <div className='mt-4 pt-4 border-t border-gray-100'>
+        <div className='mt-4 pt-4 border-t border-stone-100'>
           <h3 className='font-semibold mb-2'>Nutrition (per serving)</h3>
           <div className='flex gap-4 text-sm'>
             {parsed.nutrition_per_serving.calories != null && (
@@ -977,11 +978,11 @@ function RecipeDetail({
 
       {/* Tags */}
       {parsed.tags.length > 0 && (
-        <div className='flex flex-wrap gap-1 mt-4 pt-4 border-t border-gray-100'>
+        <div className='flex flex-wrap gap-1 mt-4 pt-4 border-t border-stone-100'>
           {parsed.tags.map((tag, i) => (
             <span
               key={i}
-              className='bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded'
+              className='bg-stone-100 text-stone-600 text-xs px-2 py-0.5 rounded'
             >
               {tag}
             </span>
@@ -991,9 +992,9 @@ function RecipeDetail({
 
       {/* Notes */}
       {parsed.notes && (
-        <div className='mt-4 pt-4 border-t border-gray-100'>
+        <div className='mt-4 pt-4 border-t border-stone-100'>
           <h3 className='font-semibold mb-1'>Notes</h3>
-          <p className='text-sm text-gray-600 italic'>{parsed.notes}</p>
+          <p className='text-sm text-stone-600 italic'>{parsed.notes}</p>
         </div>
       )}
     </div>
@@ -1182,7 +1183,7 @@ export function RecipeManager() {
   }
 
   if (isLoading) {
-    return <div className='p-6 text-gray-500 animate-pulse'>Loading recipes...</div>
+    return <div className='p-6 text-stone-500 animate-pulse'>Loading recipes...</div>
   }
 
   if (error) {
@@ -1198,18 +1199,18 @@ export function RecipeManager() {
   return (
     <div className='p-6'>
       <div className='flex items-center justify-between mb-6'>
-        <h1 className='text-2xl font-bold text-gray-900'>Recipes</h1>
+        <h1 className='text-2xl font-bold text-stone-900'>Recipes</h1>
         {viewMode === 'list' && (
           <div className='flex gap-2'>
             <button
               onClick={() => setViewMode('add')}
-              className='bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700'
+              className='bg-primary-600 text-white px-4 py-2 rounded hover:bg-primary-700'
             >
               + Add Recipe
             </button>
             <button
               onClick={() => setViewMode('import')}
-              className='border border-gray-300 px-4 py-2 rounded hover:bg-gray-50'
+              className='border border-stone-300 px-4 py-2 rounded hover:bg-stone-50'
             >
               Import
             </button>
@@ -1218,7 +1219,7 @@ export function RecipeManager() {
       </div>
 
       {viewMode === 'add' && (
-        <div className='mb-6 border border-gray-200 p-4 rounded-lg bg-white'>
+        <div className='mb-6 border border-stone-200 p-4 rounded-lg bg-white shadow-sm'>
           <h3 className='font-semibold text-lg mb-3'>Add Recipe</h3>
           <RecipeForm
             initialData={emptyForm}
@@ -1235,7 +1236,7 @@ export function RecipeManager() {
       )}
 
       {viewMode === 'import' && (
-        <div className='mb-6 border border-gray-200 p-4 rounded-lg bg-white'>
+        <div className='mb-6 border border-stone-200 p-4 rounded-lg bg-white shadow-sm'>
           <h3 className='font-semibold text-lg mb-3'>Import Recipe</h3>
           <ImportRecipeForm
             onSubmitMarkdown={handleImport}
@@ -1258,13 +1259,13 @@ export function RecipeManager() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder='Search recipes...'
-            className='border border-gray-300 p-2 rounded w-full md:w-64'
+            className='border border-stone-300 p-2 rounded w-full md:w-64'
           />
         </div>
       )}
 
       {filteredRecipes?.length === 0 && viewMode === 'list' && (
-        <p className='text-gray-500'>
+        <p className='text-stone-500'>
           {searchQuery
             ? 'No recipes match your search.'
             : 'No recipes yet. Add one to get started!'}
@@ -1308,7 +1309,9 @@ export function RecipeManager() {
               <div
                 key={recipe.id}
                 className={`p-4 rounded-lg md:col-span-2 border ${
-                  isAdaptEdit ? 'border-teal-200 bg-teal-50' : 'border-blue-200 bg-blue-50'
+                  isAdaptEdit
+                    ? 'border-secondary-200 bg-secondary-50'
+                    : 'border-primary-200 bg-primary-50'
                 }`}
               >
                 <h3 className='font-semibold text-lg mb-3'>
@@ -1415,21 +1418,23 @@ export function RecipeManager() {
           return (
             <div
               key={recipe.id}
-              className='border border-gray-200 p-4 rounded-lg bg-white'
+              className='border border-stone-200 p-4 rounded-lg bg-white shadow-sm'
             >
               <div className='flex items-start justify-between'>
                 <div className='flex items-center gap-2'>
                   {recipe.icon && <span className='text-xl'>{recipe.icon}</span>}
                   <button
                     onClick={() => setViewingId(recipe.id)}
-                    className='font-semibold text-lg hover:text-blue-600 text-left'
+                    className='font-semibold text-lg hover:text-primary-600 text-left'
                   >
                     {recipe.name}
                   </button>
                   <button
                     onClick={() => toggleFavoriteMutation.mutate(recipe.id)}
                     className={`text-lg ${
-                      recipe.is_favorite ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-400'
+                      recipe.is_favorite
+                        ? 'text-accent-500'
+                        : 'text-stone-300 hover:text-accent-400'
                     }`}
                     title={recipe.is_favorite ? 'Unfavorite' : 'Favorite'}
                   >
@@ -1440,10 +1445,10 @@ export function RecipeManager() {
               </div>
 
               {recipe.description && (
-                <p className='text-sm text-gray-600 mt-1'>{recipe.description}</p>
+                <p className='text-sm text-stone-600 mt-1'>{recipe.description}</p>
               )}
 
-              <div className='flex gap-4 mt-2 text-sm text-gray-500'>
+              <div className='flex gap-4 mt-2 text-sm text-stone-500'>
                 <span>Servings: {recipe.servings}</span>
                 {parsed.prep_time && <span>Prep: {formatTime(parsed.prep_time)}</span>}
                 {parsed.cook_time && <span>Cook: {formatTime(parsed.cook_time)}</span>}
@@ -1455,7 +1460,7 @@ export function RecipeManager() {
                   {parsed.tags.map((tag, i) => (
                     <span
                       key={i}
-                      className='bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded'
+                      className='bg-stone-100 text-stone-600 text-xs px-2 py-0.5 rounded'
                     >
                       {tag}
                     </span>
@@ -1464,7 +1469,7 @@ export function RecipeManager() {
               )}
 
               {recipe.times_made > 0 && (
-                <p className='text-xs text-gray-400 mt-2'>
+                <p className='text-xs text-stone-400 mt-2'>
                   Made {recipe.times_made} time{recipe.times_made !== 1 ? 's' : ''}
                 </p>
               )}

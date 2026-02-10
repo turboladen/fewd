@@ -22,27 +22,27 @@ function SuggestionSection({
     <div>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className='flex items-center gap-1 text-sm font-semibold text-gray-700 w-full text-left py-1'
+        className='flex items-center gap-1 text-sm font-semibold text-stone-700 w-full text-left py-1'
       >
-        <span className='text-xs text-gray-400'>{isOpen ? '\u25BC' : '\u25B6'}</span>
+        <span className='text-xs text-stone-400'>{isOpen ? '\u25BC' : '\u25B6'}</span>
         {title}
-        <span className='text-xs text-gray-400 font-normal ml-1'>({items.length})</span>
+        <span className='text-xs text-stone-400 font-normal ml-1'>({items.length})</span>
       </button>
       {isOpen && (
         <div className='space-y-1 ml-4 mb-2'>
           {items.length === 0
-            ? <p className='text-xs text-gray-400 italic'>None found</p>
+            ? <p className='text-xs text-stone-400 italic'>None found</p>
             : items.map((item) => (
               <button
                 key={item.recipe_id}
                 onClick={() => onSelect(item.recipe_id)}
-                className='w-full text-left bg-white border border-gray-200 rounded p-2 hover:border-purple-300 hover:bg-purple-50'
+                className='w-full text-left bg-white border border-stone-200 rounded p-2 hover:border-secondary-300 hover:bg-secondary-50'
               >
                 <div className='flex items-center gap-2'>
                   <span className='font-medium text-sm'>{item.recipe_name}</span>
                   <StarRating value={item.rating} size='sm' />
                 </div>
-                <div className='text-xs text-gray-500 mt-0.5'>
+                <div className='text-xs text-stone-500 mt-0.5'>
                   {item.reason}
                 </div>
               </button>
@@ -95,16 +95,16 @@ export function SuggestionPanel({
   }
 
   return (
-    <div className='border border-purple-200 rounded-lg p-3 bg-purple-50 mb-3'>
+    <div className='border border-secondary-200 rounded-lg p-3 bg-secondary-50 mb-3'>
       <div className='flex items-center justify-between mb-2'>
-        <h4 className='font-medium text-sm text-purple-800'>Suggest Recipes</h4>
-        <button onClick={onClose} className='text-gray-400 hover:text-gray-600 text-sm'>
+        <h4 className='font-medium text-sm text-secondary-800'>Suggest Recipes</h4>
+        <button onClick={onClose} className='text-stone-400 hover:text-stone-600 text-sm'>
           {'\u2715'}
         </button>
       </div>
 
       {/* Person selection */}
-      <p className='text-xs text-gray-500 mb-1'>Suggest for:</p>
+      <p className='text-xs text-stone-500 mb-1'>Suggest for:</p>
       <div className='flex flex-wrap gap-2 mb-2'>
         {people.map((person) => {
           const isSelected = selectedPersonIds.has(person.id)
@@ -113,8 +113,8 @@ export function SuggestionPanel({
               key={person.id}
               className={`flex items-center gap-1.5 text-sm px-2 py-1 rounded border cursor-pointer ${
                 isSelected
-                  ? 'bg-purple-100 border-purple-400 text-purple-800'
-                  : 'bg-white border-gray-200 text-gray-400 line-through'
+                  ? 'bg-secondary-100 border-secondary-400 text-secondary-800'
+                  : 'bg-white border-stone-200 text-stone-400 line-through'
               }`}
             >
               <input
@@ -135,7 +135,7 @@ export function SuggestionPanel({
       <button
         onClick={handleFetch}
         disabled={selectedPersonIds.size === 0 || mutation.isPending}
-        className='bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700 disabled:opacity-50 mb-2'
+        className='bg-secondary-600 text-white px-3 py-1 rounded text-sm hover:bg-secondary-700 disabled:opacity-50 mb-2'
       >
         {mutation.isPending ? 'Loading...' : 'Get Suggestions'}
       </button>
@@ -170,7 +170,7 @@ export function SuggestionPanel({
       )}
 
       {/* AI suggestions */}
-      <div className='mt-2 pt-2 border-t border-purple-200'>
+      <div className='mt-2 pt-2 border-t border-secondary-200'>
         <AiSuggestionSection
           people={people}
           selectedPersonIds={selectedPersonIds}

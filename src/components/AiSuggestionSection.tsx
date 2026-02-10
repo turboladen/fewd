@@ -164,7 +164,7 @@ export function AiSuggestionSection({
   // No API key
   if (!hasApiKey && !apiKeyQuery.isLoading) {
     return (
-      <div className='text-sm text-purple-600'>
+      <div className='text-sm text-secondary-600'>
         Set your Anthropic API key in Settings to use AI suggestions.
       </div>
     )
@@ -175,10 +175,10 @@ export function AiSuggestionSection({
     return (
       <div className='space-y-2'>
         <div className='flex items-center justify-between'>
-          <h5 className='text-sm font-semibold text-purple-800'>AI Suggestions</h5>
+          <h5 className='text-sm font-semibold text-secondary-800'>AI Suggestions</h5>
           <button
             onClick={handleBack}
-            className='text-xs text-gray-500 hover:text-gray-700'
+            className='text-xs text-stone-500 hover:text-stone-700'
           >
             {'\u2190'} Back
           </button>
@@ -186,7 +186,7 @@ export function AiSuggestionSection({
 
         {/* Loading */}
         {aiMutation.isPending && (
-          <div className='text-sm text-purple-600 animate-pulse'>
+          <div className='text-sm text-secondary-600 animate-pulse'>
             Generating suggestions...
           </div>
         )}
@@ -230,19 +230,19 @@ export function AiSuggestionSection({
             )}
 
             {/* Regenerate section */}
-            <div className='border-t border-purple-200 pt-2 space-y-2'>
-              <p className='text-xs text-gray-500'>None of these work?</p>
+            <div className='border-t border-secondary-200 pt-2 space-y-2'>
+              <p className='text-xs text-stone-500'>None of these work?</p>
               <textarea
                 value={feedback}
                 onChange={(e) => setFeedback(e.target.value)}
                 placeholder='Tell us what you want instead...'
-                className='w-full border border-gray-200 rounded px-2 py-1 text-xs'
+                className='w-full border border-stone-200 rounded px-2 py-1 text-xs'
                 rows={2}
               />
               <button
                 onClick={handleRegenerate}
                 disabled={aiMutation.isPending}
-                className='bg-purple-600 text-white px-3 py-1 rounded text-xs hover:bg-purple-700 disabled:opacity-50'
+                className='bg-secondary-600 text-white px-3 py-1 rounded text-xs hover:bg-secondary-700 disabled:opacity-50'
               >
                 Regenerate
               </button>
@@ -256,12 +256,12 @@ export function AiSuggestionSection({
   // Configure phase
   return (
     <div className='space-y-3'>
-      <h5 className='text-sm font-semibold text-purple-800'>AI Suggestions</h5>
+      <h5 className='text-sm font-semibold text-secondary-800'>AI Suggestions</h5>
 
       {/* Per-person field toggles */}
       {selectedPeople.length > 0 && (
         <div className='space-y-2'>
-          <p className='text-xs text-gray-500'>Include in AI context:</p>
+          <p className='text-xs text-stone-500'>Include in AI context:</p>
           {selectedPeople.map((person) => {
             const toggle = personToggles[person.id]
             if (!toggle) return null
@@ -269,7 +269,7 @@ export function AiSuggestionSection({
 
             return (
               <div key={person.id} className='ml-1'>
-                <p className='text-xs font-medium text-gray-700 mb-1'>{person.name}</p>
+                <p className='text-xs font-medium text-stone-700 mb-1'>{person.name}</p>
                 <div className='flex flex-wrap gap-1 mb-1'>
                   <FieldToggle
                     label='Dietary goals'
@@ -303,7 +303,7 @@ export function AiSuggestionSection({
 
       {/* Meal character */}
       <div>
-        <p className='text-xs text-gray-500 mb-1'>Meal character:</p>
+        <p className='text-xs text-stone-500 mb-1'>Meal character:</p>
         <div className='flex flex-wrap gap-1'>
           {CHARACTER_OPTIONS.map((opt) => (
             <button
@@ -311,8 +311,8 @@ export function AiSuggestionSection({
               onClick={() => setCharacterType(opt.value)}
               className={`text-xs px-2 py-1 rounded border ${
                 characterType === opt.value
-                  ? 'bg-purple-100 border-purple-400 text-purple-800'
-                  : 'bg-white border-gray-200 text-gray-600 hover:border-purple-300'
+                  ? 'bg-secondary-100 border-secondary-400 text-secondary-800'
+                  : 'bg-white border-stone-200 text-stone-600 hover:border-secondary-300'
               }`}
             >
               {opt.label}
@@ -325,7 +325,7 @@ export function AiSuggestionSection({
             value={customText}
             onChange={(e) => setCustomText(e.target.value)}
             placeholder='e.g., high protein, Mediterranean...'
-            className='mt-1 w-full border border-gray-200 rounded px-2 py-1 text-xs'
+            className='mt-1 w-full border border-stone-200 rounded px-2 py-1 text-xs'
           />
         )}
       </div>
@@ -334,7 +334,7 @@ export function AiSuggestionSection({
       <button
         onClick={() => handleGenerate()}
         disabled={selectedPeople.length === 0 || aiMutation.isPending}
-        className='bg-purple-600 text-white px-3 py-1 rounded text-xs hover:bg-purple-700 disabled:opacity-50'
+        className='bg-secondary-600 text-white px-3 py-1 rounded text-xs hover:bg-secondary-700 disabled:opacity-50'
       >
         Generate AI Suggestions
       </button>
@@ -369,7 +369,7 @@ function SuggestionCard({
     .join(', ')
 
   return (
-    <div className='bg-white border border-gray-200 rounded p-2'>
+    <div className='bg-white border border-stone-200 rounded p-2'>
       {/* Collapsed header */}
       <button
         onClick={onToggle}
@@ -380,31 +380,31 @@ function SuggestionCard({
           <div className='flex-1 min-w-0'>
             <span className='font-medium text-sm'>{suggestion.name}</span>
             {suggestion.description && (
-              <p className='text-xs text-gray-500 truncate'>{suggestion.description}</p>
+              <p className='text-xs text-stone-500 truncate'>{suggestion.description}</p>
             )}
-            <p className='text-xs text-gray-400'>
+            <p className='text-xs text-stone-400'>
               {ingredientPreview}
               {suggestion.ingredients.length > 3 ? '...' : ''}
             </p>
           </div>
-          <span className='text-xs text-gray-400'>{isExpanded ? '\u25BC' : '\u25B6'}</span>
+          <span className='text-xs text-stone-400'>{isExpanded ? '\u25BC' : '\u25B6'}</span>
         </div>
       </button>
 
       {/* Expanded details */}
       {isExpanded && (
-        <div className='mt-2 pt-2 border-t border-gray-100 space-y-2'>
+        <div className='mt-2 pt-2 border-t border-stone-100 space-y-2'>
           {/* Ingredients */}
           <div>
-            <h6 className='text-xs font-medium text-gray-700 mb-1'>Ingredients</h6>
+            <h6 className='text-xs font-medium text-stone-700 mb-1'>Ingredients</h6>
             <ul className='text-xs space-y-0.5'>
               {suggestion.ingredients.map((ing: Ingredient, i: number) => (
-                <li key={i} className='text-gray-600'>
+                <li key={i} className='text-stone-600'>
                   <span className='font-medium'>
                     {formatAmount(ing.amount as IngredientAmount)}
                   </span>
                   {ing.unit && ` ${ing.unit}`} {ing.name}
-                  {ing.notes && <span className='text-gray-400'>({ing.notes})</span>}
+                  {ing.notes && <span className='text-stone-400'>({ing.notes})</span>}
                 </li>
               ))}
             </ul>
@@ -412,15 +412,15 @@ function SuggestionCard({
 
           {/* Instructions (truncated) */}
           <div>
-            <h6 className='text-xs font-medium text-gray-700 mb-1'>Instructions</h6>
-            <p className='text-xs text-gray-600 whitespace-pre-wrap line-clamp-4'>
+            <h6 className='text-xs font-medium text-stone-700 mb-1'>Instructions</h6>
+            <p className='text-xs text-stone-600 whitespace-pre-wrap line-clamp-4'>
               {suggestion.instructions}
             </p>
           </div>
 
           {/* Nutrition */}
           {suggestion.nutrition_per_serving && (
-            <div className='text-xs text-gray-500'>
+            <div className='text-xs text-stone-500'>
               <NutritionSummary nutrition={suggestion.nutrition_per_serving} />
             </div>
           )}
@@ -435,7 +435,7 @@ function SuggestionCard({
               onUse()
             }}
             disabled={isSaving}
-            className='bg-purple-600 text-white px-3 py-1 rounded text-xs hover:bg-purple-700 disabled:opacity-50'
+            className='bg-secondary-600 text-white px-3 py-1 rounded text-xs hover:bg-secondary-700 disabled:opacity-50'
           >
             {isSaving ? 'Saving...' : `Use This (#${index + 1})`}
           </button>
@@ -468,17 +468,17 @@ function TagEditor({
 
   return (
     <div>
-      <h6 className='text-xs font-medium text-gray-700 mb-1'>Tags</h6>
+      <h6 className='text-xs font-medium text-stone-700 mb-1'>Tags</h6>
       <div className='flex flex-wrap gap-1 items-center'>
         {tags.map((tag, i) => (
           <span
             key={i}
-            className='bg-purple-100 text-purple-700 text-xs px-2 py-0.5 rounded flex items-center gap-1'
+            className='bg-secondary-100 text-secondary-700 text-xs px-2 py-0.5 rounded flex items-center gap-1'
           >
             {tag}
             <button
               onClick={() => removeTag(i)}
-              className='text-purple-400 hover:text-purple-600'
+              className='text-secondary-400 hover:text-secondary-600'
             >
               {'\u00D7'}
             </button>
@@ -495,7 +495,7 @@ function TagEditor({
             }
           }}
           placeholder='Add tag...'
-          className='text-xs border border-gray-200 rounded px-2 py-0.5 w-20'
+          className='text-xs border border-stone-200 rounded px-2 py-0.5 w-20'
         />
       </div>
     </div>

@@ -28,19 +28,19 @@ function TagInput({
 
   return (
     <div>
-      <label className='block text-sm font-medium text-gray-700 mb-1'>
+      <label className='block text-sm font-medium text-stone-700 mb-1'>
         {label}
       </label>
       <div className='flex flex-wrap gap-1 mb-1'>
         {value.map((tag, i) => (
           <span
             key={i}
-            className='inline-flex items-center bg-gray-100 text-gray-700 text-sm px-2 py-1 rounded'
+            className='inline-flex items-center bg-stone-100 text-stone-700 text-sm px-2 py-1 rounded'
           >
             {tag}
             <button
               onClick={() => handleRemove(i)}
-              className='ml-1 text-gray-400 hover:text-gray-600'
+              className='ml-1 text-stone-400 hover:text-stone-600'
               type='button'
             >
               x
@@ -54,7 +54,7 @@ function TagInput({
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder={`Add ${label.toLowerCase()} (press Enter)`}
-        className='border border-gray-300 p-2 rounded w-full text-sm'
+        className='border border-stone-300 p-2 rounded w-full text-sm'
       />
     </div>
   )
@@ -102,7 +102,7 @@ function PersonForm({
   return (
     <form onSubmit={handleSubmit} className='space-y-3'>
       <div>
-        <label className='block text-sm font-medium text-gray-700 mb-1'>
+        <label className='block text-sm font-medium text-stone-700 mb-1'>
           Name
         </label>
         <input
@@ -110,11 +110,11 @@ function PersonForm({
           required
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
-          className='border border-gray-300 p-2 rounded w-full'
+          className='border border-stone-300 p-2 rounded w-full'
         />
       </div>
       <div>
-        <label className='block text-sm font-medium text-gray-700 mb-1'>
+        <label className='block text-sm font-medium text-stone-700 mb-1'>
           Birthdate
         </label>
         <input
@@ -122,11 +122,11 @@ function PersonForm({
           required
           value={form.birthdate}
           onChange={(e) => setForm({ ...form, birthdate: e.target.value })}
-          className='border border-gray-300 p-2 rounded w-full'
+          className='border border-stone-300 p-2 rounded w-full'
         />
       </div>
       <div>
-        <label className='block text-sm font-medium text-gray-700 mb-1'>
+        <label className='block text-sm font-medium text-stone-700 mb-1'>
           Dietary Goals
         </label>
         <input
@@ -134,7 +134,7 @@ function PersonForm({
           value={form.dietary_goals}
           onChange={(e) => setForm({ ...form, dietary_goals: e.target.value })}
           placeholder='e.g., More protein, less sugar'
-          className='border border-gray-300 p-2 rounded w-full'
+          className='border border-stone-300 p-2 rounded w-full'
         />
       </div>
       <TagInput
@@ -148,13 +148,13 @@ function PersonForm({
         onChange={(dislikes) => setForm({ ...form, dislikes })}
       />
       <div>
-        <label className='block text-sm font-medium text-gray-700 mb-1'>
+        <label className='block text-sm font-medium text-stone-700 mb-1'>
           Notes
         </label>
         <textarea
           value={form.notes}
           onChange={(e) => setForm({ ...form, notes: e.target.value })}
-          className='border border-gray-300 p-2 rounded w-full'
+          className='border border-stone-300 p-2 rounded w-full'
           rows={2}
         />
       </div>
@@ -164,8 +164,8 @@ function PersonForm({
           disabled={!isValid}
           className={`px-4 py-2 rounded text-white ${
             isValid
-              ? 'bg-blue-600 hover:bg-blue-700'
-              : 'bg-blue-300 cursor-not-allowed'
+              ? 'bg-primary-600 hover:bg-primary-700'
+              : 'bg-primary-300 cursor-not-allowed'
           }`}
         >
           {submitLabel}
@@ -173,7 +173,7 @@ function PersonForm({
         <button
           type='button'
           onClick={onCancel}
-          className='border border-gray-300 px-4 py-2 rounded hover:bg-gray-50'
+          className='border border-stone-300 px-4 py-2 rounded hover:bg-stone-50'
         >
           Cancel
         </button>
@@ -243,7 +243,7 @@ export function FamilyManager() {
   }
 
   if (isLoading) {
-    return <div className='p-6 text-gray-500 animate-pulse'>Loading family members...</div>
+    return <div className='p-6 text-stone-500 animate-pulse'>Loading family members...</div>
   }
 
   if (error) {
@@ -259,11 +259,11 @@ export function FamilyManager() {
   return (
     <div className='p-6'>
       <div className='flex items-center justify-between mb-6'>
-        <h1 className='text-2xl font-bold text-gray-900'>Family Members</h1>
+        <h1 className='text-2xl font-bold text-stone-900'>Family Members</h1>
         {!isAdding && (
           <button
             onClick={() => setIsAdding(true)}
-            className='bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700'
+            className='bg-primary-600 text-white px-4 py-2 rounded hover:bg-primary-700'
           >
             + Add Person
           </button>
@@ -271,7 +271,7 @@ export function FamilyManager() {
       </div>
 
       {isAdding && (
-        <div className='mb-6 border border-gray-200 p-4 rounded-lg bg-white'>
+        <div className='mb-6 border border-stone-200 p-4 rounded-lg bg-white shadow-sm'>
           <h3 className='font-semibold text-lg mb-3'>Add Family Member</h3>
           <PersonForm
             initialData={emptyForm}
@@ -288,7 +288,7 @@ export function FamilyManager() {
       )}
 
       {people?.length === 0 && !isAdding && (
-        <p className='text-gray-500'>
+        <p className='text-stone-500'>
           No family members yet. Add someone to get started!
         </p>
       )}
@@ -301,7 +301,7 @@ export function FamilyManager() {
             return (
               <div
                 key={person.id}
-                className='border border-blue-200 p-4 rounded-lg bg-blue-50'
+                className='border border-primary-200 p-4 rounded-lg bg-primary-50'
               >
                 <h3 className='font-semibold text-lg mb-3'>
                   Edit {person.name}
@@ -331,14 +331,14 @@ export function FamilyManager() {
           return (
             <div
               key={person.id}
-              className='border border-gray-200 p-4 rounded-lg bg-white'
+              className='border border-stone-200 p-4 rounded-lg bg-white shadow-sm'
             >
               <div className='flex items-start justify-between'>
                 <h3 className='font-semibold text-lg'>{person.name}</h3>
                 <div className='flex gap-2'>
                   <button
                     onClick={() => setEditingId(person.id)}
-                    className='text-blue-600 text-sm hover:underline'
+                    className='text-primary-600 text-sm hover:underline'
                   >
                     Edit
                   </button>
@@ -354,7 +354,7 @@ export function FamilyManager() {
                         </button>
                         <button
                           onClick={() => setConfirmingDeleteId(null)}
-                          className='text-gray-500 hover:underline'
+                          className='text-stone-500 hover:underline'
                         >
                           No
                         </button>
@@ -370,7 +370,7 @@ export function FamilyManager() {
                     )}
                 </div>
               </div>
-              <p className='text-sm text-gray-500 mt-1'>
+              <p className='text-sm text-stone-500 mt-1'>
                 Born: {person.birthdate}
               </p>
               {person.dietary_goals && (
@@ -381,7 +381,7 @@ export function FamilyManager() {
               {parsed.favorites.length > 0 && (
                 <div className='mt-2'>
                   <span className='text-sm font-medium'>Favorites:</span>
-                  <span className='text-sm text-gray-600'>
+                  <span className='text-sm text-stone-600'>
                     {parsed.favorites.join(', ')}
                   </span>
                 </div>
@@ -389,13 +389,13 @@ export function FamilyManager() {
               {parsed.dislikes.length > 0 && (
                 <div className='mt-1'>
                   <span className='text-sm font-medium'>Dislikes:</span>
-                  <span className='text-sm text-gray-600'>
+                  <span className='text-sm text-stone-600'>
                     {parsed.dislikes.join(', ')}
                   </span>
                 </div>
               )}
               {person.notes && (
-                <p className='text-sm text-gray-500 mt-2 italic'>
+                <p className='text-sm text-stone-500 mt-2 italic'>
                   {person.notes}
                 </p>
               )}

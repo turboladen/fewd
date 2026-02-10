@@ -10,8 +10,8 @@ export function FieldToggle({
   colorScheme?: 'teal' | 'purple'
 }) {
   const colors = colorScheme === 'teal'
-    ? 'bg-teal-50 border-teal-300 text-teal-700'
-    : 'bg-purple-50 border-purple-300 text-purple-700'
+    ? 'bg-secondary-50 border-secondary-300 text-secondary-700'
+    : 'bg-secondary-50 border-secondary-300 text-secondary-700'
 
   return (
     <button
@@ -19,7 +19,7 @@ export function FieldToggle({
       className={`text-xs px-2 py-0.5 rounded border ${
         enabled
           ? colors
-          : 'bg-gray-50 border-gray-200 text-gray-400 line-through'
+          : 'bg-stone-50 border-stone-200 text-stone-400 line-through'
       }`}
     >
       {label}
@@ -44,7 +44,7 @@ export function PersonSummary({
   if (parts.length === 0) return null
 
   return (
-    <p className='text-xs text-gray-500 italic'>
+    <p className='text-xs text-stone-500 italic'>
       {parts.join(' | ')}
     </p>
   )

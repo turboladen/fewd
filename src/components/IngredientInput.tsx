@@ -26,8 +26,8 @@ export function IngredientRow({
         }}
         className={`text-xs px-1.5 py-1 rounded border whitespace-nowrap ${
           isRange
-            ? 'bg-blue-50 border-blue-300 text-blue-700'
-            : 'bg-gray-50 border-gray-300 text-gray-500 hover:border-blue-300'
+            ? 'bg-primary-50 border-primary-300 text-primary-700'
+            : 'bg-stone-50 border-stone-300 text-stone-500 hover:border-primary-300'
         }`}
         title={isRange ? 'Switch to exact amount' : 'Switch to range (e.g. 1-2)'}
       >
@@ -50,10 +50,10 @@ export function IngredientRow({
                       max: (ingredient.amount as { type: 'range'; min: number; max: number }).max,
                     },
                   })}
-                className='border border-gray-300 p-1 rounded w-9 text-sm'
+                className='border border-stone-300 p-1 rounded w-9 text-sm'
                 placeholder='min'
               />
-              <span className='text-gray-400 self-center'>-</span>
+              <span className='text-stone-400 self-center'>-</span>
               <input
                 type='number'
                 step='any'
@@ -67,7 +67,7 @@ export function IngredientRow({
                       max: parseFloat(e.target.value) || 0,
                     },
                   })}
-                className='border border-gray-300 p-1 rounded w-9 text-sm'
+                className='border border-stone-300 p-1 rounded w-9 text-sm'
                 placeholder='max'
               />
             </>
@@ -82,7 +82,7 @@ export function IngredientRow({
                   ...ingredient,
                   amount: { type: 'single', value: parseFloat(e.target.value) || 0 },
                 })}
-              className='border border-gray-300 p-1 rounded w-20 text-sm'
+              className='border border-stone-300 p-1 rounded w-20 text-sm'
               placeholder='Amt'
             />
           )}
@@ -91,14 +91,14 @@ export function IngredientRow({
         type='text'
         value={ingredient.unit}
         onChange={(e) => onChange({ ...ingredient, unit: e.target.value })}
-        className='border border-gray-300 p-1 rounded w-20 text-sm'
+        className='border border-stone-300 p-1 rounded w-20 text-sm'
         placeholder='Unit'
       />
       <input
         type='text'
         value={ingredient.name}
         onChange={(e) => onChange({ ...ingredient, name: e.target.value })}
-        className='border border-gray-300 p-1 rounded flex-1 text-sm'
+        className='border border-stone-300 p-1 rounded flex-1 text-sm'
         placeholder='Ingredient name'
       />
       <button
@@ -146,7 +146,7 @@ export function IngredientInput({
   return (
     <div>
       {label !== undefined && (
-        <label className='block text-sm font-medium text-gray-700 mb-1'>
+        <label className='block text-sm font-medium text-stone-700 mb-1'>
           {label}
         </label>
       )}
@@ -163,7 +163,7 @@ export function IngredientInput({
       <button
         type='button'
         onClick={addIngredient}
-        className='mt-2 text-blue-600 text-sm hover:underline'
+        className='mt-2 text-primary-600 text-sm hover:underline'
       >
         + Add ingredient
       </button>

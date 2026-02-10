@@ -77,7 +77,7 @@ function PersonServingEditor({
   }
 
   return (
-    <div className='border border-gray-200 rounded p-3 bg-gray-50'>
+    <div className='border border-stone-200 rounded p-3 bg-stone-50'>
       <div className='flex items-center gap-3 mb-2'>
         <span className='font-medium text-sm w-24'>{person.name}</span>
         <div className='flex gap-1'>
@@ -88,8 +88,8 @@ function PersonServingEditor({
               onClick={() => setMode(m)}
               className={`text-xs px-2 py-1 rounded border ${
                 mode === m
-                  ? 'bg-blue-50 border-blue-300 text-blue-700'
-                  : 'bg-white border-gray-300 text-gray-500 hover:border-blue-300'
+                  ? 'bg-primary-50 border-primary-300 text-primary-700'
+                  : 'bg-white border-stone-300 text-stone-500 hover:border-primary-300'
               }`}
             >
               {m === 'skip' ? 'Skip' : m === 'recipe' ? 'Recipe' : 'Ad-hoc'}
@@ -103,7 +103,7 @@ function PersonServingEditor({
           <select
             value={serving.recipe_id}
             onChange={(e) => onChange({ ...serving, recipe_id: e.target.value })}
-            className='border border-gray-300 p-1 rounded text-sm flex-1'
+            className='border border-stone-300 p-1 rounded text-sm flex-1'
           >
             <option value=''>Select recipe...</option>
             {recipes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
@@ -115,10 +115,10 @@ function PersonServingEditor({
             value={serving.servings_count}
             onChange={(e) =>
               onChange({ ...serving, servings_count: parseFloat(e.target.value) || 0.1 })}
-            className='border border-gray-300 p-1 rounded w-16 text-sm'
+            className='border border-stone-300 p-1 rounded w-16 text-sm'
             title='Servings count'
           />
-          <span className='text-xs text-gray-500'>servings</span>
+          <span className='text-xs text-stone-500'>servings</span>
         </div>
       )}
 
@@ -156,11 +156,11 @@ function MealSlot({
       onClick={onClick}
       className={`w-full text-left p-2 rounded border text-xs ${
         hasServings
-          ? 'bg-white border-gray-200 hover:border-blue-300'
-          : 'bg-gray-50 border-dashed border-gray-300 hover:border-blue-300 hover:bg-blue-50'
+          ? 'bg-white border-stone-200 hover:border-primary-300'
+          : 'bg-stone-50 border-dashed border-stone-300 hover:border-primary-300 hover:bg-primary-50'
       }`}
     >
-      <div className='font-medium text-gray-700 mb-1'>{mealType}</div>
+      <div className='font-medium text-stone-700 mb-1'>{mealType}</div>
       {hasServings
         ? (
           <div className='space-y-0.5'>
@@ -170,14 +170,14 @@ function MealSlot({
                 ? (recipeNames.get(s.recipe_id) ?? 'Unknown recipe')
                 : `${s.adhoc_items.length} item${s.adhoc_items.length !== 1 ? 's' : ''}`
               return (
-                <div key={i} className='text-gray-500 truncate'>
-                  <span className='text-gray-700'>{personName}</span>: {food}
+                <div key={i} className='text-stone-500 truncate'>
+                  <span className='text-stone-700'>{personName}</span>: {food}
                 </div>
               )
             })}
           </div>
         )
-        : <div className='text-gray-400'>+ Plan</div>}
+        : <div className='text-stone-400'>+ Plan</div>}
     </button>
   )
 }
@@ -204,13 +204,13 @@ function TemplateRow({
   onCancelDelete: () => void
 }) {
   return (
-    <div className='flex items-center justify-between bg-white border border-gray-200 rounded p-2'>
+    <div className='flex items-center justify-between bg-white border border-stone-200 rounded p-2'>
       <button
         onClick={() => onApply(template)}
-        className='flex-1 text-left text-sm hover:text-green-700'
+        className='flex-1 text-left text-sm hover:text-primary-700'
       >
         <span className='font-medium'>{template.name}</span>
-        <div className='text-xs text-gray-500 mt-0.5'>
+        <div className='text-xs text-stone-500 mt-0.5'>
           {template.servings.map((s) => {
             const name = people.find((p) => p.id === s.person_id)?.name ?? '?'
             const food = s.food_type === 'recipe'
@@ -232,7 +232,7 @@ function TemplateRow({
             </button>
             <button
               onClick={onCancelDelete}
-              className='text-gray-500 hover:underline'
+              className='text-stone-500 hover:underline'
             >
               No
             </button>
@@ -307,10 +307,10 @@ function TemplatePicker({
   })
 
   return (
-    <div className='border border-green-200 rounded-lg p-3 bg-green-50 mb-3'>
+    <div className='border border-primary-200 rounded-lg p-3 bg-primary-50 mb-3'>
       <div className='flex items-center justify-between mb-2'>
-        <h4 className='font-medium text-sm text-green-800'>Choose a Template</h4>
-        <button onClick={onClose} className='text-gray-400 hover:text-gray-600 text-sm'>
+        <h4 className='font-medium text-sm text-primary-800'>Choose a Template</h4>
+        <button onClick={onClose} className='text-stone-400 hover:text-stone-600 text-sm'>
           {'\u2715'}
         </button>
       </div>
@@ -324,20 +324,20 @@ function TemplatePicker({
             setConfirmingDeleteId(null)
           }}
           placeholder='Search templates...'
-          className='w-full border border-gray-300 rounded px-2 py-1 text-sm mb-2 bg-white'
+          className='w-full border border-stone-300 rounded px-2 py-1 text-sm mb-2 bg-white'
           autoFocus
         />
       )}
 
       {templates.length === 0
-        ? <p className='text-sm text-gray-500'>No templates saved yet.</p>
+        ? <p className='text-sm text-stone-500'>No templates saved yet.</p>
         : filtered.length === 0
-        ? <p className='text-sm text-gray-500'>No templates match &ldquo;{search}&rdquo;</p>
+        ? <p className='text-sm text-stone-500'>No templates match &ldquo;{search}&rdquo;</p>
         : (
           <div className='space-y-3 max-h-64 overflow-y-auto'>
             {groupOrder.map((type) => (
               <div key={type}>
-                <div className='text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1'>
+                <div className='text-xs font-semibold text-stone-500 uppercase tracking-wide mb-1'>
                   {type}
                 </div>
                 <div className='space-y-1'>
@@ -545,7 +545,7 @@ function MealEditor({
   })
 
   return (
-    <div className='border border-blue-200 rounded-lg p-4 bg-white'>
+    <div className='border border-primary-200 rounded-lg p-4 bg-white'>
       <div className='flex items-center justify-between mb-4'>
         <div>
           <h3 className='font-semibold text-lg'>
@@ -555,13 +555,13 @@ function MealEditor({
                   type='text'
                   value={customMealType}
                   onChange={(e) => setCustomMealType(e.target.value)}
-                  className='border border-gray-300 px-2 py-1 rounded text-lg font-semibold'
+                  className='border border-stone-300 px-2 py-1 rounded text-lg font-semibold'
                   placeholder='Meal name (e.g. Snack)'
                 />
               )
               : mealType}
           </h3>
-          <p className='text-sm text-gray-500'>{dateLabel}</p>
+          <p className='text-sm text-stone-500'>{dateLabel}</p>
         </div>
         <div className='flex gap-2 items-center'>
           {onDelete && (
@@ -577,7 +577,7 @@ function MealEditor({
                   </button>
                   <button
                     onClick={() => setConfirmingDelete(false)}
-                    className='text-gray-500 hover:underline'
+                    className='text-stone-500 hover:underline'
                   >
                     No
                   </button>
@@ -657,7 +657,7 @@ function MealEditor({
             value={templateName}
             onChange={(e) => setTemplateName(e.target.value)}
             placeholder='Template name...'
-            className='border border-gray-300 p-1 rounded text-sm flex-1'
+            className='border border-stone-300 p-1 rounded text-sm flex-1'
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleSaveAsTemplate()
             }}
@@ -665,13 +665,13 @@ function MealEditor({
           <button
             onClick={handleSaveAsTemplate}
             disabled={!templateName.trim()}
-            className='bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 disabled:opacity-50'
+            className='bg-primary-600 text-white px-3 py-1 rounded text-sm hover:bg-primary-700 disabled:opacity-50'
           >
             Save
           </button>
           <button
             onClick={() => setShowSaveTemplate(false)}
-            className='text-gray-500 text-sm hover:underline'
+            className='text-stone-500 text-sm hover:underline'
           >
             Cancel
           </button>
@@ -681,7 +681,7 @@ function MealEditor({
       <div className='flex gap-2'>
         <button
           onClick={handleSave}
-          className='bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700'
+          className='bg-primary-600 text-white px-4 py-2 rounded text-sm hover:bg-primary-700'
         >
           {existingMeal ? 'Save Changes' : 'Create Meal'}
         </button>
@@ -690,7 +690,7 @@ function MealEditor({
             setShowTemplatePicker(!showTemplatePicker)
             setShowSuggestionPanel(false)
           }}
-          className='border border-green-300 text-green-700 px-4 py-2 rounded text-sm hover:bg-green-50'
+          className='border border-primary-300 text-primary-700 px-4 py-2 rounded text-sm hover:bg-primary-50'
         >
           Use Template
         </button>
@@ -699,21 +699,21 @@ function MealEditor({
             setShowSuggestionPanel(!showSuggestionPanel)
             setShowTemplatePicker(false)
           }}
-          className='border border-purple-300 text-purple-700 px-4 py-2 rounded text-sm hover:bg-purple-50'
+          className='border border-secondary-300 text-secondary-700 px-4 py-2 rounded text-sm hover:bg-secondary-50'
         >
           Suggest
         </button>
         {existingMeal && onSaveAsTemplate && (
           <button
             onClick={() => setShowSaveTemplate(!showSaveTemplate)}
-            className='border border-gray-300 text-gray-600 px-4 py-2 rounded text-sm hover:bg-gray-50'
+            className='border border-stone-300 text-stone-600 px-4 py-2 rounded text-sm hover:bg-stone-50'
           >
             Save as Template
           </button>
         )}
         <button
           onClick={onCancel}
-          className='border border-gray-300 px-4 py-2 rounded text-sm text-gray-600 hover:bg-gray-50'
+          className='border border-stone-300 px-4 py-2 rounded text-sm text-stone-600 hover:bg-stone-50'
         >
           Cancel
         </button>
@@ -901,32 +901,32 @@ export function MealPlanner() {
     weekDates[6].toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   }`
 
-  if (mealsLoading) return <div className='p-6 text-gray-500 animate-pulse'>Loading...</div>
+  if (mealsLoading) return <div className='p-6 text-stone-500 animate-pulse'>Loading...</div>
 
   return (
     <div className='p-6'>
       {/* Header */}
       <div className='flex items-center justify-between mb-6'>
-        <h1 className='text-2xl font-bold text-gray-900'>Meal Planner</h1>
+        <h1 className='text-2xl font-bold text-stone-900'>Meal Planner</h1>
         <div className='flex items-center gap-3'>
           <button
             onClick={prevWeek}
-            className='px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50'
+            className='px-3 py-1 border border-stone-300 rounded text-sm hover:bg-stone-50'
           >
             {'\u2190'} Prev
           </button>
-          <span className='text-sm font-medium text-gray-700 min-w-[180px] text-center'>
+          <span className='text-sm font-medium text-stone-700 min-w-[180px] text-center'>
             {weekRangeLabel}
           </span>
           <button
             onClick={nextWeek}
-            className='px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50'
+            className='px-3 py-1 border border-stone-300 rounded text-sm hover:bg-stone-50'
           >
             Next {'\u2192'}
           </button>
           <button
             onClick={goToToday}
-            className='px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700'
+            className='px-3 py-1 bg-primary-600 text-white rounded text-sm hover:bg-primary-700'
           >
             Today
           </button>
@@ -951,14 +951,16 @@ export function MealPlanner() {
               key={dateKey}
               className={`rounded-lg border p-2 min-h-[200px] ${
                 isToday(date)
-                  ? 'bg-blue-50 border-blue-200'
-                  : 'bg-white border-gray-200'
+                  ? 'bg-primary-50 border-primary-200'
+                  : 'bg-white border-stone-200'
               }`}
             >
               {/* Day header */}
               <div
                 className={`text-center text-sm font-medium mb-2 pb-1 border-b ${
-                  isToday(date) ? 'text-blue-700 border-blue-200' : 'text-gray-700 border-gray-100'
+                  isToday(date)
+                    ? 'text-primary-700 border-primary-200'
+                    : 'text-stone-700 border-stone-100'
                 }`}
               >
                 {formatDateDisplay(date)}
@@ -1003,7 +1005,7 @@ export function MealPlanner() {
                 {/* Add custom meal */}
                 <button
                   onClick={() => handleAddCustomMeal(dateKey)}
-                  className='w-full text-xs text-gray-400 hover:text-blue-600 py-1'
+                  className='w-full text-xs text-stone-400 hover:text-primary-600 py-1'
                 >
                   + meal
                 </button>

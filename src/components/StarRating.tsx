@@ -29,7 +29,7 @@ export function StarRating({ value, onChange, size = 'md' }: StarRatingProps) {
             onClick={interactive ? () => onChange?.(starIndex) : undefined}
             onMouseEnter={interactive ? () => setHoverValue(starIndex) : undefined}
             className={`${interactive ? 'cursor-pointer' : ''} ${
-              filled ? 'text-amber-400' : 'text-gray-300'
+              filled ? 'text-amber-400' : 'text-stone-300'
             }`}
           >
             {filled ? '\u2605' : '\u2606'}

@@ -131,16 +131,16 @@ export function AdaptRecipePanel({
   // No API key message
   if (!hasApiKey && !apiKeyQuery.isLoading) {
     return (
-      <div className='border border-teal-200 rounded-lg p-4 bg-teal-50'>
-        <h3 className='font-semibold text-lg mb-3 text-teal-900'>
+      <div className='border border-secondary-200 rounded-lg p-4 bg-secondary-50'>
+        <h3 className='font-semibold text-lg mb-3 text-secondary-900'>
           Adapt: {parsed.name}
         </h3>
-        <div className='text-sm text-teal-700 mb-3'>
+        <div className='text-sm text-secondary-700 mb-3'>
           Set your Anthropic API key in Settings to use AI features.
         </div>
         <button
           onClick={onCancel}
-          className='border border-gray-300 px-4 py-2 rounded text-sm text-gray-600 hover:bg-gray-50'
+          className='border border-stone-300 px-4 py-2 rounded text-sm text-stone-600 hover:bg-stone-50'
         >
           Cancel
         </button>
@@ -151,8 +151,8 @@ export function AdaptRecipePanel({
   // Review phase
   if (phase === 'review') {
     return (
-      <div className='border border-teal-200 rounded-lg p-4 bg-teal-50'>
-        <h3 className='font-semibold text-lg mb-3 text-teal-900'>
+      <div className='border border-secondary-200 rounded-lg p-4 bg-secondary-50'>
+        <h3 className='font-semibold text-lg mb-3 text-secondary-900'>
           Adapt: {parsed.name}
         </h3>
         <DraftReview
@@ -179,14 +179,14 @@ export function AdaptRecipePanel({
 
   // Configure phase
   return (
-    <div className='border border-teal-200 rounded-lg p-4 bg-teal-50'>
-      <h3 className='font-semibold text-lg mb-3 text-teal-900'>
+    <div className='border border-secondary-200 rounded-lg p-4 bg-secondary-50'>
+      <h3 className='font-semibold text-lg mb-3 text-secondary-900'>
         Adapt: {parsed.name}
       </h3>
 
       {/* Person selection */}
       <div className='mb-4'>
-        <p className='text-sm font-medium text-gray-700 mb-2'>Adapt for:</p>
+        <p className='text-sm font-medium text-stone-700 mb-2'>Adapt for:</p>
         <div className='space-y-2'>
           {activePeople.map((person) => {
             const toggle = personToggles[person.id]
@@ -198,8 +198,8 @@ export function AdaptRecipePanel({
                 <label
                   className={`flex items-center gap-2 text-sm px-3 py-2 rounded border cursor-pointer ${
                     toggle.selected
-                      ? 'bg-teal-100 border-teal-400'
-                      : 'bg-white border-gray-200'
+                      ? 'bg-secondary-100 border-secondary-400'
+                      : 'bg-white border-stone-200'
                   }`}
                 >
                   <input
@@ -208,7 +208,7 @@ export function AdaptRecipePanel({
                     onChange={() => togglePerson(person.id)}
                     className='sr-only'
                   />
-                  <span className='text-teal-700'>
+                  <span className='text-secondary-700'>
                     {toggle.selected ? '\u2713' : ''}
                   </span>
                   <span className='font-medium'>{person.name}</span>
@@ -249,14 +249,14 @@ export function AdaptRecipePanel({
 
       {/* Instructions */}
       <div className='mb-4'>
-        <label className='block text-sm font-medium text-gray-700 mb-1'>
+        <label className='block text-sm font-medium text-stone-700 mb-1'>
           Additional instructions
         </label>
         <textarea
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
           placeholder='e.g., Make this keto-friendly, use chicken thighs instead...'
-          className='w-full border border-gray-300 rounded px-3 py-2 text-sm'
+          className='w-full border border-stone-300 rounded px-3 py-2 text-sm'
           rows={3}
         />
       </div>
@@ -266,13 +266,13 @@ export function AdaptRecipePanel({
         <button
           onClick={handleGenerate}
           disabled={selectedCount === 0}
-          className='bg-teal-600 text-white px-4 py-2 rounded text-sm hover:bg-teal-700 disabled:opacity-50'
+          className='bg-secondary-600 text-white px-4 py-2 rounded text-sm hover:bg-secondary-700 disabled:opacity-50'
         >
           Generate Adapted Recipe
         </button>
         <button
           onClick={onCancel}
-          className='border border-gray-300 px-4 py-2 rounded text-sm text-gray-600 hover:bg-gray-50'
+          className='border border-stone-300 px-4 py-2 rounded text-sm text-stone-600 hover:bg-stone-50'
         >
           Cancel
         </button>
@@ -291,19 +291,19 @@ function RecipePreview({ draft }: { draft: CreateRecipeDto }) {
         <h4 className='font-semibold text-lg'>{draft.name}</h4>
       </div>
 
-      {draft.description && <p className='text-sm text-gray-600'>{draft.description}</p>}
+      {draft.description && <p className='text-sm text-stone-600'>{draft.description}</p>}
 
-      <p className='text-sm text-gray-500'>Serves {draft.servings}</p>
+      <p className='text-sm text-stone-500'>Serves {draft.servings}</p>
 
       {/* Ingredients */}
       <div>
         <h5 className='text-sm font-medium mb-1'>Ingredients</h5>
         <ul className='text-sm space-y-0.5'>
           {draft.ingredients.map((ing, i) => (
-            <li key={i} className='text-gray-700'>
+            <li key={i} className='text-stone-700'>
               <span className='font-medium'>{formatAmount(ing.amount)}</span>
               {ing.unit && ` ${ing.unit}`} {ing.name}
-              {ing.notes && <span className='text-gray-400'>({ing.notes})</span>}
+              {ing.notes && <span className='text-stone-400'>({ing.notes})</span>}
             </li>
           ))}
         </ul>
@@ -312,7 +312,7 @@ function RecipePreview({ draft }: { draft: CreateRecipeDto }) {
       {/* Instructions (truncated) */}
       <div>
         <h5 className='text-sm font-medium mb-1'>Instructions</h5>
-        <p className='text-sm text-gray-700 whitespace-pre-wrap line-clamp-6'>
+        <p className='text-sm text-stone-700 whitespace-pre-wrap line-clamp-6'>
           {draft.instructions}
         </p>
       </div>
@@ -321,7 +321,7 @@ function RecipePreview({ draft }: { draft: CreateRecipeDto }) {
       {draft.tags.length > 0 && (
         <div className='flex flex-wrap gap-1'>
           {draft.tags.map((tag, i) => (
-            <span key={i} className='bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded'>
+            <span key={i} className='bg-stone-100 text-stone-600 text-xs px-2 py-0.5 rounded'>
               {tag}
             </span>
           ))}
@@ -330,7 +330,7 @@ function RecipePreview({ draft }: { draft: CreateRecipeDto }) {
 
       {/* Adaptation notes */}
       {draft.notes && (
-        <div className='text-xs text-gray-500 italic border-t border-gray-200 pt-2 mt-2'>
+        <div className='text-xs text-stone-500 italic border-t border-stone-200 pt-2 mt-2'>
           {draft.notes}
         </div>
       )}

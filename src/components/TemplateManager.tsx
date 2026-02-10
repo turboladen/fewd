@@ -103,7 +103,7 @@ export function TemplateManager() {
     }).join(', ')
   }
 
-  if (isLoading) return <div className='p-6 text-gray-500 animate-pulse'>Loading...</div>
+  if (isLoading) return <div className='p-6 text-stone-500 animate-pulse'>Loading...</div>
 
   if (error) {
     return (
@@ -118,7 +118,7 @@ export function TemplateManager() {
   return (
     <div className='p-6'>
       <div className='flex items-center justify-between mb-6'>
-        <h1 className='text-2xl font-bold text-gray-900'>Meal Templates</h1>
+        <h1 className='text-2xl font-bold text-stone-900'>Meal Templates</h1>
       </div>
 
       {templates.length > 0 && (
@@ -130,13 +130,13 @@ export function TemplateManager() {
             setConfirmingDeleteId(null)
           }}
           placeholder='Search templates...'
-          className='w-full max-w-md border border-gray-300 rounded px-3 py-2 text-sm mb-4'
+          className='w-full max-w-md border border-stone-300 rounded px-3 py-2 text-sm mb-4'
         />
       )}
 
       {templates.length === 0
         ? (
-          <div className='text-center py-12 text-gray-500'>
+          <div className='text-center py-12 text-stone-500'>
             <p className='text-lg mb-2'>No templates yet</p>
             <p className='text-sm'>
               Save a meal as a template from the Planner tab to get started.
@@ -144,19 +144,19 @@ export function TemplateManager() {
           </div>
         )
         : filtered.length === 0
-        ? <p className='text-sm text-gray-500'>No templates match &ldquo;{search}&rdquo;</p>
+        ? <p className='text-sm text-stone-500'>No templates match &ldquo;{search}&rdquo;</p>
         : (
           <div className='space-y-6'>
             {groupOrder.map((type) => (
               <div key={type}>
-                <h2 className='text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2'>
+                <h2 className='text-sm font-semibold text-stone-500 uppercase tracking-wide mb-2'>
                   {type}
                 </h2>
                 <div className='space-y-2'>
                   {groups.get(type)!.map((template) => (
                     <div
                       key={template.id}
-                      className='bg-white border border-gray-200 rounded-lg p-4'
+                      className='bg-white border border-stone-200 rounded-lg p-4'
                     >
                       {editingId === template.id
                         ? (
@@ -166,7 +166,7 @@ export function TemplateManager() {
                                 type='text'
                                 value={editName}
                                 onChange={(e) => setEditName(e.target.value)}
-                                className='border border-gray-300 px-2 py-1 rounded text-sm flex-1'
+                                className='border border-stone-300 px-2 py-1 rounded text-sm flex-1'
                                 placeholder='Template name'
                                 autoFocus
                                 onKeyDown={(e) => {
@@ -176,25 +176,25 @@ export function TemplateManager() {
                               <select
                                 value={editMealType}
                                 onChange={(e) => setEditMealType(e.target.value)}
-                                className='border border-gray-300 px-2 py-1 rounded text-sm'
+                                className='border border-stone-300 px-2 py-1 rounded text-sm'
                               >
                                 {MEAL_TYPES.map((mt) => <option key={mt} value={mt}>{mt}</option>)}
                               </select>
                             </div>
-                            <div className='text-xs text-gray-500'>
+                            <div className='text-xs text-stone-500'>
                               {servingSummary(template)}
                             </div>
                             <div className='flex gap-2'>
                               <button
                                 onClick={handleSaveEdit}
                                 disabled={!editName.trim()}
-                                className='bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 disabled:opacity-50'
+                                className='bg-primary-600 text-white px-3 py-1 rounded text-sm hover:bg-primary-700 disabled:opacity-50'
                               >
                                 Save
                               </button>
                               <button
                                 onClick={() => setEditingId(null)}
-                                className='border border-gray-300 px-3 py-1 rounded text-sm text-gray-600 hover:bg-gray-50'
+                                className='border border-stone-300 px-3 py-1 rounded text-sm text-stone-600 hover:bg-stone-50'
                               >
                                 Cancel
                               </button>
@@ -210,14 +210,14 @@ export function TemplateManager() {
                           <div className='flex items-center justify-between'>
                             <div>
                               <span className='font-medium'>{template.name}</span>
-                              <div className='text-xs text-gray-500 mt-0.5'>
+                              <div className='text-xs text-stone-500 mt-0.5'>
                                 {servingSummary(template)}
                               </div>
                             </div>
                             <div className='flex gap-2 items-center'>
                               <button
                                 onClick={() => startEditing(template)}
-                                className='text-blue-600 text-sm hover:underline'
+                                className='text-primary-600 text-sm hover:underline'
                               >
                                 Edit
                               </button>
@@ -233,7 +233,7 @@ export function TemplateManager() {
                                     </button>
                                     <button
                                       onClick={() => setConfirmingDeleteId(null)}
-                                      className='text-gray-500 hover:underline'
+                                      className='text-stone-500 hover:underline'
                                     >
                                       No
                                     </button>

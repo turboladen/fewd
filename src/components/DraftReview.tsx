@@ -27,27 +27,27 @@ export function DraftReview({
 }: DraftReviewProps) {
   if (isLoading) {
     return (
-      <div className='border border-blue-200 rounded-lg p-4 bg-blue-50'>
+      <div className='border border-primary-200 rounded-lg p-4 bg-primary-50'>
         <div className='flex items-center gap-3'>
           <div className='flex gap-1'>
             <div
-              className='w-2 h-2 bg-blue-400 rounded-full animate-bounce'
+              className='w-2 h-2 bg-primary-400 rounded-full animate-bounce'
               style={{ animationDelay: '0ms' }}
             />
             <div
-              className='w-2 h-2 bg-blue-400 rounded-full animate-bounce'
+              className='w-2 h-2 bg-primary-400 rounded-full animate-bounce'
               style={{ animationDelay: '150ms' }}
             />
             <div
-              className='w-2 h-2 bg-blue-400 rounded-full animate-bounce'
+              className='w-2 h-2 bg-primary-400 rounded-full animate-bounce'
               style={{ animationDelay: '300ms' }}
             />
           </div>
-          <span className='text-sm text-blue-700'>Generating...</span>
+          <span className='text-sm text-primary-700'>Generating...</span>
           {onCancel && (
             <button
               onClick={onCancel}
-              className='ml-auto text-sm text-gray-500 hover:text-gray-700'
+              className='ml-auto text-sm text-stone-500 hover:text-stone-700'
             >
               Cancel
             </button>
@@ -74,31 +74,31 @@ export function DraftReview({
   }
 
   return (
-    <div className='border border-green-200 rounded-lg p-4 bg-green-50'>
+    <div className='border border-primary-200 rounded-lg p-4 bg-primary-50'>
       <div className='mb-3'>{children}</div>
       <div className='flex gap-2'>
         <button
           onClick={onAccept}
-          className='bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700'
+          className='bg-primary-600 text-white px-3 py-1.5 rounded text-sm hover:bg-primary-700'
         >
           {acceptLabel}
         </button>
         <button
           onClick={onEdit}
-          className='bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700'
+          className='bg-primary-600 text-white px-3 py-1.5 rounded text-sm hover:bg-primary-700'
         >
           {editLabel}
         </button>
         <button
           onClick={onReject}
-          className='bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-300'
+          className='bg-stone-200 text-stone-700 px-3 py-1.5 rounded text-sm hover:bg-stone-300'
         >
           {rejectLabel}
         </button>
         {onRegenerate && (
           <button
             onClick={onRegenerate}
-            className='ml-auto text-sm text-gray-500 hover:text-gray-700'
+            className='ml-auto text-sm text-stone-500 hover:text-stone-700'
           >
             Regenerate
           </button>
