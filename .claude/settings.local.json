@@ -41,7 +41,10 @@
       "Bash(rustup target list:*)",
       "Bash(rustup show:*)",
       "Bash(rustup target add:*)",
-      "Bash(cargo add:*)"
+      "Bash(cargo add:*)",
+      "WebFetch(domain:tauri.app)",
+      "Bash(npx tauri:*)",
+      "Bash(bun run tauri build:*)"
     ]
   }
 }

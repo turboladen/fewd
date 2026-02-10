@@ -37,10 +37,33 @@ The first run will take a few minutes to compile Rust dependencies. Subsequent r
 ### Build for Production
 
 ```bash
+# Build for current architecture
 bun run tauri build
+
+# Build macOS universal binary (Intel + Apple Silicon)
+bun run tauri:build:universal
 ```
 
-Output will be in `src-tauri/target/release/bundle/`.
+**Universal binary prerequisites (one-time setup):**
+
+```bash
+rustup target add x86_64-apple-darwin    # Intel
+rustup target add aarch64-apple-darwin   # Apple Silicon (likely already installed)
+```
+
+**Output locations:**
+
+- Single-arch: `src-tauri/target/release/bundle/`
+- Universal: `src-tauri/target/universal-apple-darwin/release/bundle/`
+
+Each contains `macos/fewd.app` and `dmg/fewd_*.dmg`.
+
+**Distribute to another Mac:**
+
+1. Build with `bun run tauri:build:universal`
+2. Copy the `.dmg` from the output `dmg/` folder to the other Mac
+3. Open the `.dmg` and drag the app to Applications
+4. First launch: right-click → Open (to bypass Gatekeeper), or run `xattr -cr /Applications/fewd.app`
 
 ## Current Status
 
@@ -126,10 +149,12 @@ fewd/
 
 ### Database
 
-SQLite database is stored locally:
+SQLite database location (default, configurable via Settings):
 
 - **Dev:** `~/Library/Application Support/com.fewd.dev/fewd.db`
 - **Production:** `~/Library/Application Support/com.fewd/fewd.db`
+
+Use Settings → Database Location to point the database at a shared folder (e.g., iCloud Drive) for multi-Mac access.
 
 Inspect with: `sqlite3 ~/Library/Application\ Support/com.fewd.dev/fewd.db`
 
