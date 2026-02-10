@@ -1,9 +1,12 @@
+import { open } from '@tauri-apps/plugin-dialog'
 import { useEffect, useState } from 'react'
 import {
   useCreateRecipe,
   useDeleteRecipe,
   useEnhanceInstructions,
   useImportRecipe,
+  useImportRecipeFromFile,
+  useImportRecipeFromUrl,
   usePreviewScaleRecipe,
   useRecipes,
   useToggleFavorite,
@@ -321,57 +324,210 @@ function RecipeForm({
 // --- Import Form ---
 
 function ImportRecipeForm({
-  onSubmit,
+  onSubmitMarkdown,
+  onSubmitUrl,
+  onSubmitFile,
   onCancel,
-  error,
+  markdownError,
+  urlError,
+  fileError,
+  urlLoading,
+  fileLoading,
 }: {
-  onSubmit: (markdown: string) => void
+  onSubmitMarkdown: (markdown: string) => void
+  onSubmitUrl: (url: string) => void
+  onSubmitFile: (filePath: string) => void
   onCancel: () => void
-  error?: string
+  markdownError?: string
+  urlError?: string
+  fileError?: string
+  urlLoading?: boolean
+  fileLoading?: boolean
 }) {
+  const [importMode, setImportMode] = useState<'markdown' | 'url' | 'pdf'>('url')
   const [markdown, setMarkdown] = useState('')
+  const [url, setUrl] = useState('')
+  const [selectedFile, setSelectedFile] = useState<string | null>(null)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleMarkdownSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onSubmit(markdown)
+    onSubmitMarkdown(markdown)
   }
 
+  const handleUrlSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    onSubmitUrl(url)
+  }
+
+  const handleChooseFile = async () => {
+    const result = await open({
+      multiple: false,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    })
+    if (result) {
+      setSelectedFile(result)
+    }
+  }
+
+  const handleFileSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (selectedFile) {
+      onSubmitFile(selectedFile)
+    }
+  }
+
+  const tabs: { key: typeof importMode; label: string }[] = [
+    { key: 'url', label: 'From URL' },
+    { key: 'pdf', label: 'From PDF' },
+    { key: 'markdown', label: 'Paste Markdown' },
+  ]
+
   return (
-    <form onSubmit={handleSubmit} className='space-y-3'>
-      <div>
-        <label className='block text-sm font-medium text-gray-700 mb-1'>
-          Paste recipe markdown
-        </label>
-        <textarea
-          required
-          value={markdown}
-          onChange={(e) => setMarkdown(e.target.value)}
-          className='border border-gray-300 p-2 rounded w-full font-mono text-sm'
-          rows={12}
-          placeholder={`# Recipe Name\nDescription here\nPrep time: 15 min\nServings: 4\n\n## Ingredients\n- 2 cups flour\n- 1 tsp salt\n\n## Instructions\n1. Mix ingredients...\n\n## Tags\ndinner, quick`}
-        />
+    <div className='space-y-3'>
+      <div className='flex gap-1 border-b border-gray-200'>
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setImportMode(tab.key)}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
+              importMode === tab.key
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
-      {error && (
-        <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
-          {error}
-        </div>
+
+      {importMode === 'markdown' && (
+        <form onSubmit={handleMarkdownSubmit} className='space-y-3'>
+          <div>
+            <label className='block text-sm font-medium text-gray-700 mb-1'>
+              Paste recipe markdown
+            </label>
+            <textarea
+              required
+              value={markdown}
+              onChange={(e) => setMarkdown(e.target.value)}
+              className='border border-gray-300 p-2 rounded w-full font-mono text-sm'
+              rows={12}
+              placeholder={`# Recipe Name\nDescription here\nPrep time: 15 min\nServings: 4\n\n## Ingredients\n- 2 cups flour\n- 1 tsp salt\n\n## Instructions\n1. Mix ingredients...\n\n## Tags\ndinner, quick`}
+            />
+          </div>
+          {markdownError && (
+            <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+              {markdownError}
+            </div>
+          )}
+          <div className='flex gap-2'>
+            <button
+              type='submit'
+              className='bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700'
+            >
+              Import
+            </button>
+            <button
+              type='button'
+              onClick={onCancel}
+              className='border border-gray-300 px-4 py-2 rounded hover:bg-gray-50'
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
       )}
-      <div className='flex gap-2'>
-        <button
-          type='submit'
-          className='bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700'
-        >
-          Import
-        </button>
-        <button
-          type='button'
-          onClick={onCancel}
-          className='border border-gray-300 px-4 py-2 rounded hover:bg-gray-50'
-        >
-          Cancel
-        </button>
-      </div>
-    </form>
+
+      {importMode === 'url' && (
+        <form onSubmit={handleUrlSubmit} className='space-y-3'>
+          <div>
+            <label className='block text-sm font-medium text-gray-700 mb-1'>
+              Recipe URL
+            </label>
+            <input
+              type='url'
+              required
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder='https://example.com/recipe/...'
+              className='border border-gray-300 p-2 rounded w-full text-sm'
+            />
+            <p className='text-xs text-gray-500 mt-1'>
+              Paste a link to a recipe page. AI will extract the recipe automatically.
+            </p>
+          </div>
+          {urlError && (
+            <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+              {urlError}
+            </div>
+          )}
+          <div className='flex gap-2'>
+            <button
+              type='submit'
+              disabled={urlLoading}
+              className='bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-wait'
+            >
+              {urlLoading ? 'Analyzing recipe...' : 'Import'}
+            </button>
+            <button
+              type='button'
+              onClick={onCancel}
+              disabled={urlLoading}
+              className='border border-gray-300 px-4 py-2 rounded hover:bg-gray-50 disabled:opacity-50'
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {importMode === 'pdf' && (
+        <form onSubmit={handleFileSubmit} className='space-y-3'>
+          <div>
+            <label className='block text-sm font-medium text-gray-700 mb-1'>
+              PDF File
+            </label>
+            <div className='flex gap-2 items-center'>
+              <button
+                type='button'
+                onClick={handleChooseFile}
+                className='border border-gray-300 px-3 py-2 rounded text-sm hover:bg-gray-50'
+              >
+                Choose File
+              </button>
+              <span className='text-sm text-gray-600'>
+                {selectedFile ? selectedFile.split('/').pop() : 'No file selected'}
+              </span>
+            </div>
+            <p className='text-xs text-gray-500 mt-1'>
+              Select a PDF with recipe text. AI will extract the recipe automatically.
+            </p>
+          </div>
+          {fileError && (
+            <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+              {fileError}
+            </div>
+          )}
+          <div className='flex gap-2'>
+            <button
+              type='submit'
+              disabled={!selectedFile || fileLoading}
+              className='bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-wait'
+            >
+              {fileLoading ? 'Analyzing recipe...' : 'Import'}
+            </button>
+            <button
+              type='button'
+              onClick={onCancel}
+              disabled={fileLoading}
+              className='border border-gray-300 px-4 py-2 rounded hover:bg-gray-50 disabled:opacity-50'
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
   )
 }
 
@@ -853,6 +1009,8 @@ export function RecipeManager() {
   const deleteMutation = useDeleteRecipe()
   const toggleFavoriteMutation = useToggleFavorite()
   const importMutation = useImportRecipe()
+  const importUrlMutation = useImportRecipeFromUrl()
+  const importFileMutation = useImportRecipeFromFile()
 
   const [searchQuery, setSearchQuery] = useState('')
   const [viewMode, setViewMode] = useState<'list' | 'add' | 'import'>('list')
@@ -938,6 +1096,18 @@ export function RecipeManager() {
 
   const handleImport = (markdown: string) => {
     importMutation.mutate({ markdown }, {
+      onSuccess: () => setViewMode('list'),
+    })
+  }
+
+  const handleImportFromUrl = (url: string) => {
+    importUrlMutation.mutate({ url }, {
+      onSuccess: () => setViewMode('list'),
+    })
+  }
+
+  const handleImportFromFile = (filePath: string) => {
+    importFileMutation.mutate({ file_path: filePath }, {
       onSuccess: () => setViewMode('list'),
     })
   }
@@ -1041,7 +1211,7 @@ export function RecipeManager() {
               onClick={() => setViewMode('import')}
               className='border border-gray-300 px-4 py-2 rounded hover:bg-gray-50'
             >
-              Import Markdown
+              Import
             </button>
           </div>
         )}
@@ -1066,11 +1236,17 @@ export function RecipeManager() {
 
       {viewMode === 'import' && (
         <div className='mb-6 border border-gray-200 p-4 rounded-lg bg-white'>
-          <h3 className='font-semibold text-lg mb-3'>Import Recipe from Markdown</h3>
+          <h3 className='font-semibold text-lg mb-3'>Import Recipe</h3>
           <ImportRecipeForm
-            onSubmit={handleImport}
+            onSubmitMarkdown={handleImport}
+            onSubmitUrl={handleImportFromUrl}
+            onSubmitFile={handleImportFromFile}
             onCancel={() => setViewMode('list')}
-            error={importMutation.error ? String(importMutation.error) : undefined}
+            markdownError={importMutation.error ? String(importMutation.error) : undefined}
+            urlError={importUrlMutation.error ? String(importUrlMutation.error) : undefined}
+            fileError={importFileMutation.error ? String(importFileMutation.error) : undefined}
+            urlLoading={importUrlMutation.isPending}
+            fileLoading={importFileMutation.isPending}
           />
         </div>
       )}

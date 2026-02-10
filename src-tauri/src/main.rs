@@ -41,6 +41,8 @@ fn main() {
             recipe::preview_scale_recipe,
             recipe::enhance_recipe_instructions,
             recipe::adapt_recipe,
+            recipe::import_recipe_from_url,
+            recipe::import_recipe_from_file,
             meal::get_meals_for_date_range,
             meal::get_meal,
             meal::create_meal,

@@ -6,6 +6,7 @@ use crate::services::claude_client::ClaudeClient;
 use crate::services::person_service::PersonService;
 use crate::services::recipe_adapter::{PersonAdaptOptions, RecipeAdapter};
 use crate::services::recipe_enhancer;
+use crate::services::recipe_import_service::RecipeImportService;
 use crate::services::recipe_parser::RecipeParser;
 use crate::services::recipe_scaler;
 use crate::services::recipe_service::RecipeService;
@@ -30,15 +31,32 @@ pub struct PortionSizeDto {
 #[serde(tag = "type")]
 pub enum IngredientAmountDto {
     #[serde(rename = "single")]
-    Single { value: f64 },
+    Single {
+        #[serde(deserialize_with = "deserialize_f64_or_null")]
+        value: f64,
+    },
     #[serde(rename = "range")]
-    Range { min: f64, max: f64 },
+    Range {
+        #[serde(deserialize_with = "deserialize_f64_or_null")]
+        min: f64,
+        #[serde(deserialize_with = "deserialize_f64_or_null")]
+        max: f64,
+    },
+}
+
+/// Deserialize an f64 that may be null (AI sometimes returns null for "to taste" amounts)
+fn deserialize_f64_or_null<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<f64>::deserialize(deserializer).map(|opt| opt.unwrap_or(0.0))
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct IngredientDto {
     pub name: String,
     pub amount: IngredientAmountDto,
+    #[serde(default)]
     pub unit: String,
     pub notes: Option<String>,
 }
@@ -313,4 +331,102 @@ pub async fn adapt_recipe(
         .await;
 
     Ok(result.recipe)
+}
+
+// --- AI Import ---
+
+#[derive(Debug, Deserialize)]
+pub struct ImportRecipeFromUrlDto {
+    pub url: String,
+}
+
+#[tauri::command]
+pub async fn import_recipe_from_url(
+    state: State<'_, AppState>,
+    data: ImportRecipeFromUrlDto,
+) -> Result<recipe::Model, String> {
+    let api_key = SettingsService::get(&state.db, "anthropic_api_key".to_string())
+        .await
+        .map_err(|e| format!("Failed to read API key: {}", e))?
+        .ok_or_else(|| "No API key configured. Set it in Settings.".to_string())?;
+    if api_key.is_empty() {
+        return Err("No API key configured. Set it in Settings.".to_string());
+    }
+
+    let model = SettingsService::get(&state.db, "claude_model".to_string())
+        .await
+        .map_err(|e| format!("Failed to read model: {}", e))?
+        .unwrap_or_else(|| ClaudeClient::default_model().to_string());
+
+    eprintln!("Importing recipe from URL: {}", data.url);
+
+    let result = RecipeImportService::import_from_url(&api_key, &model, &data.url)
+        .await
+        .map_err(|e| {
+            eprintln!("URL import failed: {}", e);
+            format!("Import failed: {}", e)
+        })?;
+
+    eprintln!(
+        "Import tokens — input: {}, output: {}",
+        result.input_tokens, result.output_tokens
+    );
+
+    SettingsService::increment_token_usage(&state.db, result.input_tokens, result.output_tokens)
+        .await;
+
+    RecipeService::create(&state.db, result.recipe)
+        .await
+        .map_err(|e| {
+            eprintln!("Failed to save imported recipe: {}", e);
+            format!("Could not save recipe: {}", e)
+        })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ImportRecipeFromFileDto {
+    pub file_path: String,
+}
+
+#[tauri::command]
+pub async fn import_recipe_from_file(
+    state: State<'_, AppState>,
+    data: ImportRecipeFromFileDto,
+) -> Result<recipe::Model, String> {
+    let api_key = SettingsService::get(&state.db, "anthropic_api_key".to_string())
+        .await
+        .map_err(|e| format!("Failed to read API key: {}", e))?
+        .ok_or_else(|| "No API key configured. Set it in Settings.".to_string())?;
+    if api_key.is_empty() {
+        return Err("No API key configured. Set it in Settings.".to_string());
+    }
+
+    let model = SettingsService::get(&state.db, "claude_model".to_string())
+        .await
+        .map_err(|e| format!("Failed to read model: {}", e))?
+        .unwrap_or_else(|| ClaudeClient::default_model().to_string());
+
+    eprintln!("Importing recipe from file: {}", data.file_path);
+
+    let result = RecipeImportService::import_from_pdf(&api_key, &model, &data.file_path)
+        .await
+        .map_err(|e| {
+            eprintln!("File import failed: {}", e);
+            format!("Import failed: {}", e)
+        })?;
+
+    eprintln!(
+        "Import tokens — input: {}, output: {}",
+        result.input_tokens, result.output_tokens
+    );
+
+    SettingsService::increment_token_usage(&state.db, result.input_tokens, result.output_tokens)
+        .await;
+
+    RecipeService::create(&state.db, result.recipe)
+        .await
+        .map_err(|e| {
+            eprintln!("Failed to save imported recipe: {}", e);
+            format!("Could not save recipe: {}", e)
+        })
 }

@@ -106,3 +106,26 @@ export function useImportRecipe() {
     },
   })
 }
+
+export function useImportRecipeFromUrl() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (data: { url: string }) => invoke<Recipe>('import_recipe_from_url', { data }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['recipes'] })
+    },
+  })
+}
+
+export function useImportRecipeFromFile() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (data: { file_path: string }) =>
+      invoke<Recipe>('import_recipe_from_file', { data }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['recipes'] })
+    },
+  })
+}

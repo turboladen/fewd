@@ -475,6 +475,116 @@
 
 ---
 
+## Phase 15: App Icon
+
+**Goal:** Replace the Tauri placeholder icon (solid blue square) with a custom app icon.
+
+### Tasks:
+
+**15.1: Create Icon Source**
+
+- Design a programmatic SVG: fork and knife crossed over a circular plate, sage green background
+- Simple geometric shapes that read well at 32x32
+
+**15.2: Generate All Sizes**
+
+- Convert SVG to 1024x1024 PNG
+- Run `cargo tauri icon` to generate all required sizes (512, 256, 128, 32, .ico, .icns)
+- Replace files in `src-tauri/icons/`
+
+**Verify Phase 15:**
+
+- [ ] Dock icon shows the new design in dev mode
+- [ ] `.app` and `.dmg` bundles show the icon
+
+**Deliverable:** Custom app icon
+
+---
+
+## Phase 16: AI Recipe Import (URL + PDF)
+
+**Goal:** Add URL and PDF import methods alongside existing markdown import, using AI to extract recipes from unstructured content.
+
+### Tasks:
+
+**16.1: Backend — New Service**
+
+- Add `pdf-extract` and `html2text` crate dependencies
+- Create `recipe_import_service.rs` with `import_from_url()` and `import_from_pdf()`
+- URL import: fetch HTML via reqwest, try JSON-LD extraction first, fall back to html2text, send to Claude
+- PDF import: extract text via pdf-extract, send to Claude
+- Claude system prompt: "Extract the recipe and return JSON matching CreateRecipeDto schema"
+- Reuse `strip_code_fences` from recipe_adapter, extract shared JSON schema
+- Error types: NetworkError, PdfError, ContentTooShort, AiError, ParseError
+
+**16.2: Backend — New Commands**
+
+- Add `import_recipe_from_url` command (fetch + AI extract + save + track tokens)
+- Add `import_recipe_from_file` command (read PDF + AI extract + save + track tokens)
+- Follow existing `adapt_recipe` pattern for API key/model/token tracking
+- Register commands in main.rs
+
+**16.3: Frontend — Import UI**
+
+- Add `useImportRecipeFromUrl` and `useImportRecipeFromFile` mutation hooks
+- Update `ImportRecipeForm` with three-tab UI: Markdown (existing), URL, PDF
+- URL tab: text input + "Import" button with "Analyzing recipe with AI..." loading state
+- PDF tab: file picker via `@tauri-apps/plugin-dialog` with PDF filter + "Import" button
+- Rename "Import Markdown" button to "Import"
+
+**Verify Phase 16:**
+
+- [ ] Paste a recipe URL → imports correctly with ingredients, instructions, etc.
+- [ ] Pick a PDF recipe file → imports correctly
+- [ ] Token usage increments in Settings
+- [ ] Error handling: bad URL, empty PDF, no API key
+- [ ] CI passes
+
+**Deliverable:** AI-powered recipe import from URLs and PDFs
+
+---
+
+## Phase 17: Styling Facelift
+
+**Goal:** Replace default Tailwind theme with a warm, food-themed personality. Custom color palette, heading font, subtle shadows.
+
+### Tasks:
+
+**17.1: Tailwind Theme**
+
+- Define custom color scales in `tailwind.config.js`: primary (sage green), secondary (terracotta), accent (warm gold), surface (warm cream)
+- Add heading font family (Georgia — system font, no import)
+
+**17.2: Global Styles**
+
+- Update `index.css`: warm background, heading font via `@layer base`
+
+**17.3: Color Migration**
+
+- Mechanical find-and-replace across all component files (~16):
+  - `gray-*` → `stone-*` (~244 occurrences, Tailwind's built-in warm gray)
+  - `blue-*` → `primary-*` (~40 occurrences)
+  - `yellow-*` → `accent-*` (favorites/stars)
+  - `teal-*` → `secondary-*` (adapt recipe)
+  - `bg-gray-50` → `bg-surface` (page backgrounds)
+
+**17.4: Nav & Card Refinement**
+
+- Nav bar: warmer background, subtle shadow
+- Cards/panels: add `shadow-sm` for depth
+
+**Verify Phase 17:**
+
+- [ ] Warm tones throughout, no stray blue/cold-gray remaining
+- [ ] Heading font (Georgia) on all h1/h2/h3
+- [ ] Cards have subtle shadows
+- [ ] `dprint check && bun run lint && bun run test` all pass
+- [ ] Build and visual inspection
+
+**Deliverable:** Warm, food-themed visual design
+
+---
+
 ## Task Breakdown Summary
 
 Give these tasks to Claude Code in order:
@@ -488,6 +598,9 @@ Give these tasks to Claude Code in order:
 7. **Phase 12** — AI recipe adaptation (first AI feature, uses all Phase 11 infra)
 8. **Phase 13** — AI meal suggestions (builds on Phases 10, 11, and 12)
 9. **Phase 14** — Multi-Mac distribution (universal binary, shared database via iCloud)
+10. **Phase 15** — App icon (custom icon replacing Tauri placeholder)
+11. **Phase 16** — AI recipe import from URL and PDF (extends import system)
+12. **Phase 17** — Styling facelift (warm color palette, heading font, polish)
 
 ---
 
@@ -517,7 +630,7 @@ User selects people + preferences
 ### Recipe Lineage
 
 ```
-Original Recipe (source: "manual" | "markdown_import")
+Original Recipe (source: "manual" | "markdown_import" | "url_import" | "pdf_import")
     |-- Scaled Recipe (source: "scaled", parent_recipe_id: original)
     |-- AI Adapted Recipe (source: "ai_adapted", parent_recipe_id: original)
     +-- AI Suggested Recipe (source: "ai_suggested", parent_recipe_id: null)
