@@ -37,7 +37,11 @@
       "WebFetch(domain:docs.anthropic.com)",
       "Bash(echo:*)",
       "Bash(grep:*)",
-      "Bash(npx vitest run:*)"
+      "Bash(npx vitest run:*)",
+      "Bash(rustup target list:*)",
+      "Bash(rustup show:*)",
+      "Bash(rustup target add:*)",
+      "Bash(cargo add:*)"
     ]
   }
 }

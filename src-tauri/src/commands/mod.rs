@@ -1,3 +1,4 @@
+pub mod config;
 pub mod meal;
 pub mod meal_template;
 pub mod person;

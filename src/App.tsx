@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
 import { FamilyManager } from './components/FamilyManager'
+import { LockWarningBanner } from './components/LockWarningBanner'
 import { MealPlanner } from './components/MealPlanner'
 import { RecipeManager } from './components/RecipeManager'
 import { SettingsPanel } from './components/SettingsPanel'
@@ -85,6 +86,7 @@ function App() {
             </div>
           </div>
         </nav>
+        <LockWarningBanner />
         <main className='flex-1 overflow-y-auto'>
           {activeTab === 'family' && <FamilyManager />}
           {activeTab === 'recipes' && <RecipeManager />}

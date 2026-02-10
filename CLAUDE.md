@@ -364,30 +364,71 @@ bun run tauri dev
 ### Building
 
 ```bash
-# Build production app
+# Build for current architecture only
 bun run tauri build
 
-# Output: src-tauri/target/release/bundle/
+# Build macOS universal binary (Intel + Apple Silicon)
+bun run tauri:build:universal
+
+# Output (universal): src-tauri/target/universal-apple-darwin/release/bundle/
+# Output (single-arch): src-tauri/target/release/bundle/
 # macOS: .dmg and .app
 # Windows: .msi and .exe
 # Linux: .deb, .appimage
 ```
 
+**Universal binary prerequisites:**
+
+```bash
+# Install both Rust targets (one-time setup)
+rustup target add x86_64-apple-darwin    # Intel
+rustup target add aarch64-apple-darwin   # Apple Silicon (likely already installed)
+```
+
+**Verify a universal binary:**
+
+```bash
+file src-tauri/target/universal-apple-darwin/release/bundle/macos/fewd.app/Contents/MacOS/fewd
+# Expected: Mach-O universal binary with 2 architectures: [x86_64] [arm64]
+```
+
+**Distribute to another Mac:**
+
+1. Build: `bun run tauri:build:universal`
+2. The `.dmg` is at `src-tauri/target/universal-apple-darwin/release/bundle/dmg/`
+3. Copy the `.dmg` to the other Mac (AirDrop, USB, shared folder, etc.)
+4. On the other Mac, open the `.dmg` and drag the app to Applications
+5. First launch: right-click → Open (to bypass Gatekeeper), or run `xattr -cr /Applications/fewd.app`
+
 ### Database Location
 
-**Dev Mode:**
+The database location is configurable via Settings → Database Location.
 
-- macOS: `~/Library/Application Support/com.fewd.dev/fewd.db`
+**Default (local) paths:**
 
-**Production:**
+- Dev: `~/Library/Application Support/com.fewd.dev/fewd.db`
+- Production: `~/Library/Application Support/com.fewd/fewd.db`
 
-- macOS: `~/Library/Application Support/com.fewd/fewd.db`
+**Config file** (always local, never synced):
+
+- `~/Library/Application Support/com.fewd.dev/config.json`
+- Contains `db_dir` — when set, the app uses `<db_dir>/fewd.db` instead of the default
+
+**Shared database (iCloud):**
+
+- Use Settings → Database Location → Change Location to point to a shared iCloud folder
+- The app switches to DELETE journal mode (single-file, safe for sync) when using a custom location
+- A `.fewd.lock` file is placed alongside the database to warn about concurrent access from other machines
+- Avoid using the app on two computers at the exact same time
 
 **Inspect Database:**
 
 ```bash
-# macOS
+# Default location (macOS dev)
 sqlite3 ~/Library/Application\ Support/com.fewd.dev/fewd.db
+
+# Check current location from config
+cat ~/Library/Application\ Support/com.fewd.dev/config.json
 
 # Or use GUI tool like DB Browser for SQLite
 ```
@@ -404,8 +445,8 @@ sqlite3 ~/Library/Application\ Support/com.fewd.dev/fewd.db
 
 **`.github/workflows/build.yml`** - Runs on tags (releases):
 
-- Builds for macOS, Windows, Linux
-- Uploads artifacts
+- Builds macOS universal binary (Intel + Apple Silicon), Windows, Linux
+- Uploads artifacts to GitHub Release (draft)
 
 ### Running CI Locally
 
@@ -526,6 +567,14 @@ brew install typos-cli
 ### Building for Distribution
 
 macOS requires code signing for distribution. For personal use, unsigned builds work fine.
+
+**Build a universal binary (Intel + Apple Silicon):**
+
+```bash
+bun run tauri:build:universal
+```
+
+This produces a single `.app` and `.dmg` that runs natively on both Intel and Apple Silicon Macs. The output is in `src-tauri/target/universal-apple-darwin/release/bundle/`.
 
 **To bypass Gatekeeper on unsigned app:**
 

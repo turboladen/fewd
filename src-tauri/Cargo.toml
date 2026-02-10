@@ -17,6 +17,8 @@ tokio = { version = "1", features = ["full"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 reqwest = { version = "0.12", features = ["json", "native-tls"] }
+tauri-plugin-dialog = "2.6.0"
+hostname = "0.4.2"
 
 [dependencies.migration]
 path = "./migration"

@@ -1,11 +1,17 @@
+import { open } from '@tauri-apps/plugin-dialog'
 import { useEffect, useState } from 'react'
 import {
   useAvailableModels,
+  useCopyDbToLocation,
+  useDbConfig,
+  useSetDbLocation,
   useSetSetting,
   useSetting,
   useTestConnection,
   useTokenUsage,
+  useValidateDbLocation,
 } from '../hooks/useSettings'
+import type { ValidationResult } from '../types/settings'
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const apiKeyQuery = useSetting('anthropic_api_key')
@@ -15,16 +21,38 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const setSetting = useSetSetting()
   const testConnection = useTestConnection()
 
+  const inputPriceQuery = useSetting('cost_input_price_per_mtok')
+  const outputPriceQuery = useSetting('cost_output_price_per_mtok')
+
+  const dbConfigQuery = useDbConfig()
+  const setDbLocation = useSetDbLocation()
+  const validateDbLocation = useValidateDbLocation()
+  const copyDb = useCopyDbToLocation()
+
   const [apiKeyInput, setApiKeyInput] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [keySaved, setKeySaved] = useState(false)
   const [highlightApiKey, setHighlightApiKey] = useState(false)
+  const [pendingDir, setPendingDir] = useState<string | null>(null)
+  const [validation, setValidation] = useState<ValidationResult | null>(null)
+  const [dbLocationApplied, setDbLocationApplied] = useState(false)
+  const [showCostCalc, setShowCostCalc] = useState(false)
+  const [inputPrice, setInputPrice] = useState('')
+  const [outputPrice, setOutputPrice] = useState('')
 
   useEffect(() => {
     if (apiKeyQuery.data) {
       setApiKeyInput(apiKeyQuery.data)
     }
   }, [apiKeyQuery.data])
+
+  useEffect(() => {
+    if (inputPriceQuery.data) setInputPrice(inputPriceQuery.data)
+  }, [inputPriceQuery.data])
+
+  useEffect(() => {
+    if (outputPriceQuery.data) setOutputPrice(outputPriceQuery.data)
+  }, [outputPriceQuery.data])
 
   // Close on Escape
   useEffect(() => {
@@ -67,6 +95,77 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     setSetting.mutate({ key: 'token_usage_requests', value: '0' })
   }
 
+  const handlePriceChange = (which: 'input' | 'output', value: string) => {
+    if (which === 'input') {
+      setInputPrice(value)
+      if (value) setSetting.mutate({ key: 'cost_input_price_per_mtok', value })
+    } else {
+      setOutputPrice(value)
+      if (value) setSetting.mutate({ key: 'cost_output_price_per_mtok', value })
+    }
+  }
+
+  const estimatedCost = (() => {
+    const inp = parseFloat(inputPrice)
+    const out = parseFloat(outputPrice)
+    if ((!inp && !out) || !tokenUsageQuery.data) return null
+    const inputCost = (tokenUsageQuery.data.input_tokens / 1_000_000) * (inp || 0)
+    const outputCost = (tokenUsageQuery.data.output_tokens / 1_000_000) * (out || 0)
+    return inputCost + outputCost
+  })()
+
+  const handlePickFolder = async () => {
+    const selected = await open({ directory: true, multiple: false })
+    if (selected) {
+      const dir = selected as string
+      setPendingDir(dir)
+      validateDbLocation.mutate(dir, {
+        onSuccess: (result) => setValidation(result),
+      })
+    }
+  }
+
+  const handleApplyDbLocation = async () => {
+    if (!pendingDir) return
+    // If no existing DB at destination, offer to copy
+    if (validation && !validation.has_existing_db) {
+      copyDb.mutate(pendingDir, {
+        onSuccess: () => {
+          setDbLocation.mutate(pendingDir, {
+            onSuccess: () => {
+              setDbLocationApplied(true)
+              setPendingDir(null)
+              setValidation(null)
+            },
+          })
+        },
+      })
+    } else {
+      setDbLocation.mutate(pendingDir, {
+        onSuccess: () => {
+          setDbLocationApplied(true)
+          setPendingDir(null)
+          setValidation(null)
+        },
+      })
+    }
+  }
+
+  const handleResetDbLocation = () => {
+    setDbLocation.mutate(null, {
+      onSuccess: () => {
+        setDbLocationApplied(true)
+        setPendingDir(null)
+        setValidation(null)
+      },
+    })
+  }
+
+  const handleCancelDbChange = () => {
+    setPendingDir(null)
+    setValidation(null)
+  }
+
   const currentModel = modelQuery.data || 'claude-sonnet-4-20250514'
   const apiKeyChanged = apiKeyInput !== (apiKeyQuery.data ?? '')
 
@@ -79,7 +178,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       />
 
       {/* Panel */}
-      <div className='relative bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6'>
+      <div className='relative bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto'>
         <div className='flex items-center justify-between mb-4'>
           <h2 className='text-lg font-semibold text-gray-900'>Settings</h2>
           <button
@@ -214,6 +313,153 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               </div>
             )
             : <p className='text-xs text-gray-400 italic'>No usage yet</p>}
+
+          {/* Cost Calculator */}
+          <button
+            onClick={() => setShowCostCalc(!showCostCalc)}
+            className='text-xs text-gray-400 hover:text-gray-600 mt-2'
+          >
+            {showCostCalc ? '\u25BE' : '\u25B8'} Estimate cost
+          </button>
+
+          {showCostCalc && (
+            <div className='mt-2 space-y-2'>
+              <div className='flex gap-3'>
+                <label className='flex items-center gap-1 text-xs text-gray-500'>
+                  Input $/MTok
+                  <input
+                    type='number'
+                    step='0.01'
+                    min='0'
+                    value={inputPrice}
+                    onChange={(e) => handlePriceChange('input', e.target.value)}
+                    className='w-20 border border-gray-300 rounded px-2 py-0.5 text-xs'
+                    placeholder='3.00'
+                  />
+                </label>
+                <label className='flex items-center gap-1 text-xs text-gray-500'>
+                  Output $/MTok
+                  <input
+                    type='number'
+                    step='0.01'
+                    min='0'
+                    value={outputPrice}
+                    onChange={(e) => handlePriceChange('output', e.target.value)}
+                    className='w-20 border border-gray-300 rounded px-2 py-0.5 text-xs'
+                    placeholder='15.00'
+                  />
+                </label>
+              </div>
+              {estimatedCost !== null && (
+                <p className='text-xs font-medium text-gray-700'>
+                  Estimated cost: ${estimatedCost.toFixed(2)}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Database Location */}
+        <div className='pt-3 border-t border-gray-200'>
+          <span className='text-sm font-medium text-gray-700'>Database Location</span>
+
+          {dbConfigQuery.data && (
+            <div className='mt-1'>
+              <p className='text-xs text-gray-500 break-all'>
+                {dbConfigQuery.data.active_path}{' '}
+                <span
+                  className={`font-medium ${
+                    dbConfigQuery.data.is_default ? 'text-gray-400' : 'text-blue-500'
+                  }`}
+                >
+                  ({dbConfigQuery.data.is_default ? 'default' : 'custom'})
+                </span>
+              </p>
+            </div>
+          )}
+
+          {/* Applied / restart notice */}
+          {dbLocationApplied && (
+            <div className='mt-2 bg-blue-50 border border-blue-200 rounded p-2'>
+              <p className='text-xs text-blue-800'>
+                {'\u21BB'} Restart the app to use the new database location.
+              </p>
+            </div>
+          )}
+
+          {/* Pending selection */}
+          {pendingDir && validation && (
+            <div className='mt-2 space-y-2'>
+              <p className='text-xs text-gray-600 break-all'>
+                New location: <span className='font-medium'>{pendingDir}</span>
+              </p>
+
+              {!validation.valid && validation.warning && (
+                <div className='bg-red-50 border border-red-200 rounded p-2'>
+                  <p className='text-xs text-red-700'>{validation.warning}</p>
+                </div>
+              )}
+
+              {validation.valid && validation.warning && (
+                <div className='bg-amber-50 border border-amber-200 rounded p-2'>
+                  <p className='text-xs text-amber-800'>
+                    {'\u26A0'} {validation.warning}
+                  </p>
+                </div>
+              )}
+
+              {validation.valid && validation.has_existing_db && (
+                <p className='text-xs text-green-600'>
+                  {'\u2713'} Existing database found — it will be used.
+                </p>
+              )}
+
+              {validation.valid && !validation.has_existing_db && (
+                <p className='text-xs text-gray-500'>
+                  No database found — your current data will be copied to this location.
+                </p>
+              )}
+
+              {validation.valid && (
+                <div className='flex gap-2'>
+                  <button
+                    onClick={handleApplyDbLocation}
+                    disabled={setDbLocation.isPending || copyDb.isPending}
+                    className='bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 disabled:opacity-50'
+                  >
+                    {copyDb.isPending ? 'Copying...' : 'Apply'}
+                  </button>
+                  <button
+                    onClick={handleCancelDbChange}
+                    className='bg-gray-100 border border-gray-300 text-gray-600 px-3 py-1 rounded text-xs hover:bg-gray-200'
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Action buttons */}
+          {!pendingDir && !dbLocationApplied && (
+            <div className='mt-2 flex gap-2'>
+              <button
+                onClick={handlePickFolder}
+                className='bg-gray-100 border border-gray-300 text-gray-700 px-3 py-1 rounded text-xs hover:bg-gray-200'
+              >
+                Change Location...
+              </button>
+              {dbConfigQuery.data && !dbConfigQuery.data.is_default && (
+                <button
+                  onClick={handleResetDbLocation}
+                  disabled={setDbLocation.isPending}
+                  className='text-xs text-gray-400 hover:text-gray-600 disabled:opacity-50'
+                >
+                  Reset to Default
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

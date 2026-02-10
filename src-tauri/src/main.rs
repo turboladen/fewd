@@ -1,19 +1,27 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use fewd_lib::commands::{meal, meal_template, person, recipe, settings, shopping, suggestion};
+use fewd_lib::commands::{
+    config, meal, meal_template, person, recipe, settings, shopping, suggestion,
+};
 use fewd_lib::{db, AppState};
 use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let db = tauri::async_runtime::block_on(async {
+            let db_init = tauri::async_runtime::block_on(async {
                 db::init(app.handle())
                     .await
                     .expect("Failed to initialize database")
             });
 
-            app.manage(AppState { db });
+            app.manage(AppState {
+                db: db_init.db,
+                config_dir: db_init.config_dir,
+                db_path: db_init.db_path,
+                foreign_lock: db_init.foreign_lock,
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -51,6 +59,11 @@ fn main() {
             settings::get_available_models,
             settings::test_claude_connection,
             settings::get_token_usage,
+            config::get_db_config,
+            config::set_db_location,
+            config::validate_db_location,
+            config::copy_db_to_location,
+            config::get_lock_warning,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
