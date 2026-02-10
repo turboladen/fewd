@@ -44,7 +44,11 @@
       "Bash(cargo add:*)",
       "WebFetch(domain:tauri.app)",
       "Bash(npx tauri:*)",
-      "Bash(bun run tauri build:*)"
+      "Bash(bun run tauri build:*)",
+      "Bash(rsvg-convert:*)",
+      "Bash(sips:*)",
+      "Bash(sudo rm:*)",
+      "Bash(killall:*)"
     ]
   }
 }
