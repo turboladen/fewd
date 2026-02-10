@@ -13,15 +13,15 @@ A family meal planning application for a household of 4 people. The app helps pl
 
 ## Future Features (Parking Lot)
 
-📝 Guest support - temporary people for special occasions  
-📝 Allergy/Intolerance tracking - medical restrictions  
-📝 Historical dietary changes - track when goals/diets changed  
-📝 Eating analysis - pattern analysis, nutrition trends  
-📝 AI recipe generation - create recipes with AI  
-📝 AI meal planning - auto-generate weekly plans  
+📝 Guest support - temporary people for special occasions\
+📝 Allergy/Intolerance tracking - medical restrictions\
+📝 Historical dietary changes - track when goals/diets changed\
+📝 Eating analysis - pattern analysis, nutrition trends\
+📝 AI recipe generation - create recipes with AI\
+📝 AI meal planning - auto-generate weekly plans\
 📝 Multi-device sync - sync data across devices
 
------
+---
 
 ## Entity Specifications
 
@@ -67,7 +67,7 @@ Represents a family member who eats meals.
 }
 ```
 
------
+---
 
 ### Recipe Entity
 
@@ -148,28 +148,28 @@ Array of Ingredient objects:
   "description": "Simple grilled chicken with seasonal veggies",
   "source": "manual",
   "parent_recipe_id": null,
-  "prep_time": {"value": 15, "unit": "minutes"},
-  "cook_time": {"value": 30, "unit": "minutes"},
-  "total_time": {"value": 45, "unit": "minutes"},
+  "prep_time": { "value": 15, "unit": "minutes" },
+  "cook_time": { "value": 30, "unit": "minutes" },
+  "total_time": { "value": 45, "unit": "minutes" },
   "servings": 4,
-  "portion_size": {"value": 1, "unit": "chicken breast"},
+  "portion_size": { "value": 1, "unit": "chicken breast" },
   "instructions": "1. Season chicken...\n2. Grill for 6-7 min per side...",
   "ingredients": [
     {
       "name": "chicken breast",
-      "amount": {"type": "single", "value": 4},
+      "amount": { "type": "single", "value": 4 },
       "unit": "whole",
       "notes": "boneless, skinless"
     },
     {
       "name": "olive oil",
-      "amount": {"type": "range", "min": 2, "max": 3},
+      "amount": { "type": "range", "min": 2, "max": 3 },
       "unit": "tbsp",
       "notes": ""
     },
     {
       "name": "salt",
-      "amount": {"type": "single", "value": 1},
+      "amount": { "type": "single", "value": 1 },
       "unit": "to taste",
       "notes": ""
     }
@@ -191,7 +191,7 @@ Array of Ingredient objects:
 }
 ```
 
------
+---
 
 ### Meal Entity
 
@@ -219,8 +219,8 @@ Each person eating this meal has one PersonServing, which can be either:
   "person_id": "person-steve",
   "food_type": "recipe",
   "recipe_id": "recipe-grilled-chicken",
-  "servings_count": 0.5,  // scaled from recipe's base servings
-  "notes": "Extra spicy"   // optional
+  "servings_count": 0.5, // scaled from recipe's base servings
+  "notes": "Extra spicy" // optional
 }
 ```
 
@@ -233,13 +233,13 @@ Each person eating this meal has one PersonServing, which can be either:
   "adhoc_items": [
     {
       "name": "hot dog",
-      "amount": {"type": "single", "value": 1},
+      "amount": { "type": "single", "value": 1 },
       "unit": "whole",
       "notes": ""
     },
     {
       "name": "blueberries",
-      "amount": {"type": "range", "min": 0.5, "max": 1},
+      "amount": { "type": "range", "min": 0.5, "max": 1 },
       "unit": "cup",
       "notes": ""
     }
@@ -277,19 +277,19 @@ Each person eating this meal has one PersonServing, which can be either:
       "adhoc_items": [
         {
           "name": "hot dog",
-          "amount": {"type": "single", "value": 1},
+          "amount": { "type": "single", "value": 1 },
           "unit": "whole",
           "notes": ""
         },
         {
           "name": "blueberries",
-          "amount": {"type": "single", "value": 1},
+          "amount": { "type": "single", "value": 1 },
           "unit": "cup",
           "notes": ""
         },
         {
           "name": "chips",
-          "amount": {"type": "single", "value": 1},
+          "amount": { "type": "single", "value": 1 },
           "unit": "handful",
           "notes": ""
         }
@@ -318,7 +318,7 @@ Each person eating this meal has one PersonServing, which can be either:
 - PersonServing has `servings_count: 0.5` (2 people eating)
 - Scaled ingredient: “2 whole chicken breast”
 
------
+---
 
 ### Shopping List (Computed View)
 
@@ -363,25 +363,34 @@ Not a stored entity - computed on-the-fly from meals in a date range.
 **Business Logic:**
 
 1. **Collect ingredients:**
+
 - Query all Meals between start_date and end_date
 - For each PersonServing:
   - If `food_type` is “recipe”: Get Recipe, scale ingredients by `servings_count`
   - If `food_type` is “adhoc”: Use `adhoc_items` directly
+
 1. **Group by ingredient name:**
+
 - Case-insensitive grouping (e.g., “Chicken Breast” = “chicken breast”)
 - Exact string matching for MVP (no fuzzy matching)
+
 1. **Unit conversion:**
+
 - Use unit conversion library (`uom` crate in Rust)
 - Convert to common base units:
   - **Weight**: grams (g, kg, oz, lb, mg)
   - **Volume**: ml (ml, L, cup, tbsp, tsp, fl oz, pint, quart, gallon)
   - **Count/Discrete**: no conversion (whole, piece, clove, can, etc.)
+
 1. **Sum amounts:**
+
 - **Single values:** Convert to common unit, sum, display in most common or largest appropriate unit
 - **Ranges:** Sum min values and max values separately (e.g., 1-2 cups + 2-3 cups = 3-5 cups)
 - **Mixed single + range:** For MVP, don’t auto-sum (future feature)
 - **Non-convertible units:** Group under ingredient name but don’t sum
+
 1. **Display format:**
+
 - Decimals (e.g., “2.5 cups” not “2 1/2 cups”)
 - Most common unit from source items, or largest appropriate unit
 
@@ -414,7 +423,7 @@ Salt
   (Items listed separately - different unit types)
 ```
 
------
+---
 
 ## User Workflows
 
@@ -436,15 +445,18 @@ Salt
 
 ```markdown
 # Recipe Name
+
 Description
 Prep time: 30 min
 Servings: 4
 
 ## Ingredients
+
 - 2 cups flour
 - 1 tsp salt
 
 ## Instructions
+
 1. Mix ingredients...
 2. Bake...
 ```
@@ -486,9 +498,11 @@ Servings: 4
 1. Click on meal slot (e.g., “Monday Dinner”)
 1. Modal opens showing all family members
 1. For each person:
+
 - **Option A:** Select recipe from dropdown, specify serving count
 - **Option B:** Add ad-hoc items (like “1 hot dog, 1 cup blueberries”)
 - **Option C:** Leave blank (not eating this meal)
+
 1. Save meal
 
 **Add Custom Meal:**
@@ -517,11 +531,13 @@ Servings: 4
 1. Select date range (defaults to next 7 days)
 1. See aggregated ingredient list with totals
 1. Each ingredient shows:
+
 - Total amount needed
 - Breakdown by source (which recipes/meals)
+
 1. Copy to iOS Reminders or other list app manually
 
------
+---
 
 ## Technical Requirements
 
@@ -637,7 +653,7 @@ CREATE TABLE meals (
 - Graceful error handling
 - Transaction safety for database operations
 
------
+---
 
 ## Success Criteria
 
@@ -654,7 +670,7 @@ MVP is successful when:
 1. ✅ App is stable and usable daily
 1. ✅ Data persists correctly
 
------
+---
 
 ## Out of Scope for MVP
 

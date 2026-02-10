@@ -2,16 +2,16 @@
 
 ## Completed Phases (MVP)
 
-| Phase | Description | Status |
-|-------|-------------|--------|
-| Phase 0 | Project Setup & Scaffolding | Done |
-| Phase 1 | Person Entity (CRUD) | Done |
-| Phase 2 | Recipe Entity (CRUD + Markdown Import) | Done |
-| Phase 3 | Meal Entity & Planning (Weekly Calendar) | Done |
-| Phase 4 | Shopping List (Aggregation + Unit Conversion) | Done |
-| Phase 5 | Polish & Initial Data (Seed Data, UX, Error Handling) | Done |
+| Phase   | Description                                           | Status |
+| ------- | ----------------------------------------------------- | ------ |
+| Phase 0 | Project Setup & Scaffolding                           | Done   |
+| Phase 1 | Person Entity (CRUD)                                  | Done   |
+| Phase 2 | Recipe Entity (CRUD + Markdown Import)                | Done   |
+| Phase 3 | Meal Entity & Planning (Weekly Calendar)              | Done   |
+| Phase 4 | Shopping List (Aggregation + Unit Conversion)         | Done   |
+| Phase 5 | Polish & Initial Data (Seed Data, UX, Error Handling) | Done   |
 
------
+---
 
 ## Phase 6: Recipe Rating
 
@@ -49,7 +49,7 @@
 
 **Deliverable:** Recipe rating system
 
------
+---
 
 ## Phase 7: Recipe Scaling
 
@@ -101,7 +101,7 @@
 
 **Deliverable:** Recipe scaling with smart fractional ingredient handling
 
------
+---
 
 ## Phase 8: Inline Ingredient Enhancement (Caroline Chambers Style)
 
@@ -147,7 +147,7 @@
 
 **Deliverable:** Caroline Chambers-style enhanced recipe view
 
------
+---
 
 ## Phase 9: Meal Templates
 
@@ -198,7 +198,7 @@
 
 **Deliverable:** Reusable meal templates
 
------
+---
 
 ## Phase 10: Deterministic Meal Suggestions
 
@@ -248,7 +248,7 @@
 
 **Deliverable:** Data-driven meal suggestion engine
 
------
+---
 
 ## Phase 11: AI Infrastructure (Claude API Integration)
 
@@ -313,7 +313,7 @@
 
 **Deliverable:** AI integration infrastructure ready for feature development
 
------
+---
 
 ## Phase 12: AI Recipe Adaptation
 
@@ -360,7 +360,7 @@
 
 **Deliverable:** AI-powered recipe adaptation
 
------
+---
 
 ## Phase 13: AI Meal Suggestions
 
@@ -417,7 +417,7 @@
 
 **Deliverable:** Full AI-powered meal suggestion engine
 
------
+---
 
 ## Phase 14: Multi-Mac Distribution
 
@@ -473,7 +473,7 @@
 
 **Deliverable:** Multi-Mac distribution with shared iCloud database
 
------
+---
 
 ## Task Breakdown Summary
 
@@ -489,7 +489,7 @@ Give these tasks to Claude Code in order:
 8. **Phase 13** — AI meal suggestions (builds on Phases 10, 11, and 12)
 9. **Phase 14** — Multi-Mac distribution (universal binary, shared database via iCloud)
 
------
+---
 
 ## Architecture Notes
 
