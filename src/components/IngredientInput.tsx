@@ -1,4 +1,5 @@
 import type { Ingredient, IngredientAmount } from '../types/recipe'
+import { IconClose } from './Icon'
 
 export function IngredientRow({
   ingredient,
@@ -24,10 +25,10 @@ export function IngredientRow({
             onChange({ ...ingredient, amount: { type: 'range', min: amt.value, max: amt.value } })
           }
         }}
-        className={`text-xs px-1.5 py-1 rounded border whitespace-nowrap ${
+        className={`text-xs px-1.5 py-1 rounded-lg border whitespace-nowrap ${
           isRange
             ? 'bg-primary-50 border-primary-300 text-primary-700'
-            : 'bg-stone-50 border-stone-300 text-stone-500 hover:border-primary-300'
+            : 'bg-white border-stone-300 text-stone-500 hover:border-primary-300'
         }`}
         title={isRange ? 'Switch to exact amount' : 'Switch to range (e.g. 1-2)'}
       >
@@ -50,7 +51,7 @@ export function IngredientRow({
                       max: (ingredient.amount as { type: 'range'; min: number; max: number }).max,
                     },
                   })}
-                className='border border-stone-300 p-1 rounded w-9 text-sm'
+                className='input-sm w-9'
                 placeholder='min'
               />
               <span className='text-stone-400 self-center'>-</span>
@@ -67,7 +68,7 @@ export function IngredientRow({
                       max: parseFloat(e.target.value) || 0,
                     },
                   })}
-                className='border border-stone-300 p-1 rounded w-9 text-sm'
+                className='input-sm w-9'
                 placeholder='max'
               />
             </>
@@ -82,7 +83,7 @@ export function IngredientRow({
                   ...ingredient,
                   amount: { type: 'single', value: parseFloat(e.target.value) || 0 },
                 })}
-              className='border border-stone-300 p-1 rounded w-20 text-sm'
+              className='input-sm w-20'
               placeholder='Amt'
             />
           )}
@@ -91,22 +92,22 @@ export function IngredientRow({
         type='text'
         value={ingredient.unit}
         onChange={(e) => onChange({ ...ingredient, unit: e.target.value })}
-        className='border border-stone-300 p-1 rounded w-20 text-sm'
+        className='input-sm w-20'
         placeholder='Unit'
       />
       <input
         type='text'
         value={ingredient.name}
         onChange={(e) => onChange({ ...ingredient, name: e.target.value })}
-        className='border border-stone-300 p-1 rounded flex-1 text-sm'
+        className='input-sm flex-1'
         placeholder='Ingredient name'
       />
       <button
         type='button'
         onClick={onRemove}
-        className='text-red-500 hover:text-red-700 text-sm px-1'
+        className='btn-sm btn-danger'
       >
-        x
+        <IconClose className='w-4 h-4' />
       </button>
     </div>
   )

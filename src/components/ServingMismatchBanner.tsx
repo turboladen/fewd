@@ -1,3 +1,5 @@
+import { IconWarning } from './Icon'
+
 interface ServingMismatchBannerProps {
   recipeName: string
   recipeServings: number
@@ -21,9 +23,11 @@ export function ServingMismatchBanner({
     : perPerson.toFixed(1)
 
   return (
-    <div className='bg-amber-50 border border-amber-200 rounded p-3 text-sm'>
+    <div className='panel-warning text-sm animate-slide-down'>
       <div className='flex items-start gap-2'>
-        <span className='text-amber-500 mt-0.5'>{'\u26A0'}</span>
+        <span className='text-amber-500 mt-0.5'>
+          <IconWarning className='w-4 h-4' />
+        </span>
         <div className='flex-1'>
           <p className='text-amber-800'>
             <span className='font-medium'>{recipeName}</span> makes {recipeServings}{' '}

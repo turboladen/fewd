@@ -8,6 +8,8 @@ import { usePeople } from '../hooks/usePeople'
 import { useRecipes } from '../hooks/useRecipes'
 import type { ParsedMealTemplate } from '../types/mealTemplate'
 import { parseMealTemplate } from '../types/mealTemplate'
+import { EmptyState } from './EmptyState'
+import { useToast } from './Toast'
 
 const MEAL_TYPES = ['Breakfast', 'Lunch', 'Dinner', 'Snack']
 
@@ -17,6 +19,7 @@ export function TemplateManager() {
   const { data: rawRecipes } = useRecipes()
   const updateMutation = useUpdateMealTemplate()
   const deleteMutation = useDeleteMealTemplate()
+  const { toast } = useToast()
 
   const [search, setSearch] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -83,13 +86,21 @@ export function TemplateManager() {
     if (!editingId || !editName.trim()) return
     updateMutation.mutate(
       { id: editingId, data: { name: editName.trim(), meal_type: editMealType } },
-      { onSuccess: () => setEditingId(null) },
+      {
+        onSuccess: () => {
+          setEditingId(null)
+          toast('Template updated')
+        },
+      },
     )
   }
 
   const handleDelete = (id: string) => {
     deleteMutation.mutate(id, {
-      onSuccess: () => setConfirmingDeleteId(null),
+      onSuccess: () => {
+        setConfirmingDeleteId(null)
+        toast('Template deleted')
+      },
     })
   }
 
@@ -108,7 +119,7 @@ export function TemplateManager() {
   if (error) {
     return (
       <div className='p-6'>
-        <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+        <div className='panel-error text-red-700 text-sm'>
           Failed to load templates: {String(error)}
         </div>
       </div>
@@ -130,18 +141,17 @@ export function TemplateManager() {
             setConfirmingDeleteId(null)
           }}
           placeholder='Search templates...'
-          className='w-full max-w-md border border-stone-300 rounded px-3 py-2 text-sm mb-4'
+          className='input w-full max-w-md mb-4'
         />
       )}
 
       {templates.length === 0
         ? (
-          <div className='text-center py-12 text-stone-500'>
-            <p className='text-lg mb-2'>No templates yet</p>
-            <p className='text-sm'>
-              Save a meal as a template from the Planner tab to get started.
-            </p>
-          </div>
+          <EmptyState
+            emoji='📋'
+            title='No templates yet'
+            description='Save a meal as a template from the Planner tab to get started.'
+          />
         )
         : filtered.length === 0
         ? <p className='text-sm text-stone-500'>No templates match &ldquo;{search}&rdquo;</p>
@@ -156,17 +166,17 @@ export function TemplateManager() {
                   {groups.get(type)!.map((template) => (
                     <div
                       key={template.id}
-                      className='bg-white border border-stone-200 rounded-lg p-4'
+                      className='card p-4 animate-slide-up'
                     >
                       {editingId === template.id
                         ? (
-                          <div className='space-y-2'>
+                          <div className='space-y-2 animate-fade-in'>
                             <div className='flex gap-2'>
                               <input
                                 type='text'
                                 value={editName}
                                 onChange={(e) => setEditName(e.target.value)}
-                                className='border border-stone-300 px-2 py-1 rounded text-sm flex-1'
+                                className='input-sm flex-1'
                                 placeholder='Template name'
                                 autoFocus
                                 onKeyDown={(e) => {
@@ -176,7 +186,7 @@ export function TemplateManager() {
                               <select
                                 value={editMealType}
                                 onChange={(e) => setEditMealType(e.target.value)}
-                                className='border border-stone-300 px-2 py-1 rounded text-sm'
+                                className='input-sm'
                               >
                                 {MEAL_TYPES.map((mt) => <option key={mt} value={mt}>{mt}</option>)}
                               </select>
@@ -188,19 +198,19 @@ export function TemplateManager() {
                               <button
                                 onClick={handleSaveEdit}
                                 disabled={!editName.trim()}
-                                className='bg-primary-600 text-white px-3 py-1 rounded text-sm hover:bg-primary-700 disabled:opacity-50'
+                                className='btn-sm btn-primary'
                               >
                                 Save
                               </button>
                               <button
                                 onClick={() => setEditingId(null)}
-                                className='border border-stone-300 px-3 py-1 rounded text-sm text-stone-600 hover:bg-stone-50'
+                                className='btn-sm btn-outline'
                               >
                                 Cancel
                               </button>
                             </div>
                             {updateMutation.error && (
-                              <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+                              <div className='panel-error text-red-700 text-sm'>
                                 {String(updateMutation.error)}
                               </div>
                             )}

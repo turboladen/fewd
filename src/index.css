@@ -1,18 +1,212 @@
+/* --- Fonts --- */
+
+@font-face {
+  font-family: 'Playfair Display';
+  src: url('/fonts/PlayfairDisplay-Variable.woff2') format('woff2');
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Playfair Display';
+  src: url('/fonts/PlayfairDisplay-Italic-Variable.woff2') format('woff2');
+  font-weight: 400 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'DM Sans';
+  src: url('/fonts/DMSans-Variable.woff2') format('woff2');
+  font-weight: 100 1000;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'DM Sans';
+  src: url('/fonts/DMSans-Italic-Variable.woff2') format('woff2');
+  font-weight: 100 1000;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* --- Tailwind --- */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* --- Base --- */
+
 @layer base {
   h1, h2, h3 {
-    font-family: Georgia, 'Times New Roman', serif;
+    font-family: 'Playfair Display', Georgia, 'Times New Roman', serif;
   }
 }
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: #FDFAF6;
+  background-image:
+    radial-gradient(ellipse at 20% 50%, rgba(91, 140, 90, 0.03) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(196, 122, 74, 0.03) 0%, transparent 50%);
+}
+
+/* --- Design Tokens --- */
+
+@layer components {
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center rounded-lg font-medium
+           transition-all duration-150 ease-in-out
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2;
+  }
+  .btn-xs {
+    @apply btn text-xs px-2.5 py-1;
+  }
+  .btn-sm {
+    @apply btn text-sm px-3 py-1.5;
+  }
+  .btn-md {
+    @apply btn text-sm px-4 py-2;
+  }
+  .btn-primary {
+    @apply bg-primary-600 text-white hover:bg-primary-700
+           active:bg-primary-800 focus-visible:ring-primary-500
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply bg-secondary-600 text-white hover:bg-secondary-700
+           active:bg-secondary-800 focus-visible:ring-secondary-500
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-outline {
+    @apply border border-stone-300 text-stone-700 bg-white
+           hover:bg-stone-50 active:bg-stone-100
+           focus-visible:ring-primary-500
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply text-stone-600 hover:text-stone-900 hover:bg-stone-100
+           rounded-lg px-2 py-1
+           focus-visible:ring-primary-500;
+  }
+  .btn-danger {
+    @apply text-red-600 hover:text-red-700 hover:bg-red-50
+           focus-visible:ring-red-500;
+  }
+  .btn-danger-solid {
+    @apply bg-red-600 text-white hover:bg-red-700
+           active:bg-red-800 focus-visible:ring-red-500
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Inputs */
+  .input {
+    @apply border border-stone-300 rounded-lg px-3 py-2 text-sm
+           bg-white placeholder:text-stone-400
+           transition-colors duration-150
+           focus:outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100;
+  }
+  .input-sm {
+    @apply border border-stone-300 rounded-lg px-2 py-1.5 text-xs
+           bg-white placeholder:text-stone-400
+           transition-colors duration-150
+           focus:outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100;
+  }
+
+  /* Cards */
+  .card {
+    @apply border border-stone-200 rounded-xl bg-white
+           shadow-soft transition-shadow duration-200;
+  }
+  .card-hover {
+    @apply card hover:shadow-lifted;
+  }
+
+  /* Tags */
+  .tag {
+    @apply inline-flex items-center text-xs px-2.5 py-1 rounded-full
+           bg-stone-100 text-stone-600 transition-colors duration-150;
+  }
+  .tag-remove {
+    @apply ml-1.5 text-stone-400 hover:text-stone-600 transition-colors duration-150;
+  }
+
+  /* Panels (colored card variants) */
+  .panel-primary {
+    @apply border border-primary-200 rounded-xl p-4 bg-primary-50;
+  }
+  .panel-secondary {
+    @apply border border-secondary-200 rounded-xl p-4 bg-secondary-50;
+  }
+  .panel-warning {
+    @apply border border-amber-200 rounded-xl p-3 bg-amber-50;
+  }
+  .panel-error {
+    @apply border border-red-200 rounded-xl p-3 bg-red-50;
+  }
+}
+
+/* --- Animations --- */
+
+@layer utilities {
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  .animate-fade-in {
+    animation: fadeIn 200ms ease-out;
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-slide-up {
+    animation: slideUp 200ms ease-out;
+  }
+
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-slide-down {
+    animation: slideDown 150ms ease-out;
+  }
+
+  @keyframes expand {
+    from { grid-template-rows: 0fr; }
+    to { grid-template-rows: 1fr; }
+  }
+  .animate-expand {
+    display: grid;
+    animation: expand 150ms ease-out forwards;
+  }
+  .animate-expand > * {
+    overflow: hidden;
+  }
+
+  @keyframes scaleIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .animate-scale-in {
+    animation: scaleIn 200ms ease-out;
+  }
+
+  @keyframes backdropFade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  .animate-backdrop {
+    animation: backdropFade 200ms ease-out;
+  }
 }

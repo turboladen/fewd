@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { IconStar, IconStarFilled } from './Icon'
 
 interface StarRatingProps {
   value: number | null
@@ -12,13 +13,13 @@ export function StarRating({ value, onChange, size = 'md' }: StarRatingProps) {
   const displayValue = hoverValue ?? value ?? 0
   const stars = [1, 2, 3, 4, 5]
 
-  const sizeClass = size === 'sm' ? 'text-sm' : 'text-lg'
+  const sizeClass = size === 'sm' ? 'w-3.5 h-3.5' : 'w-5 h-5'
 
   if (!interactive && !value) return null
 
   return (
     <span
-      className={`inline-flex items-center ${sizeClass}`}
+      className='inline-flex items-center'
       onMouseLeave={() => interactive && setHoverValue(null)}
     >
       {stars.map((starIndex) => {
@@ -32,7 +33,9 @@ export function StarRating({ value, onChange, size = 'md' }: StarRatingProps) {
               filled ? 'text-amber-400' : 'text-stone-300'
             }`}
           >
-            {filled ? '\u2605' : '\u2606'}
+            {filled
+              ? <IconStarFilled className={sizeClass} />
+              : <IconStar className={sizeClass} />}
           </span>
         )
       })}

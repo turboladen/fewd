@@ -12,6 +12,7 @@ import type {
 } from '../types/recipe'
 import { formatAmount } from '../types/recipe'
 import type { MealCharacter } from '../types/suggestion'
+import { IconArrowLeft, IconChevronDown, IconChevronRight, IconClose } from './Icon'
 import { FieldToggle, PersonSummary } from './PersonFieldToggles'
 
 interface AiSuggestionSectionProps {
@@ -180,7 +181,7 @@ export function AiSuggestionSection({
             onClick={handleBack}
             className='text-xs text-stone-500 hover:text-stone-700'
           >
-            {'\u2190'} Back
+            <IconArrowLeft className='w-3 h-3 inline' /> Back
           </button>
         </div>
 
@@ -193,7 +194,7 @@ export function AiSuggestionSection({
 
         {/* Error */}
         {aiMutation.error && (
-          <div className='bg-red-50 border border-red-200 rounded p-2 text-red-700 text-sm'>
+          <div className='panel-error text-red-700 text-sm'>
             {String(aiMutation.error)}
             <button
               onClick={() => handleGenerate()}
@@ -207,7 +208,7 @@ export function AiSuggestionSection({
         {/* Suggestion cards */}
         {aiMutation.data && (
           <>
-            <div className='space-y-2 max-h-80 overflow-y-auto'>
+            <div className='space-y-2 max-h-80 overflow-y-auto animate-fade-in'>
               {aiMutation.data.map((suggestion, index) => (
                 <SuggestionCard
                   key={index}
@@ -224,7 +225,7 @@ export function AiSuggestionSection({
             </div>
 
             {createRecipeMutation.error && (
-              <div className='bg-red-50 border border-red-200 rounded p-2 text-red-700 text-sm'>
+              <div className='panel-error text-red-700 text-sm'>
                 {String(createRecipeMutation.error)}
               </div>
             )}
@@ -236,13 +237,13 @@ export function AiSuggestionSection({
                 value={feedback}
                 onChange={(e) => setFeedback(e.target.value)}
                 placeholder='Tell us what you want instead...'
-                className='w-full border border-stone-200 rounded px-2 py-1 text-xs'
+                className='input-sm w-full'
                 rows={2}
               />
               <button
                 onClick={handleRegenerate}
                 disabled={aiMutation.isPending}
-                className='bg-secondary-600 text-white px-3 py-1 rounded text-xs hover:bg-secondary-700 disabled:opacity-50'
+                className='btn-xs btn-secondary'
               >
                 Regenerate
               </button>
@@ -325,7 +326,7 @@ export function AiSuggestionSection({
             value={customText}
             onChange={(e) => setCustomText(e.target.value)}
             placeholder='e.g., high protein, Mediterranean...'
-            className='mt-1 w-full border border-stone-200 rounded px-2 py-1 text-xs'
+            className='input-sm mt-1 w-full'
           />
         )}
       </div>
@@ -334,7 +335,7 @@ export function AiSuggestionSection({
       <button
         onClick={() => handleGenerate()}
         disabled={selectedPeople.length === 0 || aiMutation.isPending}
-        className='bg-secondary-600 text-white px-3 py-1 rounded text-xs hover:bg-secondary-700 disabled:opacity-50'
+        className='btn-xs btn-secondary'
       >
         Generate AI Suggestions
       </button>
@@ -369,7 +370,7 @@ function SuggestionCard({
     .join(', ')
 
   return (
-    <div className='bg-white border border-stone-200 rounded p-2'>
+    <div className='card p-2'>
       {/* Collapsed header */}
       <button
         onClick={onToggle}
@@ -387,13 +388,17 @@ function SuggestionCard({
               {suggestion.ingredients.length > 3 ? '...' : ''}
             </p>
           </div>
-          <span className='text-xs text-stone-400'>{isExpanded ? '\u25BC' : '\u25B6'}</span>
+          <span className='text-xs text-stone-400'>
+            {isExpanded
+              ? <IconChevronDown className='w-3 h-3' />
+              : <IconChevronRight className='w-3 h-3' />}
+          </span>
         </div>
       </button>
 
       {/* Expanded details */}
       {isExpanded && (
-        <div className='mt-2 pt-2 border-t border-stone-100 space-y-2'>
+        <div className='mt-2 pt-2 border-t border-stone-100 space-y-2 animate-slide-down'>
           {/* Ingredients */}
           <div>
             <h6 className='text-xs font-medium text-stone-700 mb-1'>Ingredients</h6>
@@ -435,7 +440,7 @@ function SuggestionCard({
               onUse()
             }}
             disabled={isSaving}
-            className='bg-secondary-600 text-white px-3 py-1 rounded text-xs hover:bg-secondary-700 disabled:opacity-50'
+            className='btn-xs btn-secondary'
           >
             {isSaving ? 'Saving...' : `Use This (#${index + 1})`}
           </button>
@@ -473,14 +478,14 @@ function TagEditor({
         {tags.map((tag, i) => (
           <span
             key={i}
-            className='bg-secondary-100 text-secondary-700 text-xs px-2 py-0.5 rounded flex items-center gap-1'
+            className='tag bg-secondary-100 text-secondary-700 flex items-center gap-1'
           >
             {tag}
             <button
               onClick={() => removeTag(i)}
               className='text-secondary-400 hover:text-secondary-600'
             >
-              {'\u00D7'}
+              <IconClose className='w-3 h-3' />
             </button>
           </span>
         ))}
@@ -495,7 +500,7 @@ function TagEditor({
             }
           }}
           placeholder='Add tag...'
-          className='text-xs border border-stone-200 rounded px-2 py-0.5 w-20'
+          className='input-sm w-20'
         />
       </div>
     </div>

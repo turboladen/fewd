@@ -16,7 +16,7 @@ export function FieldToggle({
   return (
     <button
       onClick={onToggle}
-      className={`text-xs px-2 py-0.5 rounded border ${
+      className={`tag border ${
         enabled
           ? colors
           : 'bg-stone-50 border-stone-200 text-stone-400 line-through'

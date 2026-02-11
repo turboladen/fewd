@@ -26,9 +26,11 @@ import {
   getWeekDates,
   isToday,
 } from '../utils/dates'
+import { IconArrowLeft, IconArrowRight, IconClose, IconPlus, IconWarning } from './Icon'
 import { IngredientInput } from './IngredientInput'
 import { ServingMismatchBanner } from './ServingMismatchBanner'
 import { SuggestionPanel } from './SuggestionPanel'
+import { useToast } from './Toast'
 
 const DEFAULT_MEALS = [
   { type: 'Breakfast', order: 0 },
@@ -103,7 +105,7 @@ function PersonServingEditor({
           <select
             value={serving.recipe_id}
             onChange={(e) => onChange({ ...serving, recipe_id: e.target.value })}
-            className='border border-stone-300 p-1 rounded text-sm flex-1'
+            className='input-sm flex-1'
           >
             <option value=''>Select recipe...</option>
             {recipes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
@@ -115,7 +117,7 @@ function PersonServingEditor({
             value={serving.servings_count}
             onChange={(e) =>
               onChange({ ...serving, servings_count: parseFloat(e.target.value) || 0.1 })}
-            className='border border-stone-300 p-1 rounded w-16 text-sm'
+            className='input-sm w-16'
             title='Servings count'
           />
           <span className='text-xs text-stone-500'>servings</span>
@@ -244,7 +246,7 @@ function TemplateRow({
             className='text-red-400 hover:text-red-600 text-xs ml-2 px-1'
             title='Delete template'
           >
-            {'\u2715'}
+            <IconClose className='w-3 h-3' />
           </button>
         )}
     </div>
@@ -307,11 +309,11 @@ function TemplatePicker({
   })
 
   return (
-    <div className='border border-primary-200 rounded-lg p-3 bg-primary-50 mb-3'>
+    <div className='border border-primary-200 rounded-lg p-3 bg-primary-50 mb-3 animate-slide-down'>
       <div className='flex items-center justify-between mb-2'>
         <h4 className='font-medium text-sm text-primary-800'>Choose a Template</h4>
         <button onClick={onClose} className='text-stone-400 hover:text-stone-600 text-sm'>
-          {'\u2715'}
+          <IconClose className='w-3.5 h-3.5' />
         </button>
       </div>
 
@@ -324,7 +326,7 @@ function TemplatePicker({
             setConfirmingDeleteId(null)
           }}
           placeholder='Search templates...'
-          className='w-full border border-stone-300 rounded px-2 py-1 text-sm mb-2 bg-white'
+          className='input-sm w-full mb-2'
           autoFocus
         />
       )}
@@ -545,7 +547,7 @@ function MealEditor({
   })
 
   return (
-    <div className='border border-primary-200 rounded-lg p-4 bg-white'>
+    <div className='card p-4 border-primary-200 animate-slide-up'>
       <div className='flex items-center justify-between mb-4'>
         <div>
           <h3 className='font-semibold text-lg'>
@@ -555,7 +557,7 @@ function MealEditor({
                   type='text'
                   value={customMealType}
                   onChange={(e) => setCustomMealType(e.target.value)}
-                  className='border border-stone-300 px-2 py-1 rounded text-lg font-semibold'
+                  className='input text-lg font-semibold'
                   placeholder='Meal name (e.g. Snack)'
                 />
               )
@@ -645,7 +647,7 @@ function MealEditor({
         ))}
 
       {validationError && (
-        <div className='mb-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+        <div className='mb-2 panel-error text-red-700 text-sm'>
           {validationError}
         </div>
       )}
@@ -657,7 +659,7 @@ function MealEditor({
             value={templateName}
             onChange={(e) => setTemplateName(e.target.value)}
             placeholder='Template name...'
-            className='border border-stone-300 p-1 rounded text-sm flex-1'
+            className='input-sm flex-1'
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleSaveAsTemplate()
             }}
@@ -665,7 +667,7 @@ function MealEditor({
           <button
             onClick={handleSaveAsTemplate}
             disabled={!templateName.trim()}
-            className='bg-primary-600 text-white px-3 py-1 rounded text-sm hover:bg-primary-700 disabled:opacity-50'
+            className='btn-sm btn-primary'
           >
             Save
           </button>
@@ -681,7 +683,7 @@ function MealEditor({
       <div className='flex gap-2'>
         <button
           onClick={handleSave}
-          className='bg-primary-600 text-white px-4 py-2 rounded text-sm hover:bg-primary-700'
+          className='btn-sm btn-primary'
         >
           {existingMeal ? 'Save Changes' : 'Create Meal'}
         </button>
@@ -690,7 +692,7 @@ function MealEditor({
             setShowTemplatePicker(!showTemplatePicker)
             setShowSuggestionPanel(false)
           }}
-          className='border border-primary-300 text-primary-700 px-4 py-2 rounded text-sm hover:bg-primary-50'
+          className='btn-sm btn-outline border-primary-300 text-primary-700 hover:bg-primary-50'
         >
           Use Template
         </button>
@@ -699,21 +701,21 @@ function MealEditor({
             setShowSuggestionPanel(!showSuggestionPanel)
             setShowTemplatePicker(false)
           }}
-          className='border border-secondary-300 text-secondary-700 px-4 py-2 rounded text-sm hover:bg-secondary-50'
+          className='btn-sm btn-outline border-secondary-300 text-secondary-700 hover:bg-secondary-50'
         >
           Suggest
         </button>
         {existingMeal && onSaveAsTemplate && (
           <button
             onClick={() => setShowSaveTemplate(!showSaveTemplate)}
-            className='border border-stone-300 text-stone-600 px-4 py-2 rounded text-sm hover:bg-stone-50'
+            className='btn-sm btn-outline'
           >
             Save as Template
           </button>
         )}
         <button
           onClick={onCancel}
-          className='border border-stone-300 px-4 py-2 rounded text-sm text-stone-600 hover:bg-stone-50'
+          className='btn-sm btn-outline'
         >
           Cancel
         </button>
@@ -726,6 +728,7 @@ function MealEditor({
 
 export function MealPlanner() {
   const [currentMonday, setCurrentMonday] = useState(() => getMonday(new Date()))
+  const { toast } = useToast()
   const [editingSlot, setEditingSlot] = useState<
     {
       date: string
@@ -856,11 +859,19 @@ export function MealPlanner() {
     if (existing) {
       updateMutation.mutate(
         { id: existing.id, data: { servings: data.servings, meal_type: data.meal_type } },
-        { onSuccess: () => setEditingSlot(null) },
+        {
+          onSuccess: () => {
+            setEditingSlot(null)
+            toast('Meal saved')
+          },
+        },
       )
     } else {
       createMutation.mutate(data, {
-        onSuccess: () => setEditingSlot(null),
+        onSuccess: () => {
+          setEditingSlot(null)
+          toast('Meal saved')
+        },
       })
     }
   }
@@ -876,7 +887,10 @@ export function MealPlanner() {
 
     if (existing) {
       deleteMutation.mutate(existing.id, {
-        onSuccess: () => setEditingSlot(null),
+        onSuccess: () => {
+          setEditingSlot(null)
+          toast('Meal deleted')
+        },
       })
     }
   }
@@ -888,7 +902,9 @@ export function MealPlanner() {
   }
 
   const handleSaveAsTemplate = (mealId: string, name: string) => {
-    createTemplateMutation.mutate({ meal_id: mealId, name })
+    createTemplateMutation.mutate({ meal_id: mealId, name }, {
+      onSuccess: () => toast('Template saved'),
+    })
   }
 
   const handleDeleteTemplate = (id: string) => {
@@ -911,22 +927,22 @@ export function MealPlanner() {
         <div className='flex items-center gap-3'>
           <button
             onClick={prevWeek}
-            className='px-3 py-1 border border-stone-300 rounded text-sm hover:bg-stone-50'
+            className='btn-sm btn-outline'
           >
-            {'\u2190'} Prev
+            <IconArrowLeft className='w-4 h-4 mr-1' /> Prev
           </button>
           <span className='text-sm font-medium text-stone-700 min-w-[180px] text-center'>
             {weekRangeLabel}
           </span>
           <button
             onClick={nextWeek}
-            className='px-3 py-1 border border-stone-300 rounded text-sm hover:bg-stone-50'
+            className='btn-sm btn-outline'
           >
-            Next {'\u2192'}
+            Next <IconArrowRight className='w-4 h-4 ml-1' />
           </button>
           <button
             onClick={goToToday}
-            className='px-3 py-1 bg-primary-600 text-white rounded text-sm hover:bg-primary-700'
+            className='btn-sm btn-primary'
           >
             Today
           </button>
@@ -934,7 +950,7 @@ export function MealPlanner() {
       </div>
 
       {mealsError && (
-        <div className='mb-4 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+        <div className='mb-4 panel-error text-red-700 text-sm'>
           Failed to load meals: {String(mealsError)}
         </div>
       )}
@@ -1007,7 +1023,7 @@ export function MealPlanner() {
                   onClick={() => handleAddCustomMeal(dateKey)}
                   className='w-full text-xs text-stone-400 hover:text-primary-600 py-1'
                 >
-                  + meal
+                  <IconPlus className='w-3 h-3 inline' /> meal
                 </button>
               </div>
             </div>
@@ -1017,9 +1033,9 @@ export function MealPlanner() {
 
       {/* Serving mismatch warnings */}
       {weeklyMismatches.length > 0 && (
-        <div className='mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3'>
+        <div className='mt-3 panel-warning animate-slide-down'>
           <div className='flex items-center gap-2 text-sm text-amber-800'>
-            <span>{'\u26A0'}</span>
+            <IconWarning className='w-4 h-4 text-amber-600' />
             <span className='font-medium'>
               {weeklyMismatches.length} partial recipe{weeklyMismatches.length !== 1 ? 's' : ''}
             </span>
@@ -1068,7 +1084,7 @@ export function MealPlanner() {
             onDeleteTemplate={handleDeleteTemplate}
           />
           {(createMutation.error || updateMutation.error) && (
-            <div className='mt-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+            <div className='mt-2 panel-error text-red-700 text-sm'>
               {String(createMutation.error || updateMutation.error)}
             </div>
           )}

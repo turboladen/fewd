@@ -46,7 +46,20 @@ export default {
         surface: '#FDFAF6',
       },
       fontFamily: {
-        heading: ['Georgia', '"Times New Roman"', 'serif'],
+        heading: ['"Playfair Display"', 'Georgia', '"Times New Roman"', 'serif'],
+        sans: [
+          '"DM Sans"',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          '"Segoe UI"',
+          'Roboto',
+          'sans-serif',
+        ],
+      },
+      boxShadow: {
+        'soft': '0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.03)',
+        'lifted': '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.03)',
+        'float': '0 10px 15px -3px rgba(0, 0, 0, 0.06), 0 4px 6px -4px rgba(0, 0, 0, 0.04)',
       },
     },
   },

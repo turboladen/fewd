@@ -27,7 +27,7 @@ export function DraftReview({
 }: DraftReviewProps) {
   if (isLoading) {
     return (
-      <div className='border border-primary-200 rounded-lg p-4 bg-primary-50'>
+      <div className='panel-primary animate-slide-up'>
         <div className='flex items-center gap-3'>
           <div className='flex gap-1'>
             <div
@@ -59,12 +59,12 @@ export function DraftReview({
 
   if (error) {
     return (
-      <div className='border border-red-200 rounded-lg p-4 bg-red-50'>
+      <div className='panel-error animate-slide-up'>
         <p className='text-sm text-red-700 mb-2'>{error}</p>
         {onRegenerate && (
           <button
             onClick={onRegenerate}
-            className='text-sm bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700'
+            className='btn-sm btn-danger-solid'
           >
             Try Again
           </button>
@@ -74,24 +74,24 @@ export function DraftReview({
   }
 
   return (
-    <div className='border border-primary-200 rounded-lg p-4 bg-primary-50'>
+    <div className='panel-primary animate-fade-in'>
       <div className='mb-3'>{children}</div>
       <div className='flex gap-2'>
         <button
           onClick={onAccept}
-          className='bg-primary-600 text-white px-3 py-1.5 rounded text-sm hover:bg-primary-700'
+          className='btn-sm btn-primary'
         >
           {acceptLabel}
         </button>
         <button
           onClick={onEdit}
-          className='bg-primary-600 text-white px-3 py-1.5 rounded text-sm hover:bg-primary-700'
+          className='btn-sm btn-primary'
         >
           {editLabel}
         </button>
         <button
           onClick={onReject}
-          className='bg-stone-200 text-stone-700 px-3 py-1.5 rounded text-sm hover:bg-stone-300'
+          className='btn-sm btn-outline'
         >
           {rejectLabel}
         </button>

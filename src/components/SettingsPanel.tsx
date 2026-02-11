@@ -12,6 +12,16 @@ import {
   useValidateDbLocation,
 } from '../hooks/useSettings'
 import type { ValidationResult } from '../types/settings'
+import {
+  IconCheck,
+  IconChevronDown,
+  IconChevronRight,
+  IconClose,
+  IconRefresh,
+  IconWarning,
+  IconX,
+} from './Icon'
+import { useToast } from './Toast'
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const apiKeyQuery = useSetting('anthropic_api_key')
@@ -20,6 +30,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const tokenUsageQuery = useTokenUsage()
   const setSetting = useSetSetting()
   const testConnection = useTestConnection()
+  const { toast } = useToast()
 
   const inputPriceQuery = useSetting('cost_input_price_per_mtok')
   const outputPriceQuery = useSetting('cost_output_price_per_mtok')
@@ -31,7 +42,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   const [apiKeyInput, setApiKeyInput] = useState('')
   const [showKey, setShowKey] = useState(false)
-  const [keySaved, setKeySaved] = useState(false)
   const [highlightApiKey, setHighlightApiKey] = useState(false)
   const [pendingDir, setPendingDir] = useState<string | null>(null)
   const [validation, setValidation] = useState<ValidationResult | null>(null)
@@ -68,9 +78,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       { key: 'anthropic_api_key', value: apiKeyInput },
       {
         onSuccess: () => {
-          setKeySaved(true)
           setShowKey(false)
-          setTimeout(() => setKeySaved(false), 2000)
+          toast('API key saved')
         },
       },
     )
@@ -173,19 +182,19 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     <div className='fixed inset-0 z-50 flex items-center justify-center'>
       {/* Backdrop */}
       <div
-        className='absolute inset-0 bg-black bg-opacity-30'
+        className='absolute inset-0 bg-black bg-opacity-30 animate-backdrop'
         onClick={onClose}
       />
 
       {/* Panel */}
-      <div className='relative bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto'>
+      <div className='relative bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto animate-scale-in'>
         <div className='flex items-center justify-between mb-4'>
           <h2 className='text-lg font-semibold text-stone-900'>Settings</h2>
           <button
             onClick={onClose}
             className='text-stone-400 hover:text-stone-600 text-lg'
           >
-            {'\u2715'}
+            <IconClose className='w-5 h-5' />
           </button>
         </div>
 
@@ -207,10 +216,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 value={apiKeyInput}
                 onChange={(e) => setApiKeyInput(e.target.value)}
                 placeholder='sk-ant-...'
-                className={`w-full border rounded px-3 py-1.5 text-sm pr-12 ${
+                className={`input w-full pr-12 ${
                   highlightApiKey
                     ? 'border-amber-400'
-                    : 'border-stone-300'
+                    : ''
                 }`}
               />
               <button
@@ -224,12 +233,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <button
               onClick={handleSaveKey}
               disabled={setSetting.isPending || !apiKeyChanged}
-              className='bg-primary-600 text-white px-3 py-1.5 rounded text-sm hover:bg-primary-700 disabled:opacity-50'
+              className='btn-sm btn-primary'
             >
               Save
             </button>
           </div>
-          {keySaved && <p className='text-xs text-primary-600 mt-1'>API key saved</p>}
         </div>
 
         {/* Model Selector */}
@@ -241,7 +249,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <select
               value={currentModel}
               onChange={(e) => handleModelChange(e.target.value)}
-              className='flex-1 border border-stone-300 rounded px-3 py-1.5 text-sm'
+              className='input flex-1'
             >
               {modelsQuery.data?.map((model) => (
                 <option key={model.id} value={model.id}>
@@ -255,7 +263,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               className='text-stone-400 hover:text-stone-600 px-2 text-sm disabled:opacity-50'
               title='Refresh models from Anthropic'
             >
-              {'\u21BB'}
+              <IconRefresh className='w-4 h-4' />
             </button>
           </div>
           <p className={`text-xs mt-1 ${highlightApiKey ? 'text-amber-600' : 'text-stone-400'}`}>
@@ -272,18 +280,19 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           <button
             onClick={() => testConnection.mutate()}
             disabled={testConnection.isPending || !apiKeyInput}
-            className='bg-stone-100 border border-stone-300 text-stone-700 px-3 py-1.5 rounded text-sm hover:bg-stone-200 disabled:opacity-50'
+            className='btn-sm btn-outline'
           >
             {testConnection.isPending ? 'Testing...' : 'Test Connection'}
           </button>
           {testConnection.isSuccess && (
             <p className='text-xs text-primary-600 mt-1'>
-              {'\u2713'} Connected — response: &quot;{testConnection.data}&quot;
+              <IconCheck className='w-3.5 h-3.5 inline' />{' '}
+              Connected — response: &quot;{testConnection.data}&quot;
             </p>
           )}
           {testConnection.isError && (
             <p className='text-xs text-red-600 mt-1'>
-              {'\u2717'} {String(testConnection.error)}
+              <IconX className='w-3.5 h-3.5 inline' /> {String(testConnection.error)}
             </p>
           )}
         </div>
@@ -319,7 +328,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             onClick={() => setShowCostCalc(!showCostCalc)}
             className='text-xs text-stone-400 hover:text-stone-600 mt-2'
           >
-            {showCostCalc ? '\u25BE' : '\u25B8'} Estimate cost
+            {showCostCalc
+              ? <IconChevronDown className='w-3 h-3 inline' />
+              : <IconChevronRight className='w-3 h-3 inline' />} Estimate cost
           </button>
 
           {showCostCalc && (
@@ -333,7 +344,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     min='0'
                     value={inputPrice}
                     onChange={(e) => handlePriceChange('input', e.target.value)}
-                    className='w-20 border border-stone-300 rounded px-2 py-0.5 text-xs'
+                    className='input-sm w-20'
                     placeholder='3.00'
                   />
                 </label>
@@ -345,7 +356,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     min='0'
                     value={outputPrice}
                     onChange={(e) => handlePriceChange('output', e.target.value)}
-                    className='w-20 border border-stone-300 rounded px-2 py-0.5 text-xs'
+                    className='input-sm w-20'
                     placeholder='15.00'
                   />
                 </label>
@@ -380,9 +391,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
           {/* Applied / restart notice */}
           {dbLocationApplied && (
-            <div className='mt-2 bg-primary-50 border border-primary-200 rounded p-2'>
+            <div className='mt-2 panel-primary p-2'>
               <p className='text-xs text-primary-800'>
-                {'\u21BB'} Restart the app to use the new database location.
+                <IconRefresh className='w-3.5 h-3.5 inline' />{' '}
+                Restart the app to use the new database location.
               </p>
             </div>
           )}
@@ -395,22 +407,23 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               </p>
 
               {!validation.valid && validation.warning && (
-                <div className='bg-red-50 border border-red-200 rounded p-2'>
+                <div className='panel-error p-2'>
                   <p className='text-xs text-red-700'>{validation.warning}</p>
                 </div>
               )}
 
               {validation.valid && validation.warning && (
-                <div className='bg-amber-50 border border-amber-200 rounded p-2'>
+                <div className='panel-warning p-2'>
                   <p className='text-xs text-amber-800'>
-                    {'\u26A0'} {validation.warning}
+                    <IconWarning className='w-3.5 h-3.5 inline' /> {validation.warning}
                   </p>
                 </div>
               )}
 
               {validation.valid && validation.has_existing_db && (
                 <p className='text-xs text-primary-600'>
-                  {'\u2713'} Existing database found — it will be used.
+                  <IconCheck className='w-3.5 h-3.5 inline' />{' '}
+                  Existing database found — it will be used.
                 </p>
               )}
 
@@ -425,13 +438,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   <button
                     onClick={handleApplyDbLocation}
                     disabled={setDbLocation.isPending || copyDb.isPending}
-                    className='bg-primary-600 text-white px-3 py-1 rounded text-xs hover:bg-primary-700 disabled:opacity-50'
+                    className='btn-xs btn-primary'
                   >
                     {copyDb.isPending ? 'Copying...' : 'Apply'}
                   </button>
                   <button
                     onClick={handleCancelDbChange}
-                    className='bg-stone-100 border border-stone-300 text-stone-600 px-3 py-1 rounded text-xs hover:bg-stone-200'
+                    className='btn-xs btn-outline'
                   >
                     Cancel
                   </button>
@@ -445,7 +458,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <div className='mt-2 flex gap-2'>
               <button
                 onClick={handlePickFolder}
-                className='bg-stone-100 border border-stone-300 text-stone-700 px-3 py-1 rounded text-xs hover:bg-stone-200'
+                className='btn-xs btn-outline'
               >
                 Change Location...
               </button>

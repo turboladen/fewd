@@ -4,6 +4,8 @@ import { formatAmount } from '../types/recipe'
 import type { IngredientAmount } from '../types/recipe'
 import type { AggregatedIngredient, IngredientSource } from '../types/shopping'
 import { addDays, formatDateKey, getMonday, getWeekDates } from '../utils/dates'
+import { EmptyState } from './EmptyState'
+import { IconArrowLeft, IconArrowRight, IconChevronDown, IconChevronUp } from './Icon'
 
 function formatSourceLabel(source: IngredientSource): string {
   const dateObj = new Date(source.meal_date + 'T00:00:00')
@@ -33,10 +35,10 @@ function IngredientCard({
   const hasPartialRecipe = ingredient.items.some(isPartialSource)
 
   return (
-    <div className='border border-stone-200 rounded-lg bg-white shadow-sm'>
+    <div className='card'>
       <button
         onClick={onToggle}
-        className='w-full text-left px-4 py-3 flex items-center justify-between hover:bg-stone-50'
+        className='w-full text-left px-4 py-3 flex items-center justify-between hover:bg-stone-50 rounded-xl transition-colors'
       >
         <div className='flex items-center gap-3'>
           <span className='font-medium text-stone-900'>
@@ -48,12 +50,12 @@ function IngredientCard({
             </span>
           )}
           {!hasTotals && ingredient.items.length > 1 && (
-            <span className='text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded'>
+            <span className='tag text-amber-600 bg-amber-50'>
               Mixed units
             </span>
           )}
           {hasPartialRecipe && (
-            <span className='text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded'>
+            <span className='tag text-amber-600 bg-amber-50'>
               Partial recipe
             </span>
           )}
@@ -62,28 +64,32 @@ function IngredientCard({
           <span className='text-xs text-stone-400'>
             {ingredient.items.length} source{ingredient.items.length !== 1 ? 's' : ''}
           </span>
-          <span className='text-stone-400 text-sm'>
-            {isExpanded ? '\u25B2' : '\u25BC'}
+          <span className='text-stone-400 transition-transform duration-200'>
+            {isExpanded
+              ? <IconChevronUp className='w-4 h-4' />
+              : <IconChevronDown className='w-4 h-4' />}
           </span>
         </div>
       </button>
 
       {isExpanded && (
-        <div className='px-4 pb-3 border-t border-stone-100'>
-          <div className='mt-2 space-y-1'>
-            {ingredient.items.map((source, i) => (
-              <div key={i} className='flex items-center gap-2 text-sm text-stone-600'>
-                <span className='text-stone-900 font-medium min-w-[80px]'>
-                  {formatAmount(source.amount)} {source.unit}
-                </span>
-                <span className='text-stone-400'>{formatSourceLabel(source)}</span>
-                {isPartialSource(source) && (
-                  <span className='text-xs text-amber-500'>
-                    ({source.person_servings} of {source.recipe_servings} servings)
+        <div className='animate-expand'>
+          <div className='px-4 pb-3 border-t border-stone-100'>
+            <div className='mt-2 space-y-1'>
+              {ingredient.items.map((source, i) => (
+                <div key={i} className='flex items-center gap-2 text-sm text-stone-600'>
+                  <span className='text-stone-900 font-medium min-w-[80px]'>
+                    {formatAmount(source.amount)} {source.unit}
                   </span>
-                )}
-              </div>
-            ))}
+                  <span className='text-stone-400'>{formatSourceLabel(source)}</span>
+                  {isPartialSource(source) && (
+                    <span className='text-xs text-amber-500'>
+                      ({source.person_servings} of {source.recipe_servings} servings)
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -145,22 +151,22 @@ export function ShoppingList() {
         <div className='flex items-center gap-3'>
           <button
             onClick={prevWeek}
-            className='px-3 py-1 border border-stone-300 rounded text-sm hover:bg-stone-50'
+            className='btn-sm btn-outline'
           >
-            {'\u2190'} Prev
+            <IconArrowLeft className='w-4 h-4 mr-1' /> Prev
           </button>
           <span className='text-sm font-medium text-stone-700 min-w-[180px] text-center'>
             {weekRangeLabel}
           </span>
           <button
             onClick={nextWeek}
-            className='px-3 py-1 border border-stone-300 rounded text-sm hover:bg-stone-50'
+            className='btn-sm btn-outline'
           >
-            Next {'\u2192'}
+            Next <IconArrowRight className='w-4 h-4 ml-1' />
           </button>
           <button
             onClick={goToThisWeek}
-            className='px-3 py-1 bg-primary-600 text-white rounded text-sm hover:bg-primary-700'
+            className='btn-sm btn-primary'
           >
             This Week
           </button>
@@ -172,19 +178,18 @@ export function ShoppingList() {
 
       {/* Error state */}
       {error && (
-        <div className='text-red-600 text-sm bg-red-50 border border-red-200 rounded p-3'>
+        <div className='panel-error text-red-700 text-sm'>
           {String(error)}
         </div>
       )}
 
       {/* Empty state */}
       {!isLoading && !error && ingredients && ingredients.length === 0 && (
-        <div className='text-center py-12'>
-          <p className='text-stone-500 text-lg mb-2'>No meals planned for this week</p>
-          <p className='text-stone-400 text-sm'>
-            Plan some meals in the Planner tab to see ingredients here.
-          </p>
-        </div>
+        <EmptyState
+          emoji='🛒'
+          title='Nothing to buy this week'
+          description='Plan some meals in the Planner tab to generate your shopping list.'
+        />
       )}
 
       {/* Ingredient list */}

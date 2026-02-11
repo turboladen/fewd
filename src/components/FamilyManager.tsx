@@ -2,63 +2,10 @@ import { useEffect, useState } from 'react'
 import { useCreatePerson, useDeletePerson, usePeople, useUpdatePerson } from '../hooks/usePeople'
 import type { CreatePersonDto, UpdatePersonDto } from '../types/person'
 import { parsePerson } from '../types/person'
-
-function TagInput({
-  label,
-  value,
-  onChange,
-}: {
-  label: string
-  value: string[]
-  onChange: (value: string[]) => void
-}) {
-  const [input, setInput] = useState('')
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && input.trim()) {
-      e.preventDefault()
-      onChange([...value, input.trim()])
-      setInput('')
-    }
-  }
-
-  const handleRemove = (index: number) => {
-    onChange(value.filter((_, i) => i !== index))
-  }
-
-  return (
-    <div>
-      <label className='block text-sm font-medium text-stone-700 mb-1'>
-        {label}
-      </label>
-      <div className='flex flex-wrap gap-1 mb-1'>
-        {value.map((tag, i) => (
-          <span
-            key={i}
-            className='inline-flex items-center bg-stone-100 text-stone-700 text-sm px-2 py-1 rounded'
-          >
-            {tag}
-            <button
-              onClick={() => handleRemove(i)}
-              className='ml-1 text-stone-400 hover:text-stone-600'
-              type='button'
-            >
-              x
-            </button>
-          </span>
-        ))}
-      </div>
-      <input
-        type='text'
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder={`Add ${label.toLowerCase()} (press Enter)`}
-        className='border border-stone-300 p-2 rounded w-full text-sm'
-      />
-    </div>
-  )
-}
+import { EmptyState } from './EmptyState'
+import { IconEdit, IconPlus, IconTrash } from './Icon'
+import { TagInput } from './TagInput'
+import { useToast } from './Toast'
 
 interface PersonFormData {
   name: string
@@ -110,7 +57,7 @@ function PersonForm({
           required
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
-          className='border border-stone-300 p-2 rounded w-full'
+          className='input w-full'
         />
       </div>
       <div>
@@ -122,7 +69,7 @@ function PersonForm({
           required
           value={form.birthdate}
           onChange={(e) => setForm({ ...form, birthdate: e.target.value })}
-          className='border border-stone-300 p-2 rounded w-full'
+          className='input w-full'
         />
       </div>
       <div>
@@ -134,7 +81,7 @@ function PersonForm({
           value={form.dietary_goals}
           onChange={(e) => setForm({ ...form, dietary_goals: e.target.value })}
           placeholder='e.g., More protein, less sugar'
-          className='border border-stone-300 p-2 rounded w-full'
+          className='input w-full'
         />
       </div>
       <TagInput
@@ -154,7 +101,7 @@ function PersonForm({
         <textarea
           value={form.notes}
           onChange={(e) => setForm({ ...form, notes: e.target.value })}
-          className='border border-stone-300 p-2 rounded w-full'
+          className='input w-full'
           rows={2}
         />
       </div>
@@ -162,18 +109,14 @@ function PersonForm({
         <button
           type='submit'
           disabled={!isValid}
-          className={`px-4 py-2 rounded text-white ${
-            isValid
-              ? 'bg-primary-600 hover:bg-primary-700'
-              : 'bg-primary-300 cursor-not-allowed'
-          }`}
+          className='btn-md btn-primary'
         >
           {submitLabel}
         </button>
         <button
           type='button'
           onClick={onCancel}
-          className='border border-stone-300 px-4 py-2 rounded hover:bg-stone-50'
+          className='btn-md btn-outline'
         >
           Cancel
         </button>
@@ -187,6 +130,7 @@ export function FamilyManager() {
   const createMutation = useCreatePerson()
   const updateMutation = useUpdatePerson()
   const deleteMutation = useDeletePerson()
+  const { toast } = useToast()
 
   const [isAdding, setIsAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -218,7 +162,10 @@ export function FamilyManager() {
       notes: formData.notes || undefined,
     }
     createMutation.mutate(dto, {
-      onSuccess: () => setIsAdding(false),
+      onSuccess: () => {
+        setIsAdding(false)
+        toast('Family member added')
+      },
     })
   }
 
@@ -232,13 +179,19 @@ export function FamilyManager() {
       notes: formData.notes || undefined,
     }
     updateMutation.mutate({ id, data: dto }, {
-      onSuccess: () => setEditingId(null),
+      onSuccess: () => {
+        setEditingId(null)
+        toast('Changes saved')
+      },
     })
   }
 
   const handleDelete = (id: string) => {
     deleteMutation.mutate(id, {
-      onSuccess: () => setConfirmingDeleteId(null),
+      onSuccess: () => {
+        setConfirmingDeleteId(null)
+        toast('Family member removed')
+      },
     })
   }
 
@@ -249,7 +202,7 @@ export function FamilyManager() {
   if (error) {
     return (
       <div className='p-6'>
-        <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+        <div className='panel-error text-red-700 text-sm'>
           Failed to load family members: {String(error)}
         </div>
       </div>
@@ -263,15 +216,16 @@ export function FamilyManager() {
         {!isAdding && (
           <button
             onClick={() => setIsAdding(true)}
-            className='bg-primary-600 text-white px-4 py-2 rounded hover:bg-primary-700'
+            className='btn-md btn-primary'
           >
-            + Add Person
+            <IconPlus className='w-4 h-4' />
+            Add Person
           </button>
         )}
       </div>
 
       {isAdding && (
-        <div className='mb-6 border border-stone-200 p-4 rounded-lg bg-white shadow-sm'>
+        <div className='card p-4 mb-6 animate-slide-up'>
           <h3 className='font-semibold text-lg mb-3'>Add Family Member</h3>
           <PersonForm
             initialData={emptyForm}
@@ -280,7 +234,7 @@ export function FamilyManager() {
             submitLabel='Add Person'
           />
           {createMutation.error && (
-            <div className='mt-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+            <div className='mt-2 panel-error text-red-700 text-sm'>
               {String(createMutation.error)}
             </div>
           )}
@@ -288,9 +242,12 @@ export function FamilyManager() {
       )}
 
       {people?.length === 0 && !isAdding && (
-        <p className='text-stone-500'>
-          No family members yet. Add someone to get started!
-        </p>
+        <EmptyState
+          emoji='👨‍👩‍👧‍👦'
+          title='Your family awaits'
+          description='Add your first family member to start planning meals together.'
+          action={{ label: 'Add Person', onClick: () => setIsAdding(true) }}
+        />
       )}
 
       <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
@@ -301,7 +258,7 @@ export function FamilyManager() {
             return (
               <div
                 key={person.id}
-                className='border border-primary-200 p-4 rounded-lg bg-primary-50'
+                className='panel-primary animate-slide-up'
               >
                 <h3 className='font-semibold text-lg mb-3'>
                   Edit {person.name}
@@ -320,7 +277,7 @@ export function FamilyManager() {
                   submitLabel='Save Changes'
                 />
                 {updateMutation.error && (
-                  <div className='mt-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+                  <div className='mt-2 panel-error text-red-700 text-sm'>
                     {String(updateMutation.error)}
                   </div>
                 )}
@@ -331,7 +288,7 @@ export function FamilyManager() {
           return (
             <div
               key={person.id}
-              className='border border-stone-200 p-4 rounded-lg bg-white shadow-sm'
+              className='card p-4 animate-slide-up'
             >
               <div className='flex items-start justify-between'>
                 <h3 className='font-semibold text-lg'>{person.name}</h3>
@@ -340,7 +297,7 @@ export function FamilyManager() {
                     onClick={() => setEditingId(person.id)}
                     className='text-primary-600 text-sm hover:underline'
                   >
-                    Edit
+                    <IconEdit className='w-4 h-4' />
                   </button>
                   {confirmingDeleteId === person.id
                     ? (
@@ -363,9 +320,9 @@ export function FamilyManager() {
                     : (
                       <button
                         onClick={() => setConfirmingDeleteId(person.id)}
-                        className='text-red-600 text-sm hover:underline'
+                        className='btn-sm btn-danger'
                       >
-                        Delete
+                        <IconTrash className='w-4 h-4' />
                       </button>
                     )}
                 </div>

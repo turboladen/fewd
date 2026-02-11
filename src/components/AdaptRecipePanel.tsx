@@ -6,6 +6,7 @@ import { parsePerson } from '../types/person'
 import type { CreateRecipeDto, ParsedRecipe, PersonAdaptOptions } from '../types/recipe'
 import { formatAmount } from '../types/recipe'
 import { DraftReview } from './DraftReview'
+import { IconCheck } from './Icon'
 import { FieldToggle, PersonSummary } from './PersonFieldToggles'
 
 interface AdaptRecipePanelProps {
@@ -131,7 +132,7 @@ export function AdaptRecipePanel({
   // No API key message
   if (!hasApiKey && !apiKeyQuery.isLoading) {
     return (
-      <div className='border border-secondary-200 rounded-lg p-4 bg-secondary-50'>
+      <div className='panel-secondary'>
         <h3 className='font-semibold text-lg mb-3 text-secondary-900'>
           Adapt: {parsed.name}
         </h3>
@@ -140,7 +141,7 @@ export function AdaptRecipePanel({
         </div>
         <button
           onClick={onCancel}
-          className='border border-stone-300 px-4 py-2 rounded text-sm text-stone-600 hover:bg-stone-50'
+          className='btn-sm btn-outline'
         >
           Cancel
         </button>
@@ -151,7 +152,7 @@ export function AdaptRecipePanel({
   // Review phase
   if (phase === 'review') {
     return (
-      <div className='border border-secondary-200 rounded-lg p-4 bg-secondary-50'>
+      <div className='panel-secondary animate-fade-in'>
         <h3 className='font-semibold text-lg mb-3 text-secondary-900'>
           Adapt: {parsed.name}
         </h3>
@@ -169,7 +170,7 @@ export function AdaptRecipePanel({
           {draft && <RecipePreview draft={draft} />}
         </DraftReview>
         {createMutation.error && (
-          <div className='mt-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+          <div className='mt-2 panel-error text-red-700 text-sm'>
             {String(createMutation.error)}
           </div>
         )}
@@ -179,7 +180,7 @@ export function AdaptRecipePanel({
 
   // Configure phase
   return (
-    <div className='border border-secondary-200 rounded-lg p-4 bg-secondary-50'>
+    <div className='panel-secondary animate-slide-up'>
       <h3 className='font-semibold text-lg mb-3 text-secondary-900'>
         Adapt: {parsed.name}
       </h3>
@@ -209,7 +210,7 @@ export function AdaptRecipePanel({
                     className='sr-only'
                   />
                   <span className='text-secondary-700'>
-                    {toggle.selected ? '\u2713' : ''}
+                    {toggle.selected ? <IconCheck className='w-3.5 h-3.5' /> : ''}
                   </span>
                   <span className='font-medium'>{person.name}</span>
                 </label>
@@ -256,7 +257,7 @@ export function AdaptRecipePanel({
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
           placeholder='e.g., Make this keto-friendly, use chicken thighs instead...'
-          className='w-full border border-stone-300 rounded px-3 py-2 text-sm'
+          className='input w-full'
           rows={3}
         />
       </div>
@@ -266,13 +267,13 @@ export function AdaptRecipePanel({
         <button
           onClick={handleGenerate}
           disabled={selectedCount === 0}
-          className='bg-secondary-600 text-white px-4 py-2 rounded text-sm hover:bg-secondary-700 disabled:opacity-50'
+          className='btn-sm btn-secondary'
         >
           Generate Adapted Recipe
         </button>
         <button
           onClick={onCancel}
-          className='border border-stone-300 px-4 py-2 rounded text-sm text-stone-600 hover:bg-stone-50'
+          className='btn-sm btn-outline'
         >
           Cancel
         </button>
@@ -321,7 +322,7 @@ function RecipePreview({ draft }: { draft: CreateRecipeDto }) {
       {draft.tags.length > 0 && (
         <div className='flex flex-wrap gap-1'>
           {draft.tags.map((tag, i) => (
-            <span key={i} className='bg-stone-100 text-stone-600 text-xs px-2 py-0.5 rounded'>
+            <span key={i} className='tag'>
               {tag}
             </span>
           ))}

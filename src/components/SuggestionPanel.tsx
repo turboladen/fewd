@@ -3,6 +3,7 @@ import { useMealSuggestions } from '../hooks/useSuggestions'
 import type { Person } from '../types/person'
 import type { SuggestionItem } from '../types/suggestion'
 import { AiSuggestionSection } from './AiSuggestionSection'
+import { IconCheck, IconChevronDown, IconChevronRight, IconClose } from './Icon'
 import { StarRating } from './StarRating'
 
 function SuggestionSection({
@@ -24,19 +25,23 @@ function SuggestionSection({
         onClick={() => setIsOpen(!isOpen)}
         className='flex items-center gap-1 text-sm font-semibold text-stone-700 w-full text-left py-1'
       >
-        <span className='text-xs text-stone-400'>{isOpen ? '\u25BC' : '\u25B6'}</span>
+        <span className='text-xs text-stone-400'>
+          {isOpen
+            ? <IconChevronDown className='w-3 h-3' />
+            : <IconChevronRight className='w-3 h-3' />}
+        </span>
         {title}
         <span className='text-xs text-stone-400 font-normal ml-1'>({items.length})</span>
       </button>
       {isOpen && (
-        <div className='space-y-1 ml-4 mb-2'>
+        <div className='space-y-1 ml-4 mb-2 animate-slide-down'>
           {items.length === 0
             ? <p className='text-xs text-stone-400 italic'>None found</p>
             : items.map((item) => (
               <button
                 key={item.recipe_id}
                 onClick={() => onSelect(item.recipe_id)}
-                className='w-full text-left bg-white border border-stone-200 rounded p-2 hover:border-secondary-300 hover:bg-secondary-50'
+                className='w-full text-left card p-2 hover:border-secondary-300 hover:bg-secondary-50'
               >
                 <div className='flex items-center gap-2'>
                   <span className='font-medium text-sm'>{item.recipe_name}</span>
@@ -95,11 +100,11 @@ export function SuggestionPanel({
   }
 
   return (
-    <div className='border border-secondary-200 rounded-lg p-3 bg-secondary-50 mb-3'>
+    <div className='border border-secondary-200 rounded-lg p-3 bg-secondary-50 mb-3 animate-slide-down'>
       <div className='flex items-center justify-between mb-2'>
         <h4 className='font-medium text-sm text-secondary-800'>Suggest Recipes</h4>
         <button onClick={onClose} className='text-stone-400 hover:text-stone-600 text-sm'>
-          {'\u2715'}
+          <IconClose className='w-3.5 h-3.5' />
         </button>
       </div>
 
@@ -124,7 +129,7 @@ export function SuggestionPanel({
                 className='sr-only'
               />
               <span className='text-xs'>
-                {isSelected ? '\u2713' : ''}
+                {isSelected ? <IconCheck className='w-3.5 h-3.5' /> : ''}
               </span>
               {person.name}
             </label>
@@ -135,13 +140,13 @@ export function SuggestionPanel({
       <button
         onClick={handleFetch}
         disabled={selectedPersonIds.size === 0 || mutation.isPending}
-        className='bg-secondary-600 text-white px-3 py-1 rounded text-sm hover:bg-secondary-700 disabled:opacity-50 mb-2'
+        className='btn-sm btn-secondary mb-2'
       >
         {mutation.isPending ? 'Loading...' : 'Get Suggestions'}
       </button>
 
       {mutation.error && (
-        <div className='mb-2 bg-red-50 border border-red-200 rounded p-2 text-red-700 text-sm'>
+        <div className='mb-2 panel-error text-red-700 text-sm'>
           {String(mutation.error)}
         </div>
       )}

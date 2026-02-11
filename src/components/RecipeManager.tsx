@@ -22,67 +22,14 @@ import type {
 } from '../types/recipe'
 import { formatAmount, formatTime, parseRecipe } from '../types/recipe'
 import { AdaptRecipePanel } from './AdaptRecipePanel'
+import { EmptyState } from './EmptyState'
+import { IconArrowRight, IconCheck, IconClose, IconPlus, IconStar, IconStarFilled } from './Icon'
 import { IngredientInput } from './IngredientInput'
 import { StarRating } from './StarRating'
+import { TagInput } from './TagInput'
+import { useToast } from './Toast'
 
 // --- Sub-components ---
-
-function TagInput({
-  label,
-  value,
-  onChange,
-}: {
-  label: string
-  value: string[]
-  onChange: (value: string[]) => void
-}) {
-  const [input, setInput] = useState('')
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && input.trim()) {
-      e.preventDefault()
-      onChange([...value, input.trim()])
-      setInput('')
-    }
-  }
-
-  const handleRemove = (index: number) => {
-    onChange(value.filter((_, i) => i !== index))
-  }
-
-  return (
-    <div>
-      <label className='block text-sm font-medium text-stone-700 mb-1'>
-        {label}
-      </label>
-      <div className='flex flex-wrap gap-1 mb-1'>
-        {value.map((tag, i) => (
-          <span
-            key={i}
-            className='inline-flex items-center bg-stone-100 text-stone-700 text-sm px-2 py-1 rounded'
-          >
-            {tag}
-            <button
-              onClick={() => handleRemove(i)}
-              className='ml-1 text-stone-400 hover:text-stone-600'
-              type='button'
-            >
-              x
-            </button>
-          </span>
-        ))}
-      </div>
-      <input
-        type='text'
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder={`Add ${label.toLowerCase()} (press Enter)`}
-        className='border border-stone-300 p-2 rounded w-full text-sm'
-      />
-    </div>
-  )
-}
 
 function TimeInput({
   label,
@@ -112,7 +59,7 @@ function TimeInput({
             }
           }}
           placeholder='0'
-          className='border border-stone-300 p-2 rounded w-20 text-sm'
+          className='input-sm w-20'
         />
         <select
           value={value?.unit ?? 'minutes'}
@@ -121,7 +68,7 @@ function TimeInput({
               onChange({ ...value, unit: e.target.value as TimeValue['unit'] })
             }
           }}
-          className='border border-stone-300 p-2 rounded text-sm'
+          className='input-sm'
         >
           <option value='minutes'>minutes</option>
           <option value='hours'>hours</option>
@@ -197,7 +144,7 @@ function RecipeForm({
             required
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
-            className='border border-stone-300 p-2 rounded w-full'
+            className='input w-full'
           />
         </div>
         <div>
@@ -209,7 +156,7 @@ function RecipeForm({
             value={form.icon}
             onChange={(e) => setForm({ ...form, icon: e.target.value })}
             placeholder='e.g. 🍝'
-            className='border border-stone-300 p-2 rounded w-24'
+            className='input w-24'
           />
         </div>
       </div>
@@ -222,7 +169,7 @@ function RecipeForm({
           value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })}
           placeholder='Brief description of the recipe'
-          className='border border-stone-300 p-2 rounded w-full'
+          className='input w-full'
           rows={2}
         />
       </div>
@@ -253,7 +200,7 @@ function RecipeForm({
             required
             value={form.servings}
             onChange={(e) => setForm({ ...form, servings: parseInt(e.target.value) || 1 })}
-            className='border border-stone-300 p-2 rounded w-20 text-sm'
+            className='input-sm w-20'
           />
         </div>
       </div>
@@ -272,7 +219,7 @@ function RecipeForm({
           required
           value={form.instructions}
           onChange={(e) => setForm({ ...form, instructions: e.target.value })}
-          className='border border-stone-300 p-2 rounded w-full'
+          className='input w-full'
           rows={4}
           placeholder='Step-by-step instructions...'
         />
@@ -291,13 +238,13 @@ function RecipeForm({
         <textarea
           value={form.notes}
           onChange={(e) => setForm({ ...form, notes: e.target.value })}
-          className='border border-stone-300 p-2 rounded w-full'
+          className='input w-full'
           rows={2}
         />
       </div>
 
       {validationError && (
-        <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+        <div className='panel-error text-red-700 text-sm'>
           {validationError}
         </div>
       )}
@@ -305,14 +252,14 @@ function RecipeForm({
       <div className='flex gap-2'>
         <button
           type='submit'
-          className='bg-primary-600 text-white px-4 py-2 rounded hover:bg-primary-700'
+          className='btn-md btn-primary'
         >
           {submitLabel}
         </button>
         <button
           type='button'
           onClick={onCancel}
-          className='border border-stone-300 px-4 py-2 rounded hover:bg-stone-50'
+          className='btn-md btn-outline'
         >
           Cancel
         </button>
@@ -410,27 +357,27 @@ function ImportRecipeForm({
               required
               value={markdown}
               onChange={(e) => setMarkdown(e.target.value)}
-              className='border border-stone-300 p-2 rounded w-full font-mono text-sm'
+              className='input w-full font-mono'
               rows={12}
               placeholder={`# Recipe Name\nDescription here\nPrep time: 15 min\nServings: 4\n\n## Ingredients\n- 2 cups flour\n- 1 tsp salt\n\n## Instructions\n1. Mix ingredients...\n\n## Tags\ndinner, quick`}
             />
           </div>
           {markdownError && (
-            <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+            <div className='panel-error text-red-700 text-sm'>
               {markdownError}
             </div>
           )}
           <div className='flex gap-2'>
             <button
               type='submit'
-              className='bg-primary-600 text-white px-4 py-2 rounded hover:bg-primary-700'
+              className='btn-md btn-primary'
             >
               Import
             </button>
             <button
               type='button'
               onClick={onCancel}
-              className='border border-stone-300 px-4 py-2 rounded hover:bg-stone-50'
+              className='btn-md btn-outline'
             >
               Cancel
             </button>
@@ -450,14 +397,14 @@ function ImportRecipeForm({
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder='https://example.com/recipe/...'
-              className='border border-stone-300 p-2 rounded w-full text-sm'
+              className='input w-full'
             />
             <p className='text-xs text-stone-500 mt-1'>
               Paste a link to a recipe page. AI will extract the recipe automatically.
             </p>
           </div>
           {urlError && (
-            <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+            <div className='panel-error text-red-700 text-sm'>
               {urlError}
             </div>
           )}
@@ -465,7 +412,7 @@ function ImportRecipeForm({
             <button
               type='submit'
               disabled={urlLoading}
-              className='bg-primary-600 text-white px-4 py-2 rounded hover:bg-primary-700 disabled:opacity-50 disabled:cursor-wait'
+              className='btn-md btn-primary disabled:cursor-wait'
             >
               {urlLoading ? 'Analyzing recipe...' : 'Import'}
             </button>
@@ -473,7 +420,7 @@ function ImportRecipeForm({
               type='button'
               onClick={onCancel}
               disabled={urlLoading}
-              className='border border-stone-300 px-4 py-2 rounded hover:bg-stone-50 disabled:opacity-50'
+              className='btn-md btn-outline'
             >
               Cancel
             </button>
@@ -491,7 +438,7 @@ function ImportRecipeForm({
               <button
                 type='button'
                 onClick={handleChooseFile}
-                className='border border-stone-300 px-3 py-2 rounded text-sm hover:bg-stone-50'
+                className='btn-sm btn-outline'
               >
                 Choose File
               </button>
@@ -504,7 +451,7 @@ function ImportRecipeForm({
             </p>
           </div>
           {fileError && (
-            <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+            <div className='panel-error text-red-700 text-sm'>
               {fileError}
             </div>
           )}
@@ -512,7 +459,7 @@ function ImportRecipeForm({
             <button
               type='submit'
               disabled={!selectedFile || fileLoading}
-              className='bg-primary-600 text-white px-4 py-2 rounded hover:bg-primary-700 disabled:opacity-50 disabled:cursor-wait'
+              className='btn-md btn-primary disabled:cursor-wait'
             >
               {fileLoading ? 'Analyzing recipe...' : 'Import'}
             </button>
@@ -520,7 +467,7 @@ function ImportRecipeForm({
               type='button'
               onClick={onCancel}
               disabled={fileLoading}
-              className='border border-stone-300 px-4 py-2 rounded hover:bg-stone-50 disabled:opacity-50'
+              className='btn-md btn-outline'
             >
               Cancel
             </button>
@@ -575,33 +522,35 @@ function ScaleRecipePanel({
   }
 
   return (
-    <div className='border border-secondary-200 rounded-lg p-4 bg-secondary-50'>
+    <div className='panel-secondary animate-slide-up'>
       <h3 className='font-semibold text-lg mb-3'>Scale: {parsed.name}</h3>
 
       <div className='flex items-center gap-3 mb-4'>
         <span className='text-sm text-stone-600'>
           Current: {parsed.servings} serving{parsed.servings !== 1 ? 's' : ''}
         </span>
-        <span className='text-stone-400'>{'\u2192'}</span>
+        <span className='text-stone-400'>
+          <IconArrowRight className='w-4 h-4' />
+        </span>
         <input
           type='number'
           min={1}
           value={targetServings}
           onChange={(e) => setTargetServings(parseInt(e.target.value) || 1)}
-          className='border border-stone-300 p-1 rounded w-20 text-sm'
+          className='input-sm w-20'
         />
         <span className='text-sm text-stone-600'>servings</span>
         <button
           onClick={handlePreview}
           disabled={targetServings < 1 || targetServings === parsed.servings}
-          className='bg-secondary-600 text-white px-3 py-1 rounded text-sm hover:bg-secondary-700 disabled:opacity-50 disabled:cursor-not-allowed'
+          className='btn-sm btn-secondary'
         >
           Preview
         </button>
       </div>
 
       {previewMutation.error && (
-        <div className='mb-3 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+        <div className='mb-3 panel-error text-red-700 text-sm'>
           {String(previewMutation.error)}
         </div>
       )}
@@ -609,7 +558,7 @@ function ScaleRecipePanel({
       {preview && editedIngredients && (
         <>
           {preview.flagged.length > 0 && (
-            <div className='mb-3 bg-amber-50 border border-amber-200 rounded p-3 text-amber-800 text-sm'>
+            <div className='mb-3 panel-warning text-amber-800 text-sm'>
               Some ingredients have fractional amounts for discrete units. You can adjust them
               below.
             </div>
@@ -638,7 +587,7 @@ function ScaleRecipePanel({
                           amount: { type: 'single', value: val },
                         })
                       }}
-                      className='border border-amber-300 p-1 rounded w-16 text-sm bg-white'
+                      className='input-sm w-16 border-amber-300'
                     />
                   )
                   : <span className='font-medium w-16 text-right'>{formatAmount(ing.amount)}</span>}
@@ -652,7 +601,7 @@ function ScaleRecipePanel({
           </div>
 
           {error && (
-            <div className='mb-3 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+            <div className='mb-3 panel-error text-red-700 text-sm'>
               {error}
             </div>
           )}
@@ -660,19 +609,19 @@ function ScaleRecipePanel({
           <div className='flex gap-2'>
             <button
               onClick={() => onSaveAsNew(editedIngredients, targetServings)}
-              className='bg-primary-600 text-white px-4 py-2 rounded text-sm hover:bg-primary-700'
+              className='btn-sm btn-primary'
             >
               Save as New Recipe
             </button>
             <button
               onClick={() => onUpdateInPlace(editedIngredients, targetServings)}
-              className='border border-stone-300 px-4 py-2 rounded text-sm hover:bg-stone-50'
+              className='btn-sm btn-outline'
             >
               Update This Recipe
             </button>
             <button
               onClick={onCancel}
-              className='border border-stone-300 px-4 py-2 rounded text-sm text-stone-600 hover:bg-stone-50'
+              className='btn-sm btn-outline'
             >
               Cancel
             </button>
@@ -684,7 +633,7 @@ function ScaleRecipePanel({
         <div className='flex gap-2'>
           <button
             onClick={onCancel}
-            className='border border-stone-300 px-4 py-2 rounded text-sm text-stone-600 hover:bg-stone-50'
+            className='btn-sm btn-outline'
           >
             Cancel
           </button>
@@ -794,7 +743,7 @@ function RecipeDetail({
   }
 
   return (
-    <div className='border border-stone-200 p-6 rounded-lg bg-white shadow-sm md:col-span-2'>
+    <div className='card p-6 md:col-span-2 animate-fade-in'>
       {/* Header */}
       <div className='flex items-start justify-between mb-4'>
         <div>
@@ -807,7 +756,9 @@ function RecipeDetail({
                 parsed.is_favorite ? 'text-accent-500' : 'text-stone-300 hover:text-accent-400'
               }`}
             >
-              {parsed.is_favorite ? '\u2605' : '\u2606'}
+              {parsed.is_favorite
+                ? <IconStarFilled className='w-5 h-5' />
+                : <IconStar className='w-5 h-5' />}
             </button>
           </div>
           <div className='flex items-center gap-2 mt-1'>
@@ -865,7 +816,7 @@ function RecipeDetail({
             className='ml-2 text-stone-400 hover:text-stone-600 text-lg'
             title='Back to list'
           >
-            {'\u2715'}
+            <IconClose className='w-5 h-5' />
           </button>
         </div>
       </div>
@@ -933,7 +884,11 @@ function RecipeDetail({
                 {enhanceMutation.isPending
                   ? 'Loading...'
                   : enhancedMode
-                  ? 'Enhanced \u2713'
+                  ? (
+                    <>
+                      Enhanced <IconCheck className='w-3 h-3 inline' />
+                    </>
+                  )
                   : 'Enhanced view'}
               </button>
             )}
@@ -982,7 +937,7 @@ function RecipeDetail({
           {parsed.tags.map((tag, i) => (
             <span
               key={i}
-              className='bg-stone-100 text-stone-600 text-xs px-2 py-0.5 rounded'
+              className='tag'
             >
               {tag}
             </span>
@@ -1004,6 +959,7 @@ function RecipeDetail({
 // --- Main Component ---
 
 export function RecipeManager() {
+  const { toast } = useToast()
   const { data: recipes, isLoading, error } = useRecipes()
   const createMutation = useCreateRecipe()
   const updateMutation = useUpdateRecipe()
@@ -1066,7 +1022,10 @@ export function RecipeManager() {
       icon: formData.icon || undefined,
     }
     createMutation.mutate(dto, {
-      onSuccess: () => setViewMode('list'),
+      onSuccess: () => {
+        toast('Recipe created')
+        setViewMode('list')
+      },
     })
   }
 
@@ -1085,31 +1044,46 @@ export function RecipeManager() {
       icon: formData.icon || undefined,
     }
     updateMutation.mutate({ id, data: dto }, {
-      onSuccess: () => setEditingId(null),
+      onSuccess: () => {
+        toast('Recipe updated')
+        setEditingId(null)
+      },
     })
   }
 
   const handleDelete = (id: string) => {
     deleteMutation.mutate(id, {
-      onSuccess: () => setConfirmingDeleteId(null),
+      onSuccess: () => {
+        toast('Recipe deleted')
+        setConfirmingDeleteId(null)
+      },
     })
   }
 
   const handleImport = (markdown: string) => {
     importMutation.mutate({ markdown }, {
-      onSuccess: () => setViewMode('list'),
+      onSuccess: () => {
+        toast('Recipe imported')
+        setViewMode('list')
+      },
     })
   }
 
   const handleImportFromUrl = (url: string) => {
     importUrlMutation.mutate({ url }, {
-      onSuccess: () => setViewMode('list'),
+      onSuccess: () => {
+        toast('Recipe imported from URL')
+        setViewMode('list')
+      },
     })
   }
 
   const handleImportFromFile = (filePath: string) => {
     importFileMutation.mutate({ file_path: filePath }, {
-      onSuccess: () => setViewMode('list'),
+      onSuccess: () => {
+        toast('Recipe imported from PDF')
+        setViewMode('list')
+      },
     })
   }
 
@@ -1189,7 +1163,7 @@ export function RecipeManager() {
   if (error) {
     return (
       <div className='p-6'>
-        <div className='bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+        <div className='panel-error text-red-700 text-sm'>
           Failed to load recipes: {String(error)}
         </div>
       </div>
@@ -1204,13 +1178,13 @@ export function RecipeManager() {
           <div className='flex gap-2'>
             <button
               onClick={() => setViewMode('add')}
-              className='bg-primary-600 text-white px-4 py-2 rounded hover:bg-primary-700'
+              className='btn-md btn-primary'
             >
-              + Add Recipe
+              <IconPlus className='w-4 h-4' /> Add Recipe
             </button>
             <button
               onClick={() => setViewMode('import')}
-              className='border border-stone-300 px-4 py-2 rounded hover:bg-stone-50'
+              className='btn-md btn-outline'
             >
               Import
             </button>
@@ -1219,7 +1193,7 @@ export function RecipeManager() {
       </div>
 
       {viewMode === 'add' && (
-        <div className='mb-6 border border-stone-200 p-4 rounded-lg bg-white shadow-sm'>
+        <div className='mb-6 card p-4 animate-slide-up'>
           <h3 className='font-semibold text-lg mb-3'>Add Recipe</h3>
           <RecipeForm
             initialData={emptyForm}
@@ -1228,7 +1202,7 @@ export function RecipeManager() {
             submitLabel='Add Recipe'
           />
           {createMutation.error && (
-            <div className='mt-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+            <div className='mt-2 panel-error text-red-700 text-sm'>
               {String(createMutation.error)}
             </div>
           )}
@@ -1236,7 +1210,7 @@ export function RecipeManager() {
       )}
 
       {viewMode === 'import' && (
-        <div className='mb-6 border border-stone-200 p-4 rounded-lg bg-white shadow-sm'>
+        <div className='mb-6 card p-4 animate-slide-up'>
           <h3 className='font-semibold text-lg mb-3'>Import Recipe</h3>
           <ImportRecipeForm
             onSubmitMarkdown={handleImport}
@@ -1259,17 +1233,22 @@ export function RecipeManager() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder='Search recipes...'
-            className='border border-stone-300 p-2 rounded w-full md:w-64'
+            className='input w-full md:w-64'
           />
         </div>
       )}
 
       {filteredRecipes?.length === 0 && viewMode === 'list' && (
-        <p className='text-stone-500'>
-          {searchQuery
-            ? 'No recipes match your search.'
-            : 'No recipes yet. Add one to get started!'}
-        </p>
+        searchQuery
+          ? <p className='text-stone-500'>No recipes match your search.</p>
+          : (
+            <EmptyState
+              emoji='📖'
+              title='Your recipe book is empty'
+              description='Add a recipe manually or import one to get started.'
+              action={{ label: 'Add Recipe', onClick: () => setViewMode('add') }}
+            />
+          )
       )}
 
       <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
@@ -1308,10 +1287,10 @@ export function RecipeManager() {
             return (
               <div
                 key={recipe.id}
-                className={`p-4 rounded-lg md:col-span-2 border ${
+                className={`md:col-span-2 animate-slide-up ${
                   isAdaptEdit
-                    ? 'border-secondary-200 bg-secondary-50'
-                    : 'border-primary-200 bg-primary-50'
+                    ? 'panel-secondary'
+                    : 'panel-primary'
                 }`}
               >
                 <h3 className='font-semibold text-lg mb-3'>
@@ -1329,7 +1308,7 @@ export function RecipeManager() {
                   submitLabel={isAdaptEdit ? 'Save Adapted Recipe' : 'Save Changes'}
                 />
                 {(isAdaptEdit ? createMutation.error : updateMutation.error) && (
-                  <div className='mt-2 bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm'>
+                  <div className='mt-2 panel-error text-red-700 text-sm'>
                     {String(isAdaptEdit ? createMutation.error : updateMutation.error)}
                   </div>
                 )}
@@ -1418,7 +1397,7 @@ export function RecipeManager() {
           return (
             <div
               key={recipe.id}
-              className='border border-stone-200 p-4 rounded-lg bg-white shadow-sm'
+              className='card-hover p-4 animate-slide-up'
             >
               <div className='flex items-start justify-between'>
                 <div className='flex items-center gap-2'>
@@ -1438,7 +1417,9 @@ export function RecipeManager() {
                     }`}
                     title={recipe.is_favorite ? 'Unfavorite' : 'Favorite'}
                   >
-                    {recipe.is_favorite ? '\u2605' : '\u2606'}
+                    {recipe.is_favorite
+                      ? <IconStarFilled className='w-5 h-5' />
+                      : <IconStar className='w-5 h-5' />}
                   </button>
                   <StarRating value={recipe.rating} size='sm' />
                 </div>
@@ -1460,7 +1441,7 @@ export function RecipeManager() {
                   {parsed.tags.map((tag, i) => (
                     <span
                       key={i}
-                      className='bg-stone-100 text-stone-600 text-xs px-2 py-0.5 rounded'
+                      className='tag'
                     >
                       {tag}
                     </span>
