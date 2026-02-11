@@ -196,6 +196,43 @@ export function MyComponent({ onSave }: Props) {
 - Event handlers: `handle` prefix (e.g., `handleClick`)
 - Boolean props/state: `is/has/should` prefix (e.g., `isOpen`)
 
+### Frontend Design System
+
+**Typography:** Self-hosted variable fonts in `public/fonts/` (for offline Tauri use):
+- Headings: Playfair Display (serif) — configured as `fontFamily.heading` in Tailwind
+- Body: DM Sans (sans-serif) — configured as `fontFamily.sans` override in Tailwind
+
+**Design Tokens (`src/index.css` `@layer components`):**
+
+| Token | Usage |
+|-------|-------|
+| `.btn` + `.btn-xs`/`.btn-sm`/`.btn-md` | Button sizes (include focus ring + transition) |
+| `.btn-primary`/`.btn-secondary`/`.btn-outline`/`.btn-ghost`/`.btn-danger` | Button variants |
+| `.input`/`.input-sm` | Text inputs, selects, textareas |
+| `.card`/`.card-hover` | Content containers with shadow + rounded-xl |
+| `.tag` | Rounded-full pills for labels |
+| `.panel-primary`/`.panel-secondary`/`.panel-warning`/`.panel-error` | Colored card variants |
+
+**Animation Utilities (`src/index.css` `@layer utilities`):**
+- `animate-fade-in`, `animate-slide-up`, `animate-slide-down`, `animate-scale-in`, `animate-backdrop` — opacity + transform, GPU-composited
+- `animate-expand` — height-based accordion reveal using `grid-template-rows: 0fr → 1fr`
+
+**Shared UI Components:**
+
+| Component | Purpose |
+|-----------|---------|
+| `Icon.tsx` | SVG icon components (Heroicons paths): `IconGear`, `IconClose`, `IconCheck`, `IconPlus`, `IconSearch`, `IconTrash`, `IconEdit`, `IconStar`/`IconStarFilled`, `IconArrowLeft`/`Right`, `IconChevronUp`/`Down`/`Left`/`Right`, `IconWarning`, `IconRefresh` |
+| `Toast.tsx` | `ToastProvider` context + `useToast()` hook. Wrap app in provider, call `toast('message')` in mutation callbacks. |
+| `EmptyState.tsx` | Centered empty-state display. Props: `emoji`, `title`, `description`, optional `action` |
+| `TagInput.tsx` | Reusable tag editor. Props: `label`, `value`, `onChange`, optional `placeholder` |
+| `StarRating.tsx` | Star rating display/input with SVG stars |
+
+**Color Palette** (in `tailwind.config.js`):
+- `primary` — earthy greens (forest/sage tones)
+- `secondary` — warm terracotta/copper
+- `accent` — gold/amber highlights
+- `surface` — warm off-white `#FDFAF6`
+
 ### Database/Migrations
 
 **SeaORM Migrations:**
@@ -269,10 +306,10 @@ mod tests {
 cargo test
 
 # Frontend tests
-npm test
+bun test
 
-# All tests (used in CI)
-npm run test:all
+# Frontend tests (watch mode)
+bun run test:watch
 ```
 
 ## Linting & Formatting
@@ -311,34 +348,11 @@ bun run lint:fix
 
 ### Typos
 
-Uses `typos-cli` to catch typos in code and docs.
+Uses `typos-cli` to catch typos in code and docs. Configuration in `.typos.toml`.
 
 ```bash
-# Install (macOS)
-brew install typos-cli
-
 # Check typos
 typos
-
-# Check with CI config
-typos --config .typos.toml
-```
-
-**Configuration:** `.typos.toml`
-
-```toml
-[default]
-extend-ignore-re = [
-  "uuid",  # UUIDs often flagged as typos
-]
-
-[files]
-extend-exclude = [
-  "target/",
-  "node_modules/",
-  "dist/",
-  "*.db",
-]
 ```
 
 ## Running the App
@@ -547,41 +561,6 @@ cargo build
 ```bash
 rm -rf node_modules bun.lockb
 bun install
-```
-
-## macOS Specific
-
-### First-Time Setup
-
-```bash
-# Install Tauri CLI
-cargo install tauri-cli
-
-# Install dprint (code formatter)
-cargo install dprint
-
-# Install typos
-brew install typos-cli
-```
-
-### Building for Distribution
-
-macOS requires code signing for distribution. For personal use, unsigned builds work fine.
-
-**Build a universal binary (Intel + Apple Silicon):**
-
-```bash
-bun run tauri:build:universal
-```
-
-This produces a single `.app` and `.dmg` that runs natively on both Intel and Apple Silicon Macs. The output is in `src-tauri/target/universal-apple-darwin/release/bundle/`.
-
-**To bypass Gatekeeper on unsigned app:**
-
-```bash
-# Right-click app → Open (instead of double-click)
-# Or remove quarantine:
-xattr -cr /path/to/fewd.app
 ```
 
 ## Key Patterns
