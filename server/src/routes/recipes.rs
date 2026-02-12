@@ -186,7 +186,10 @@ pub async fn import_url(
     SettingsService::increment_token_usage(&state.db, result.input_tokens, result.output_tokens)
         .await;
 
-    RecipeService::create(&state.db, result.recipe)
+    let mut recipe = result.recipe;
+    recipe.source_url = Some(data.url);
+
+    RecipeService::create(&state.db, recipe)
         .await
         .map(|r| (StatusCode::CREATED, Json(r)))
         .map_err(AppError::from)

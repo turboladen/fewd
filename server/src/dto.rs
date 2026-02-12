@@ -64,6 +64,7 @@ pub struct CreateRecipeDto {
     pub name: String,
     pub description: Option<String>,
     pub source: String,
+    pub source_url: Option<String>,
     pub parent_recipe_id: Option<String>,
     pub prep_time: Option<TimeValueDto>,
     pub cook_time: Option<TimeValueDto>,

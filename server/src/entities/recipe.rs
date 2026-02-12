@@ -9,6 +9,8 @@ pub struct Model {
     pub name: String,
     pub description: Option<String>,
     pub source: String,
+    #[sea_orm(column_type = "Text")]
+    pub source_url: Option<String>,
     pub parent_recipe_id: Option<String>,
     #[sea_orm(column_type = "Text")]
     pub prep_time: Option<String>,

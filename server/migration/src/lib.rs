@@ -6,6 +6,7 @@ mod m20260118_000003_create_meals;
 mod m20260208_000004_add_recipe_rating;
 mod m20260208_000005_create_meal_templates;
 mod m20260208_000006_create_settings;
+mod m20260212_000007_add_recipe_source_url;
 
 pub struct Migrator;
 
@@ -19,6 +20,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260208_000004_add_recipe_rating::Migration),
             Box::new(m20260208_000005_create_meal_templates::Migration),
             Box::new(m20260208_000006_create_settings::Migration),
+            Box::new(m20260212_000007_add_recipe_source_url::Migration),
         ]
     }
 }

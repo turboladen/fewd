@@ -32,6 +32,7 @@ export interface Recipe {
   name: string
   description: string | null
   source: string
+  source_url: string | null
   parent_recipe_id: string | null
   prep_time: string | null
   cook_time: string | null

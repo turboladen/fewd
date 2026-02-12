@@ -896,6 +896,27 @@ function RecipeDetail({
         </div>
       )}
 
+      {/* Source URL */}
+      {parsed.source_url && (
+        <div className='text-sm text-stone-500 mb-2'>
+          Source:{' '}
+          <a
+            href={parsed.source_url}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='text-primary-600 hover:text-primary-700 underline'
+          >
+            {(() => {
+              try {
+                return new URL(parsed.source_url).hostname.replace(/^www\./, '')
+              } catch {
+                return parsed.source_url
+              }
+            })()}
+          </a>
+        </div>
+      )}
+
       {/* Meta row */}
       <div className='flex flex-wrap gap-4 text-sm text-stone-500 mb-4 pb-4 border-b border-stone-100'>
         <span>Servings: {formatServings(parsed.servings, parsed.portion_size)}</span>

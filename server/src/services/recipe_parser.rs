@@ -32,6 +32,7 @@ impl RecipeParser {
                 Some(description)
             },
             source: "markdown_import".to_string(),
+            source_url: None,
             parent_recipe_id: None,
             prep_time,
             cook_time,

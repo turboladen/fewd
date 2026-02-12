@@ -32,6 +32,7 @@ impl RecipeService {
             name: Set(data.name),
             description: Set(data.description),
             source: Set(data.source),
+            source_url: Set(data.source_url),
             parent_recipe_id: Set(data.parent_recipe_id),
             prep_time: Set(data.prep_time.map(|t| to_json(&t)).transpose()?),
             cook_time: Set(data.cook_time.map(|t| to_json(&t)).transpose()?),
