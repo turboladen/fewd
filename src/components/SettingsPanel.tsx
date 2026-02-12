@@ -1,24 +1,17 @@
-import { open } from '@tauri-apps/plugin-dialog'
 import { useEffect, useState } from 'react'
 import {
   useAvailableModels,
-  useCopyDbToLocation,
-  useDbConfig,
-  useSetDbLocation,
   useSetSetting,
   useSetting,
   useTestConnection,
   useTokenUsage,
-  useValidateDbLocation,
 } from '../hooks/useSettings'
-import type { ValidationResult } from '../types/settings'
 import {
   IconCheck,
   IconChevronDown,
   IconChevronRight,
   IconClose,
   IconRefresh,
-  IconWarning,
   IconX,
 } from './Icon'
 import { useToast } from './Toast'
@@ -35,17 +28,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const inputPriceQuery = useSetting('cost_input_price_per_mtok')
   const outputPriceQuery = useSetting('cost_output_price_per_mtok')
 
-  const dbConfigQuery = useDbConfig()
-  const setDbLocation = useSetDbLocation()
-  const validateDbLocation = useValidateDbLocation()
-  const copyDb = useCopyDbToLocation()
-
   const [apiKeyInput, setApiKeyInput] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [highlightApiKey, setHighlightApiKey] = useState(false)
-  const [pendingDir, setPendingDir] = useState<string | null>(null)
-  const [validation, setValidation] = useState<ValidationResult | null>(null)
-  const [dbLocationApplied, setDbLocationApplied] = useState(false)
   const [showCostCalc, setShowCostCalc] = useState(false)
   const [inputPrice, setInputPrice] = useState('')
   const [outputPrice, setOutputPrice] = useState('')
@@ -122,58 +107,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     const outputCost = (tokenUsageQuery.data.output_tokens / 1_000_000) * (out || 0)
     return inputCost + outputCost
   })()
-
-  const handlePickFolder = async () => {
-    const selected = await open({ directory: true, multiple: false })
-    if (selected) {
-      const dir = selected as string
-      setPendingDir(dir)
-      validateDbLocation.mutate(dir, {
-        onSuccess: (result) => setValidation(result),
-      })
-    }
-  }
-
-  const handleApplyDbLocation = async () => {
-    if (!pendingDir) return
-    // If no existing DB at destination, offer to copy
-    if (validation && !validation.has_existing_db) {
-      copyDb.mutate(pendingDir, {
-        onSuccess: () => {
-          setDbLocation.mutate(pendingDir, {
-            onSuccess: () => {
-              setDbLocationApplied(true)
-              setPendingDir(null)
-              setValidation(null)
-            },
-          })
-        },
-      })
-    } else {
-      setDbLocation.mutate(pendingDir, {
-        onSuccess: () => {
-          setDbLocationApplied(true)
-          setPendingDir(null)
-          setValidation(null)
-        },
-      })
-    }
-  }
-
-  const handleResetDbLocation = () => {
-    setDbLocation.mutate(null, {
-      onSuccess: () => {
-        setDbLocationApplied(true)
-        setPendingDir(null)
-        setValidation(null)
-      },
-    })
-  }
-
-  const handleCancelDbChange = () => {
-    setPendingDir(null)
-    setValidation(null)
-  }
 
   const currentModel = modelQuery.data || 'claude-sonnet-4-20250514'
   const apiKeyChanged = apiKeyInput !== (apiKeyQuery.data ?? '')
@@ -365,111 +298,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <p className='text-xs font-medium text-stone-700'>
                   Estimated cost: ${estimatedCost.toFixed(2)}
                 </p>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Database Location */}
-        <div className='pt-3 border-t border-stone-200'>
-          <span className='text-sm font-medium text-stone-700'>Database Location</span>
-
-          {dbConfigQuery.data && (
-            <div className='mt-1'>
-              <p className='text-xs text-stone-500 break-all'>
-                {dbConfigQuery.data.active_path}{' '}
-                <span
-                  className={`font-medium ${
-                    dbConfigQuery.data.is_default ? 'text-stone-400' : 'text-primary-500'
-                  }`}
-                >
-                  ({dbConfigQuery.data.is_default ? 'default' : 'custom'})
-                </span>
-              </p>
-            </div>
-          )}
-
-          {/* Applied / restart notice */}
-          {dbLocationApplied && (
-            <div className='mt-2 panel-primary p-2'>
-              <p className='text-xs text-primary-800'>
-                <IconRefresh className='w-3.5 h-3.5 inline' />{' '}
-                Restart the app to use the new database location.
-              </p>
-            </div>
-          )}
-
-          {/* Pending selection */}
-          {pendingDir && validation && (
-            <div className='mt-2 space-y-2'>
-              <p className='text-xs text-stone-600 break-all'>
-                New location: <span className='font-medium'>{pendingDir}</span>
-              </p>
-
-              {!validation.valid && validation.warning && (
-                <div className='panel-error p-2'>
-                  <p className='text-xs text-red-700'>{validation.warning}</p>
-                </div>
-              )}
-
-              {validation.valid && validation.warning && (
-                <div className='panel-warning p-2'>
-                  <p className='text-xs text-amber-800'>
-                    <IconWarning className='w-3.5 h-3.5 inline' /> {validation.warning}
-                  </p>
-                </div>
-              )}
-
-              {validation.valid && validation.has_existing_db && (
-                <p className='text-xs text-primary-600'>
-                  <IconCheck className='w-3.5 h-3.5 inline' />{' '}
-                  Existing database found — it will be used.
-                </p>
-              )}
-
-              {validation.valid && !validation.has_existing_db && (
-                <p className='text-xs text-stone-500'>
-                  No database found — your current data will be copied to this location.
-                </p>
-              )}
-
-              {validation.valid && (
-                <div className='flex gap-2'>
-                  <button
-                    onClick={handleApplyDbLocation}
-                    disabled={setDbLocation.isPending || copyDb.isPending}
-                    className='btn-xs btn-primary'
-                  >
-                    {copyDb.isPending ? 'Copying...' : 'Apply'}
-                  </button>
-                  <button
-                    onClick={handleCancelDbChange}
-                    className='btn-xs btn-outline'
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Action buttons */}
-          {!pendingDir && !dbLocationApplied && (
-            <div className='mt-2 flex gap-2'>
-              <button
-                onClick={handlePickFolder}
-                className='btn-xs btn-outline'
-              >
-                Change Location...
-              </button>
-              {dbConfigQuery.data && !dbConfigQuery.data.is_default && (
-                <button
-                  onClick={handleResetDbLocation}
-                  disabled={setDbLocation.isPending}
-                  className='text-xs text-stone-400 hover:text-stone-600 disabled:opacity-50'
-                >
-                  Reset to Default
-                </button>
               )}
             </div>
           )}

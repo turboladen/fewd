@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
-import { invoke } from '@tauri-apps/api/core'
+import { api } from '../lib/api'
 import type { AggregatedIngredient } from '../types/shopping'
 
 export function useShoppingList(startDate: string, endDate: string) {
   return useQuery({
     queryKey: ['shopping', startDate, endDate],
-    queryFn: () => invoke<AggregatedIngredient[]>('get_shopping_list', { startDate, endDate }),
+    queryFn: () =>
+      api.get<AggregatedIngredient[]>('/shopping-list?start_date=' + startDate + '&end_date=' + endDate),
     enabled: !!startDate && !!endDate,
   })
 }

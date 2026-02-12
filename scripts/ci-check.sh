@@ -39,7 +39,7 @@ fi
 echo “━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━”
 echo “🦀 Rust Checks”
 echo “━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━”
-cd src-tauri
+cd server
 run_check “Rust formatting” “cargo fmt –all – –check”
 run_check “Rust linting (clippy)” “cargo clippy –all-targets –all-features – -D warnings”
 run_check “Rust tests” “cargo test –all-features”

@@ -2,7 +2,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
 import { FamilyManager } from './components/FamilyManager'
 import { IconGear } from './components/Icon'
-import { LockWarningBanner } from './components/LockWarningBanner'
 import { MealPlanner } from './components/MealPlanner'
 import { RecipeManager } from './components/RecipeManager'
 import { SettingsPanel } from './components/SettingsPanel'
@@ -31,10 +30,6 @@ function App() {
       <ToastProvider>
         <div className='h-screen flex flex-col bg-surface'>
           <nav className='flex-none bg-white/95 backdrop-blur-sm border-b border-stone-200/80 shadow-soft'>
-            <div
-              className='h-7 w-full'
-              data-tauri-drag-region
-            />
             <div className='flex pl-2'>
               {tabs.map(({ key, label }) => (
                 <button
@@ -63,7 +58,6 @@ function App() {
               </div>
             </div>
           </nav>
-          <LockWarningBanner />
           <main className='flex-1 overflow-y-auto'>
             <div key={activeTab} className='animate-fade-in'>
               {activeTab === 'family' && <FamilyManager />}

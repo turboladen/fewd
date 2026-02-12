@@ -1,5 +1,4 @@
-import { open } from '@tauri-apps/plugin-dialog'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   useCreateRecipe,
   useDeleteRecipe,
@@ -16,11 +15,12 @@ import type {
   CreateRecipeDto,
   Ingredient,
   ParsedRecipe,
+  PortionSize,
   ScaleResult,
   TimeValue,
   UpdateRecipeDto,
 } from '../types/recipe'
-import { formatAmount, formatTime, parseRecipe } from '../types/recipe'
+import { formatAmount, formatServings, formatTime, parseRecipe } from '../types/recipe'
 import { AdaptRecipePanel } from './AdaptRecipePanel'
 import { EmptyState } from './EmptyState'
 import { IconArrowRight, IconCheck, IconClose, IconPlus, IconStar, IconStarFilled } from './Icon'
@@ -88,6 +88,7 @@ interface RecipeFormData {
   cook_time?: TimeValue
   total_time?: TimeValue
   servings: number
+  portion_size?: PortionSize
   instructions: string
   ingredients: Ingredient[]
   tags: string[]
@@ -205,6 +206,57 @@ function RecipeForm({
         </div>
       </div>
 
+      <div>
+        <label className='block text-sm font-medium text-stone-700 mb-1'>
+          Serving size <span className='text-stone-400 font-normal'>(optional)</span>
+        </label>
+        <div className='flex gap-2 items-center'>
+          <input
+            type='number'
+            min={0}
+            step='any'
+            value={form.portion_size?.value ?? ''}
+            onChange={(e) => {
+              const v = e.target.value
+              if (v === '' && !form.portion_size?.unit) {
+                setForm({ ...form, portion_size: undefined })
+              } else {
+                setForm({
+                  ...form,
+                  portion_size: {
+                    value: parseFloat(v) || 0,
+                    unit: form.portion_size?.unit ?? '',
+                  },
+                })
+              }
+            }}
+            placeholder='2'
+            className='input-sm w-20'
+          />
+          <input
+            type='text'
+            value={form.portion_size?.unit ?? ''}
+            onChange={(e) => {
+              const unit = e.target.value
+              if (!unit && !form.portion_size?.value) {
+                setForm({ ...form, portion_size: undefined })
+              } else {
+                setForm({
+                  ...form,
+                  portion_size: {
+                    value: form.portion_size?.value ?? 0,
+                    unit,
+                  },
+                })
+              }
+            }}
+            placeholder='cookies, slices, pieces...'
+            className='input-sm w-48'
+          />
+          <span className='text-xs text-stone-400'>per serving</span>
+        </div>
+      </div>
+
       <IngredientInput
         label='Ingredients'
         value={form.ingredients}
@@ -283,7 +335,7 @@ function ImportRecipeForm({
 }: {
   onSubmitMarkdown: (markdown: string) => void
   onSubmitUrl: (url: string) => void
-  onSubmitFile: (filePath: string) => void
+  onSubmitFile: (file: File) => void
   onCancel: () => void
   markdownError?: string
   urlError?: string
@@ -294,7 +346,8 @@ function ImportRecipeForm({
   const [importMode, setImportMode] = useState<'markdown' | 'url' | 'pdf'>('url')
   const [markdown, setMarkdown] = useState('')
   const [url, setUrl] = useState('')
-  const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleMarkdownSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -306,13 +359,14 @@ function ImportRecipeForm({
     onSubmitUrl(url)
   }
 
-  const handleChooseFile = async () => {
-    const result = await open({
-      multiple: false,
-      filters: [{ name: 'PDF', extensions: ['pdf'] }],
-    })
-    if (result) {
-      setSelectedFile(result)
+  const handleChooseFile = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      setSelectedFile(file)
     }
   }
 
@@ -435,6 +489,13 @@ function ImportRecipeForm({
               PDF File
             </label>
             <div className='flex gap-2 items-center'>
+              <input
+                ref={fileInputRef}
+                type='file'
+                accept='.pdf'
+                onChange={handleFileChange}
+                className='hidden'
+              />
               <button
                 type='button'
                 onClick={handleChooseFile}
@@ -443,7 +504,7 @@ function ImportRecipeForm({
                 Choose File
               </button>
               <span className='text-sm text-stone-600'>
-                {selectedFile ? selectedFile.split('/').pop() : 'No file selected'}
+                {selectedFile ? selectedFile.name : 'No file selected'}
               </span>
             </div>
             <p className='text-xs text-stone-500 mt-1'>
@@ -837,7 +898,7 @@ function RecipeDetail({
 
       {/* Meta row */}
       <div className='flex flex-wrap gap-4 text-sm text-stone-500 mb-4 pb-4 border-b border-stone-100'>
-        <span>Servings: {parsed.servings}</span>
+        <span>Servings: {formatServings(parsed.servings, parsed.portion_size)}</span>
         {parsed.prep_time && <span>Prep: {formatTime(parsed.prep_time)}</span>}
         {parsed.cook_time && <span>Cook: {formatTime(parsed.cook_time)}</span>}
         {parsed.total_time && <span>Total: {formatTime(parsed.total_time)}</span>}
@@ -1011,6 +1072,7 @@ export function RecipeManager() {
       name: formData.name,
       source: 'manual',
       servings: formData.servings,
+      portion_size: formData.portion_size,
       instructions: formData.instructions,
       ingredients: formData.ingredients,
       tags: formData.tags,
@@ -1033,6 +1095,7 @@ export function RecipeManager() {
     const dto: UpdateRecipeDto = {
       name: formData.name,
       servings: formData.servings,
+      portion_size: formData.portion_size,
       instructions: formData.instructions,
       ingredients: formData.ingredients,
       tags: formData.tags,
@@ -1078,8 +1141,8 @@ export function RecipeManager() {
     })
   }
 
-  const handleImportFromFile = (filePath: string) => {
-    importFileMutation.mutate({ file_path: filePath }, {
+  const handleImportFromFile = (file: File) => {
+    importFileMutation.mutate(file, {
       onSuccess: () => {
         toast('Recipe imported from PDF')
         setViewMode('list')
@@ -1100,6 +1163,7 @@ export function RecipeManager() {
       source: 'scaled',
       parent_recipe_id: recipeId,
       servings,
+      portion_size: parsed.portion_size ?? undefined,
       instructions: source.instructions,
       ingredients,
       tags: parsed.tags,
@@ -1137,6 +1201,7 @@ export function RecipeManager() {
       source: adaptDraft.source,
       parent_recipe_id: adaptDraft.parent_recipe_id,
       servings: formData.servings,
+      portion_size: formData.portion_size,
       instructions: formData.instructions,
       ingredients: formData.ingredients,
       tags: formData.tags,
@@ -1265,6 +1330,7 @@ export function RecipeManager() {
                 cook_time: adaptDraft.cook_time,
                 total_time: adaptDraft.total_time,
                 servings: adaptDraft.servings,
+                portion_size: adaptDraft.portion_size,
                 instructions: adaptDraft.instructions,
                 ingredients: adaptDraft.ingredients,
                 tags: adaptDraft.tags,
@@ -1278,6 +1344,7 @@ export function RecipeManager() {
                 cook_time: parsed.cook_time ?? undefined,
                 total_time: parsed.total_time ?? undefined,
                 servings: recipe.servings,
+                portion_size: parsed.portion_size ?? undefined,
                 instructions: recipe.instructions,
                 ingredients: parsed.ingredients,
                 tags: parsed.tags,
@@ -1430,7 +1497,7 @@ export function RecipeManager() {
               )}
 
               <div className='flex gap-4 mt-2 text-sm text-stone-500'>
-                <span>Servings: {recipe.servings}</span>
+                <span>Servings: {formatServings(recipe.servings, parsed.portion_size)}</span>
                 {parsed.prep_time && <span>Prep: {formatTime(parsed.prep_time)}</span>}
                 {parsed.cook_time && <span>Cook: {formatTime(parsed.cook_time)}</span>}
                 {parsed.total_time && <span>Total: {formatTime(parsed.total_time)}</span>}

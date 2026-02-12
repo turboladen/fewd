@@ -160,6 +160,11 @@ export function formatTime(time: TimeValue | null): string {
   return `${time.value} ${time.unit}`
 }
 
+export function formatServings(servings: number, portionSize: PortionSize | null): string {
+  if (!portionSize) return `${servings}`
+  return `${servings} (${portionSize.value} ${portionSize.unit} each)`
+}
+
 export function formatAmount(amount: IngredientAmount): string {
   if (amount.type === 'single') {
     return amount.value % 1 === 0
