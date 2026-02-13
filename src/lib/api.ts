@@ -18,7 +18,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
 
   // 204 No Content
   if (response.status === 204) {
-    return undefined as T
+    return undefined as unknown as T
   }
 
   return response.json()
@@ -45,8 +45,8 @@ export const api = {
     }).then(handleResponse<T>)
   },
 
-  delete<T>(path: string): Promise<T> {
-    return fetch(`${BASE}${path}`, { method: 'DELETE' }).then(handleResponse<T>)
+  delete(path: string): Promise<void> {
+    return fetch(`${BASE}${path}`, { method: 'DELETE' }).then(handleResponse)
   },
 
   upload<T>(path: string, file: File): Promise<T> {

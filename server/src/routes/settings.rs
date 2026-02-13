@@ -12,7 +12,10 @@ pub async fn get_setting(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<Option<String>>, AppError> {
-    SettingsService::get(&state.db, key).await.map(Json).map_err(AppError::from)
+    SettingsService::get(&state.db, key)
+        .await
+        .map(Json)
+        .map_err(AppError::from)
 }
 
 pub async fn set_setting(
@@ -39,12 +42,10 @@ pub async fn available_models(
         .map_err(AppError::from)?;
 
     let models = match api_key {
-        Some(key) if !key.is_empty() => ClaudeClient::list_models(&key)
-            .await
-            .unwrap_or_else(|e| {
-                tracing::warn!("Failed to fetch models from API, using fallback: {}", e);
-                ClaudeClient::fallback_models()
-            }),
+        Some(key) if !key.is_empty() => ClaudeClient::list_models(&key).await.unwrap_or_else(|e| {
+            tracing::warn!("Failed to fetch models from API, using fallback: {}", e);
+            ClaudeClient::fallback_models()
+        }),
         _ => ClaudeClient::fallback_models(),
     };
 

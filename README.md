@@ -1,14 +1,23 @@
 # fewd
 
-A family meal planning desktop app built with Tauri (Rust + React). Plan weekly meals for each family member, manage recipes (including markdown import), and generate aggregated shopping lists with unit conversion.
+Family meal planner. Plan weekly meals for each family member, manage recipes, generate shopping lists, and get AI-powered suggestions — all from a single self-hosted binary.
 
 ## Features
 
 - **Family Members** — Track each person's dietary goals, favorites, and dislikes
-- **Recipe Management** — Create recipes manually or import from markdown; tag, favorite, and search
+- **Recipe Management** — Create recipes manually, import from markdown or URLs; tag, favorite, and search
 - **Meal Planning** — Weekly calendar view with per-person meal assignment (recipe or ad-hoc items)
 - **Shopping Lists** — Aggregated ingredient list for any week, with automatic unit conversion and source tracking
-- **Seed Data** — Pre-populates family members on first run
+- **AI-Powered** — Recipe suggestions, adaptation, and extraction via Claude API
+- **Meal Templates** — Save and reuse common meal combinations
+
+## Architecture
+
+- **Backend:** Rust (Axum + SeaORM + SQLite)
+- **Frontend:** React 18 + TypeScript + Vite + TanStack Query + Tailwind
+- **Deployment:** Single binary that embeds the SPA and serves everything over HTTP
+
+The frontend is compiled by Vite into `dist/`, then embedded into the Rust binary at compile time via `rust-embed`. The result is one executable that serves the API (`/api/*`) and the web UI on a configurable port.
 
 ## Quick Start
 
@@ -16,20 +25,18 @@ A family meal planning desktop app built with Tauri (Rust + React). Plan weekly 
 
 - [Rust](https://www.rust-lang.org/tools/install) (via rustup)
 - [Bun](https://bun.sh/) (JavaScript runtime and package manager)
+- [just](https://github.com/casey/just) (command runner)
 
 Optional (for code quality checks):
 
 - dprint: `cargo install dprint`
 - typos-cli: `brew install typos-cli`
 
-### Setup and Run
+### Development
 
 ```bash
-# 1. Install JavaScript dependencies (includes Tauri CLI)
 bun install
-
-# 2. Run in development mode (compiles Rust + starts React dev server)
-bun run tauri dev
+just dev          # Runs Axum + Vite dev servers concurrently
 ```
 
 The first run will take a few minutes to compile Rust dependencies. Subsequent runs are fast.
@@ -37,93 +44,71 @@ The first run will take a few minutes to compile Rust dependencies. Subsequent r
 ### Build for Production
 
 ```bash
-# Build for current architecture
-bun run tauri build
-
-# Build macOS universal binary (Intel + Apple Silicon)
-bun run tauri:build:universal
+just build        # Build frontend + release server binary
 ```
 
-**Universal binary prerequisites (one-time setup):**
+The binary lands at `server/target/release/fewd-server`.
+
+### Run in Production
 
 ```bash
-rustup target add x86_64-apple-darwin    # Intel
-rustup target add aarch64-apple-darwin   # Apple Silicon (likely already installed)
+DATABASE_PATH=/path/to/fewd.db PORT=3000 ./fewd-server
 ```
 
-**Output locations:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_PATH` | `./data/fewd.db` | Path to the SQLite database file |
+| `PORT` | `3000` | HTTP port to listen on |
 
-- Single-arch: `src-tauri/target/release/bundle/`
-- Universal: `src-tauri/target/universal-apple-darwin/release/bundle/`
+The database and its parent directory are created automatically on first run.
 
-Each contains `macos/fewd.app` and `dmg/fewd_*.dmg`.
+## Cross-Compiling for Linux ARM64
 
-**Distribute to another Mac:**
+For deploying to ARM64 devices (e.g., ODroid N2+, Raspberry Pi 4) without installing build tools on the target.
 
-1. Build with `bun run tauri:build:universal`
-2. Copy the `.dmg` from the output `dmg/` folder to the other Mac
-3. Open the `.dmg` and drag the app to Applications
-4. First launch: right-click → Open (to bypass Gatekeeper), or run `xattr -cr /Applications/fewd.app`
+**One-time setup (macOS):**
 
-## Current Status
+```bash
+rustup target add aarch64-unknown-linux-gnu
+brew install messense/macos-cross-toolchains/aarch64-unknown-linux-gnu
+```
 
-### Completed (MVP)
+**Build:**
 
-- [x] Project scaffolding (Tauri 2 + React 18 + SeaORM + SQLite)
-- [x] Family member management (CRUD with dietary goals, favorites, dislikes)
-- [x] Recipe management (CRUD, markdown import, search, favorites, usage tracking)
-- [x] Meal planning calendar (weekly view, per-person recipe/ad-hoc assignment)
-- [x] Shopping list generation (ingredient aggregation with unit conversion)
-- [x] Polish (seed data, ESC key support, loading states, form validation, error display)
-- [x] Test suite (45 Rust tests, 36 frontend tests)
+```bash
+just build-arm64
+```
 
-### Planned
+**Deploy to a remote host:**
 
-See `IMPLEMENTATION_PLAN.md` for upcoming features:
+```bash
+just deploy user@hostname
+```
 
-- Recipe scaling and derivation
-- Recipe rating system
-- Inline ingredient enhancement (Caroline Chambers style)
-- Meal templates
-- AI-powered recipe adaptation (via Claude API)
-- AI-powered meal suggestions
+This builds the ARM64 binary and copies it to `/opt/fewd/` on the target via scp.
 
-## Documentation
-
-- **REQUIREMENTS.md** — Full specifications and data models
-- **IMPLEMENTATION_PLAN.md** — Step-by-step build guide for upcoming features
-- **CLAUDE.md** — Development guide for AI assistants
-
-## Tech Stack
-
-**Backend:** Rust + Tauri 2 + SeaORM + SQLite
-
-**Frontend:** React 18 + TypeScript + Vite + TanStack Query + Tailwind CSS
-
-## Development
-
-### Commands
+## Commands
 
 ```bash
 # Development
-bun run tauri dev          # Run with hot reload
+just dev                   # Run with hot reload (server + client)
 
-# Testing
-cargo test                 # Rust tests (from src-tauri/)
-bun run test               # Frontend tests
+# Building
+just build                 # Build frontend + server (release)
+just build-arm64           # Cross-compile for Linux ARM64
 
-# Linting & Formatting
-cargo fmt                  # Format Rust code (from src-tauri/)
-cargo clippy               # Lint Rust code (from src-tauri/)
-dprint fmt                 # Format frontend code
-bun run lint               # Lint frontend code
-typos                      # Check for typos
+# Deploying
+just deploy user@host      # Build ARM64 + scp to remote host
 
-# All CI checks at once
-./scripts/ci-check.sh
+# Testing & Linting
+just ci                    # Run all CI checks locally
 ```
 
-### Project Structure
+## CI
+
+Pushes to any branch run linting, formatting, and tests. Tagged releases (`v*`) build binaries for macOS (Intel + ARM), Linux x64, and Linux ARM64 — uploaded as draft GitHub Releases.
+
+## Project Structure
 
 ```
 fewd/
@@ -131,32 +116,24 @@ fewd/
 │   ├── components/        # UI components
 │   ├── hooks/             # TanStack Query hooks
 │   ├── types/             # TypeScript type definitions
-│   ├── utils/             # Date helpers and utilities
 │   └── App.tsx
-├── src-tauri/             # Rust backend
+├── server/                # Rust backend
 │   ├── src/
-│   │   ├── commands/      # Tauri command handlers (thin layer)
+│   │   ├── routes/        # Axum route handlers
 │   │   ├── entities/      # SeaORM entities (DB models)
 │   │   ├── services/      # Business logic
 │   │   ├── db.rs          # Database initialization
 │   │   └── main.rs
-│   ├── migration/         # SeaORM database migrations
-│   ├── capabilities/      # Tauri 2 ACL permissions
-│   └── tests/             # Integration tests
+│   └── migration/         # SeaORM database migrations
 ├── .github/workflows/     # CI/CD
-└── scripts/               # Development scripts
+└── Justfile               # Development commands
 ```
 
-### Database
+## Documentation
 
-SQLite database location (default, configurable via Settings):
-
-- **Dev:** `~/Library/Application Support/com.fewd.dev/fewd.db`
-- **Production:** `~/Library/Application Support/com.fewd/fewd.db`
-
-Use Settings → Database Location to point the database at a shared folder (e.g., iCloud Drive) for multi-Mac access.
-
-Inspect with: `sqlite3 ~/Library/Application\ Support/com.fewd.dev/fewd.db`
+- **REQUIREMENTS.md** — Full specifications and data models
+- **IMPLEMENTATION_PLAN.md** — Build guide for upcoming features
+- **CLAUDE.md** — Development guide for AI assistants
 
 ## License
 

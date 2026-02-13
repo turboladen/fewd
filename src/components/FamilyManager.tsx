@@ -296,6 +296,7 @@ export function FamilyManager() {
                   <button
                     onClick={() => setEditingId(person.id)}
                     className='text-primary-600 text-sm hover:underline'
+                    aria-label={`Edit ${person.name}`}
                   >
                     <IconEdit className='w-4 h-4' />
                   </button>
@@ -321,6 +322,7 @@ export function FamilyManager() {
                       <button
                         onClick={() => setConfirmingDeleteId(person.id)}
                         className='btn-sm btn-danger'
+                        aria-label={`Delete ${person.name}`}
                       >
                         <IconTrash className='w-4 h-4' />
                       </button>

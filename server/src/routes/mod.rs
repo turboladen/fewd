@@ -1,5 +1,5 @@
-mod meals;
 mod meal_templates;
+mod meals;
 mod people;
 mod recipes;
 mod settings;
@@ -17,7 +17,9 @@ pub fn api_routes() -> Router<AppState> {
         .route("/people", get(people::list).post(people::create))
         .route(
             "/people/{id}",
-            get(people::get_one).put(people::update).delete(people::remove),
+            get(people::get_one)
+                .put(people::update)
+                .delete(people::remove),
         )
         // Recipes
         .route("/recipes", get(recipes::list).post(recipes::create))

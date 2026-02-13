@@ -9,14 +9,20 @@ use crate::services::person_service::PersonService;
 use crate::AppState;
 
 pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<person::Model>>, AppError> {
-    PersonService::get_all(&state.db).await.map(Json).map_err(AppError::from)
+    PersonService::get_all(&state.db)
+        .await
+        .map(Json)
+        .map_err(AppError::from)
 }
 
 pub async fn get_one(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Option<person::Model>>, AppError> {
-    PersonService::get_by_id(&state.db, id).await.map(Json).map_err(AppError::from)
+    PersonService::get_by_id(&state.db, id)
+        .await
+        .map(Json)
+        .map_err(AppError::from)
 }
 
 pub async fn create(
@@ -34,7 +40,10 @@ pub async fn update(
     Path(id): Path<String>,
     Json(data): Json<UpdatePersonDto>,
 ) -> Result<Json<person::Model>, AppError> {
-    PersonService::update(&state.db, id, data).await.map(Json).map_err(AppError::from)
+    PersonService::update(&state.db, id, data)
+        .await
+        .map(Json)
+        .map_err(AppError::from)
 }
 
 pub async fn remove(

@@ -103,7 +103,11 @@ export function SuggestionPanel({
     <div className='border border-secondary-200 rounded-lg p-3 bg-secondary-50 mb-3 animate-slide-down'>
       <div className='flex items-center justify-between mb-2'>
         <h4 className='font-medium text-sm text-secondary-800'>Suggest Recipes</h4>
-        <button onClick={onClose} className='text-stone-400 hover:text-stone-600 text-sm'>
+        <button
+          onClick={onClose}
+          className='text-stone-400 hover:text-stone-600 text-sm'
+          aria-label='Close suggestions'
+        >
           <IconClose className='w-3.5 h-3.5' />
         </button>
       </div>

@@ -816,6 +816,7 @@ function RecipeDetail({
               className={`text-xl ${
                 parsed.is_favorite ? 'text-accent-500' : 'text-stone-300 hover:text-accent-400'
               }`}
+              aria-label={parsed.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
             >
               {parsed.is_favorite
                 ? <IconStarFilled className='w-5 h-5' />

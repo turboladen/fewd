@@ -9,7 +9,14 @@ import { ShoppingList } from './components/ShoppingList'
 import { TemplateManager } from './components/TemplateManager'
 import { ToastProvider } from './components/Toast'
 
-const queryClient = new QueryClient()
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      retry: 1,
+    },
+  },
+})
 
 type Tab = 'family' | 'recipes' | 'planner' | 'templates' | 'shopping'
 
@@ -52,6 +59,7 @@ function App() {
                   onClick={() => setIsSettingsOpen(true)}
                   className='btn-ghost text-stone-400 hover:text-stone-600'
                   title='Settings'
+                  aria-label='Settings'
                 >
                   <IconGear className='w-5 h-5' />
                 </button>

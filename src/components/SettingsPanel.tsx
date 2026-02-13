@@ -6,14 +6,7 @@ import {
   useTestConnection,
   useTokenUsage,
 } from '../hooks/useSettings'
-import {
-  IconCheck,
-  IconChevronDown,
-  IconChevronRight,
-  IconClose,
-  IconRefresh,
-  IconX,
-} from './Icon'
+import { IconCheck, IconChevronDown, IconChevronRight, IconClose, IconRefresh, IconX } from './Icon'
 import { useToast } from './Toast'
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
@@ -126,6 +119,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           <button
             onClick={onClose}
             className='text-stone-400 hover:text-stone-600 text-lg'
+            aria-label='Close settings'
           >
             <IconClose className='w-5 h-5' />
           </button>

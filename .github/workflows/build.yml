@@ -19,6 +19,10 @@ jobs:
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             artifact_name: fewd-server-linux-x64
+          - platform: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            artifact_name: fewd-server-linux-arm64
+            use_cross: true
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -39,8 +43,17 @@ jobs:
       - name: Build frontend
         run: bun run build
 
+      - name: Install cross
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
       - name: Build server
+        if: ${{ !matrix.use_cross }}
         run: cd server && cargo build --release --target ${{ matrix.target }}
+
+      - name: Build server (cross)
+        if: matrix.use_cross
+        run: cd server && cross build --release --target ${{ matrix.target }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

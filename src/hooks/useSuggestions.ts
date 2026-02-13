@@ -5,14 +5,12 @@ import type { AiSuggestMealsDto, GetSuggestionsDto, MealSuggestions } from '../t
 
 export function useMealSuggestions() {
   return useMutation({
-    mutationFn: (data: GetSuggestionsDto) =>
-      api.post<MealSuggestions>('/suggestions', data),
+    mutationFn: (data: GetSuggestionsDto) => api.post<MealSuggestions>('/suggestions', data),
   })
 }
 
 export function useAiSuggestMeals() {
   return useMutation({
-    mutationFn: (data: AiSuggestMealsDto) =>
-      api.post<CreateRecipeDto[]>('/suggestions/ai', data),
+    mutationFn: (data: AiSuggestMealsDto) => api.post<CreateRecipeDto[]>('/suggestions/ai', data),
   })
 }

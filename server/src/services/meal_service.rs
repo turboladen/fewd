@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use chrono::NaiveDate;
 use sea_orm::*;
 
@@ -71,6 +73,22 @@ impl MealService {
             .await?
             .ok_or(DbErr::RecordNotFound("Meal not found".to_string()))?;
 
+        // When servings change, adjust recipe usage counters
+        if let Some(ref new_servings) = data.servings {
+            let old_servings: Vec<PersonServingDto> =
+                serde_json::from_str(&existing.servings).unwrap_or_default();
+            let old_ids = collect_recipe_ids(&old_servings);
+            let new_ids = collect_recipe_ids(new_servings);
+
+            // Decrement recipes that were removed
+            let removed: Vec<&str> = old_ids.difference(&new_ids).map(|s| s.as_str()).collect();
+            decrement_recipe_usage(db, &removed).await?;
+
+            // Increment recipes that were added
+            let added: Vec<&str> = new_ids.difference(&old_ids).map(|s| s.as_str()).collect();
+            increment_recipe_usage_by_ids(db, &added).await?;
+        }
+
         let mut meal: meal::ActiveModel = existing.into();
 
         if let Some(date) = data.date {
@@ -94,9 +112,32 @@ impl MealService {
     }
 
     pub async fn delete(db: &DatabaseConnection, id: String) -> Result<(), DbErr> {
+        let existing = Meal::find_by_id(id.clone())
+            .one(db)
+            .await?
+            .ok_or(DbErr::RecordNotFound("Meal not found".to_string()))?;
+
+        // Decrement recipe usage before deleting
+        let servings: Vec<PersonServingDto> =
+            serde_json::from_str(&existing.servings).unwrap_or_default();
+        let ids = collect_recipe_ids(&servings);
+        let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+        decrement_recipe_usage(db, &id_refs).await?;
+
         Meal::delete_by_id(id).exec(db).await?;
         Ok(())
     }
+}
+
+/// Collect unique recipe IDs from a list of servings
+fn collect_recipe_ids(servings: &[PersonServingDto]) -> HashSet<String> {
+    servings
+        .iter()
+        .filter_map(|s| match s {
+            PersonServingDto::Recipe { recipe_id, .. } => Some(recipe_id.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Increment times_made and update last_made for each recipe referenced in servings
@@ -104,18 +145,43 @@ async fn increment_recipe_usage(
     db: &DatabaseConnection,
     servings: &[PersonServingDto],
 ) -> Result<(), DbErr> {
+    let ids = collect_recipe_ids(servings);
+    let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+    increment_recipe_usage_by_ids(db, &id_refs).await
+}
+
+/// Increment times_made and update last_made for specific recipe IDs
+async fn increment_recipe_usage_by_ids(
+    db: &DatabaseConnection,
+    recipe_ids: &[&str],
+) -> Result<(), DbErr> {
     let now = chrono::Utc::now();
 
-    for serving in servings {
-        if let PersonServingDto::Recipe { recipe_id, .. } = serving {
-            if let Some(existing) = Recipe::find_by_id(recipe_id).one(db).await? {
-                let new_times_made = existing.times_made + 1;
-                let mut recipe: recipe::ActiveModel = existing.into();
-                recipe.times_made = Set(new_times_made);
-                recipe.last_made = Set(Some(now));
-                recipe.updated_at = Set(now);
-                recipe.update(db).await?;
-            }
+    for recipe_id in recipe_ids {
+        if let Some(existing) = Recipe::find_by_id(*recipe_id).one(db).await? {
+            let new_times_made = existing.times_made + 1;
+            let mut recipe: recipe::ActiveModel = existing.into();
+            recipe.times_made = Set(new_times_made);
+            recipe.last_made = Set(Some(now));
+            recipe.updated_at = Set(now);
+            recipe.update(db).await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Decrement times_made for specific recipe IDs (floor at 0)
+async fn decrement_recipe_usage(db: &DatabaseConnection, recipe_ids: &[&str]) -> Result<(), DbErr> {
+    let now = chrono::Utc::now();
+
+    for recipe_id in recipe_ids {
+        if let Some(existing) = Recipe::find_by_id(*recipe_id).one(db).await? {
+            let new_times_made = (existing.times_made - 1).max(0);
+            let mut recipe: recipe::ActiveModel = existing.into();
+            recipe.times_made = Set(new_times_made);
+            recipe.updated_at = Set(now);
+            recipe.update(db).await?;
         }
     }
 

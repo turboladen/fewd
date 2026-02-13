@@ -91,8 +91,9 @@ impl RecipeImportService {
         model: &str,
         bytes: &[u8],
     ) -> Result<ImportResult, ImportError> {
-        let text = pdf_extract::extract_text_from_mem(bytes)
-            .map_err(|e| ImportError::PdfError(format!("Could not extract text from PDF: {}", e)))?;
+        let text = pdf_extract::extract_text_from_mem(bytes).map_err(|e| {
+            ImportError::PdfError(format!("Could not extract text from PDF: {}", e))
+        })?;
 
         if text.len() < MIN_CONTENT_CHARS {
             return Err(ImportError::ContentTooShort);

@@ -18,8 +18,7 @@ export function useCreateMealTemplate() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (data: CreateMealTemplateDto) =>
-      api.post<MealTemplate>('/meal-templates', data),
+    mutationFn: (data: CreateMealTemplateDto) => api.post<MealTemplate>('/meal-templates', data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['meal_templates'] })
     },

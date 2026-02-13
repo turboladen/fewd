@@ -180,7 +180,7 @@ impl PromptBuilder {
 fn compute_age(birthdate: chrono::NaiveDate) -> i32 {
     let today = chrono::Utc::now().date_naive();
     let mut age = today.year() - birthdate.year();
-    if today.ordinal() < birthdate.ordinal() {
+    if (today.month(), today.day()) < (birthdate.month(), birthdate.day()) {
         age -= 1;
     }
     age

@@ -1,9 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import type {
-  ModelOption,
-  TokenUsage,
-} from '../types/settings'
+import type { ModelOption, TokenUsage } from '../types/settings'
 
 export function useSetting(key: string) {
   return useQuery({

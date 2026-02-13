@@ -9,6 +9,7 @@
     "dev:full": "concurrently --names server,client --prefix-colors blue,green \"bun run dev:server\" \"bun run dev\"",
     "build": "tsc && vite build",
     "build:server": "cd server && cargo build --release",
+    "build:server:arm64": "cd server && cargo build --release --target aarch64-unknown-linux-gnu",
     "build:full": "bun run build && bun run build:server",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",

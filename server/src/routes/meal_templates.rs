@@ -11,7 +11,10 @@ use crate::AppState;
 pub async fn list(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<meal_template::Model>>, AppError> {
-    MealTemplateService::get_all(&state.db).await.map(Json).map_err(AppError::from)
+    MealTemplateService::get_all(&state.db)
+        .await
+        .map(Json)
+        .map_err(AppError::from)
 }
 
 pub async fn create(

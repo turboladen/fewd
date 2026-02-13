@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePeople } from '../hooks/usePeople'
 import { useAdaptRecipe, useCreateRecipe } from '../hooks/useRecipes'
 import { useSetting } from '../hooks/useSettings'
@@ -37,25 +37,23 @@ export function AdaptRecipePanel({
   const activePeople = people?.filter((p) => p.is_active) ?? []
 
   // Per-person toggle state
-  const [personToggles, setPersonToggles] = useState<Record<string, PersonToggleState>>(() => {
-    const initial: Record<string, PersonToggleState> = {}
-    // Will be populated once people load
-    return initial
-  })
+  const [personToggles, setPersonToggles] = useState<Record<string, PersonToggleState>>({})
 
-  // Ensure toggles exist for all active people
-  if (activePeople.length > 0 && Object.keys(personToggles).length === 0) {
-    const initial: Record<string, PersonToggleState> = {}
-    for (const person of activePeople) {
-      initial[person.id] = {
-        selected: true,
-        include_dietary_goals: true,
-        include_dislikes: true,
-        include_favorites: true,
+  // Initialize toggles when people data loads
+  useEffect(() => {
+    if (activePeople.length > 0 && Object.keys(personToggles).length === 0) {
+      const initial: Record<string, PersonToggleState> = {}
+      for (const person of activePeople) {
+        initial[person.id] = {
+          selected: true,
+          include_dietary_goals: true,
+          include_dislikes: true,
+          include_favorites: true,
+        }
       }
+      setPersonToggles(initial)
     }
-    setPersonToggles(initial)
-  }
+  }, [activePeople.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [instructions, setInstructions] = useState('')
   const [draft, setDraft] = useState<CreateRecipeDto | null>(null)

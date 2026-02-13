@@ -29,7 +29,10 @@ pub async fn get_one(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Option<meal::Model>>, AppError> {
-    MealService::get_by_id(&state.db, id).await.map(Json).map_err(AppError::from)
+    MealService::get_by_id(&state.db, id)
+        .await
+        .map(Json)
+        .map_err(AppError::from)
 }
 
 pub async fn create(
@@ -47,7 +50,10 @@ pub async fn update(
     Path(id): Path<String>,
     Json(data): Json<UpdateMealDto>,
 ) -> Result<Json<meal::Model>, AppError> {
-    MealService::update(&state.db, id, data).await.map(Json).map_err(AppError::from)
+    MealService::update(&state.db, id, data)
+        .await
+        .map(Json)
+        .map_err(AppError::from)
 }
 
 pub async fn remove(

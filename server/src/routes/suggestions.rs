@@ -65,7 +65,9 @@ pub async fn ai_suggest(
     .await
     .map_err(AppError::from)?;
 
-    let recipes = RecipeService::get_all(&state.db).await.map_err(AppError::from)?;
+    let recipes = RecipeService::get_all(&state.db)
+        .await
+        .map_err(AppError::from)?;
 
     let ctx = SuggestionContext {
         people: &people,

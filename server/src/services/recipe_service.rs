@@ -114,12 +114,13 @@ impl RecipeService {
             recipe.is_favorite = Set(is_favorite);
         }
         if let Some(rating) = data.rating {
-            if !(1.0..=5.0).contains(&rating) || rating.fract() != 0.0 {
+            let rounded = rating.round();
+            if !(1.0..=5.0).contains(&rounded) {
                 return Err(DbErr::Custom(
                     "Rating must be a whole number from 1 to 5".to_string(),
                 ));
             }
-            recipe.rating = Set(Some(rating));
+            recipe.rating = Set(Some(rounded));
         }
 
         recipe.updated_at = Set(chrono::Utc::now());

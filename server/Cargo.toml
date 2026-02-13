@@ -27,7 +27,7 @@ rust-embed = "8"
 mime_guess = "2"
 
 # Database
-sea-orm = { version = "1.1", features = ["sqlx-sqlite", "runtime-tokio-native-tls", "macros"] }
+sea-orm = { version = "1.1", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros"] }
 migration = { path = "./migration" }
 
 # Serialization
@@ -37,7 +37,7 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # HTTP client (for Claude API and URL import)
-reqwest = { version = "0.12", features = ["json", "native-tls"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 
 # PDF and HTML processing
 pdf-extract = "0.10.0"

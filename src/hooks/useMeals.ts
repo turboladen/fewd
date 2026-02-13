@@ -5,8 +5,7 @@ import type { CreateMealDto, Meal, UpdateMealDto } from '../types/meal'
 export function useMealsForDateRange(startDate: string, endDate: string) {
   return useQuery({
     queryKey: ['meals', 'date-range', startDate, endDate],
-    queryFn: () =>
-      api.get<Meal[]>('/meals?start_date=' + startDate + '&end_date=' + endDate),
+    queryFn: () => api.get<Meal[]>('/meals?start_date=' + startDate + '&end_date=' + endDate),
     enabled: !!startDate && !!endDate,
   })
 }

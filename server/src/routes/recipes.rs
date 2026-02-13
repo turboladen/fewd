@@ -20,14 +20,20 @@ use crate::services::settings_service::SettingsService;
 use crate::AppState;
 
 pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<recipe::Model>>, AppError> {
-    RecipeService::get_all(&state.db).await.map(Json).map_err(AppError::from)
+    RecipeService::get_all(&state.db)
+        .await
+        .map(Json)
+        .map_err(AppError::from)
 }
 
 pub async fn get_one(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Option<recipe::Model>>, AppError> {
-    RecipeService::get_by_id(&state.db, id).await.map(Json).map_err(AppError::from)
+    RecipeService::get_by_id(&state.db, id)
+        .await
+        .map(Json)
+        .map_err(AppError::from)
 }
 
 #[derive(Deserialize)]
@@ -39,7 +45,10 @@ pub async fn search(
     State(state): State<AppState>,
     Query(params): Query<SearchQuery>,
 ) -> Result<Json<Vec<recipe::Model>>, AppError> {
-    RecipeService::search(&state.db, params.q).await.map(Json).map_err(AppError::from)
+    RecipeService::search(&state.db, params.q)
+        .await
+        .map(Json)
+        .map_err(AppError::from)
 }
 
 pub async fn create(
@@ -57,7 +66,10 @@ pub async fn update(
     Path(id): Path<String>,
     Json(data): Json<UpdateRecipeDto>,
 ) -> Result<Json<recipe::Model>, AppError> {
-    RecipeService::update(&state.db, id, data).await.map(Json).map_err(AppError::from)
+    RecipeService::update(&state.db, id, data)
+        .await
+        .map(Json)
+        .map_err(AppError::from)
 }
 
 pub async fn remove(
@@ -74,7 +86,10 @@ pub async fn toggle_favorite(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<recipe::Model>, AppError> {
-    RecipeService::toggle_favorite(&state.db, id).await.map(Json).map_err(AppError::from)
+    RecipeService::toggle_favorite(&state.db, id)
+        .await
+        .map(Json)
+        .map_err(AppError::from)
 }
 
 pub async fn import_markdown(
