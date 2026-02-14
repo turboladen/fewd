@@ -1,3 +1,4 @@
+mod cocktails;
 mod meal_templates;
 mod meals;
 mod people;
@@ -6,7 +7,7 @@ mod settings;
 mod shopping;
 mod suggestions;
 
-use axum::routing::{get, post, put};
+use axum::routing::{delete, get, post, put};
 use axum::Router;
 
 use crate::AppState;
@@ -61,6 +62,35 @@ pub fn api_routes() -> Router<AppState> {
         // Suggestions
         .route("/suggestions", post(suggestions::get_suggestions))
         .route("/suggestions/ai", post(suggestions::ai_suggest))
+        // Bar Items
+        .route(
+            "/bar-items",
+            get(cocktails::list_bar_items).post(cocktails::create_bar_item),
+        )
+        .route("/bar-items/bulk", post(cocktails::bulk_create_bar_items))
+        .route("/bar-items/all", delete(cocktails::delete_all_bar_items))
+        .route("/bar-items/{id}", delete(cocktails::delete_bar_item))
+        // Drink Recipes
+        .route(
+            "/drink-recipes",
+            get(cocktails::list_drink_recipes).post(cocktails::create_drink_recipe),
+        )
+        .route(
+            "/drink-recipes/{id}",
+            get(cocktails::get_drink_recipe)
+                .put(cocktails::update_drink_recipe)
+                .delete(cocktails::delete_drink_recipe),
+        )
+        .route(
+            "/drink-recipes/{id}/favorite",
+            post(cocktails::toggle_drink_favorite),
+        )
+        .route(
+            "/drink-recipes/import/url",
+            post(cocktails::import_drink_recipe_url),
+        )
+        // Cocktail AI Suggestions
+        .route("/cocktails/suggest", post(cocktails::ai_suggest_cocktails))
         // Settings
         .route("/settings/models", get(settings::available_models))
         .route("/settings/test-connection", post(settings::test_connection))

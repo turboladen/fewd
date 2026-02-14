@@ -48,7 +48,7 @@ impl From<ClaudeError> for ImportError {
 }
 
 const MAX_CONTENT_CHARS: usize = 50_000;
-const MIN_CONTENT_CHARS: usize = 50;
+pub const MIN_CONTENT_CHARS: usize = 50;
 
 pub struct RecipeImportService;
 
@@ -103,7 +103,7 @@ impl RecipeImportService {
         Self::extract_recipe_with_ai(api_key, model, truncated, "pdf_import").await
     }
 
-    async fn fetch_url(url: &str) -> Result<String, ImportError> {
+    pub async fn fetch_url(url: &str) -> Result<String, ImportError> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
@@ -130,7 +130,7 @@ impl RecipeImportService {
     }
 
     /// Try JSON-LD extraction first (most token-efficient), fall back to html2text
-    fn extract_content(html: &str) -> String {
+    pub fn extract_content(html: &str) -> String {
         // Try to find JSON-LD recipe data — recipe sites almost always include this
         if let Some(jsonld) = extract_jsonld_recipe(html) {
             return jsonld;

@@ -55,10 +55,10 @@ The binary lands at `server/target/release/fewd-server`.
 DATABASE_PATH=/path/to/fewd.db PORT=3000 ./fewd-server
 ```
 
-| Variable | Default | Description |
-|----------|---------|-------------|
+| Variable        | Default          | Description                      |
+| --------------- | ---------------- | -------------------------------- |
 | `DATABASE_PATH` | `./data/fewd.db` | Path to the SQLite database file |
-| `PORT` | `3000` | HTTP port to listen on |
+| `PORT`          | `3000`           | HTTP port to listen on           |
 
 The database and its parent directory are created automatically on first run.
 

@@ -1,5 +1,9 @@
 pub mod ai_suggestion_service;
+pub mod bar_item_service;
 pub mod claude_client;
+pub mod cocktail_suggestion_service;
+pub mod drink_recipe_import_service;
+pub mod drink_recipe_service;
 pub mod meal_service;
 pub mod meal_template_service;
 pub mod person_service;

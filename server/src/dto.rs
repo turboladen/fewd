@@ -125,6 +125,8 @@ pub struct CreatePersonDto {
     pub dislikes: Vec<String>,
     pub favorites: Vec<String>,
     pub notes: Option<String>,
+    pub drink_preferences: Option<Vec<String>>,
+    pub drink_dislikes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -136,6 +138,8 @@ pub struct UpdatePersonDto {
     pub favorites: Option<Vec<String>>,
     pub notes: Option<String>,
     pub is_active: Option<bool>,
+    pub drink_preferences: Option<Vec<String>>,
+    pub drink_dislikes: Option<Vec<String>>,
 }
 
 // ─── Meal DTOs ──────────────────────────────────────────────────
@@ -262,4 +266,88 @@ pub struct TokenUsage {
 #[derive(Debug, Deserialize)]
 pub struct SetSettingBody {
     pub value: String,
+}
+
+// ─── Bar Item DTOs ─────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CreateBarItemDto {
+    pub name: String,
+    pub category: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct BulkBarItemsDto {
+    pub items: Vec<CreateBarItemDto>,
+}
+
+// ─── Drink Recipe DTOs ─────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct CreateDrinkRecipeDto {
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(default = "default_drink_source")]
+    pub source: String,
+    pub source_url: Option<String>,
+    #[serde(default = "default_servings_one")]
+    pub servings: i32,
+    pub instructions: String,
+    pub ingredients: Vec<IngredientDto>,
+    pub technique: Option<String>,
+    pub glassware: Option<String>,
+    pub garnish: Option<String>,
+    pub tags: Vec<String>,
+    pub notes: Option<String>,
+    pub icon: Option<String>,
+    pub is_non_alcoholic: Option<bool>,
+}
+
+fn default_drink_source() -> String {
+    "manual".to_string()
+}
+
+fn default_servings_one() -> i32 {
+    1
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct UpdateDrinkRecipeDto {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub servings: Option<i32>,
+    pub instructions: Option<String>,
+    pub ingredients: Option<Vec<IngredientDto>>,
+    pub technique: Option<String>,
+    pub glassware: Option<String>,
+    pub garnish: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub notes: Option<String>,
+    pub icon: Option<String>,
+    pub is_favorite: Option<bool>,
+    pub is_non_alcoholic: Option<bool>,
+    pub rating: Option<f64>,
+}
+
+// ─── Cocktail Suggestion DTOs ──────────────────────────────────
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(tag = "type")]
+pub enum DrinkMood {
+    /// A named cocktail style/family (e.g. "Sours", "Ancestrals", "Highballs")
+    #[serde(rename = "style")]
+    Style { label: String },
+    /// Freeform user description
+    #[serde(rename = "custom")]
+    Custom { text: String },
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AiSuggestCocktailsDto {
+    pub person_ids: Vec<String>,
+    pub bar_item_ids: Vec<String>,
+    pub mood: DrinkMood,
+    pub include_non_alcoholic: bool,
+    pub feedback: Option<String>,
+    pub previous_suggestion_names: Option<Vec<String>>,
 }

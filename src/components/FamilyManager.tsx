@@ -14,6 +14,8 @@ interface PersonFormData {
   dislikes: string[]
   favorites: string[]
   notes: string
+  drink_preferences: string[]
+  drink_dislikes: string[]
 }
 
 const emptyForm: PersonFormData = {
@@ -23,6 +25,8 @@ const emptyForm: PersonFormData = {
   dislikes: [],
   favorites: [],
   notes: '',
+  drink_preferences: [],
+  drink_dislikes: [],
 }
 
 function PersonForm({
@@ -94,6 +98,18 @@ function PersonForm({
         value={form.dislikes}
         onChange={(dislikes) => setForm({ ...form, dislikes })}
       />
+      <TagInput
+        label='Drink Preferences'
+        value={form.drink_preferences}
+        onChange={(drink_preferences) => setForm({ ...form, drink_preferences })}
+        placeholder='e.g., bourbon, tiki, sour (press Enter)'
+      />
+      <TagInput
+        label='Drink Dislikes'
+        value={form.drink_dislikes}
+        onChange={(drink_dislikes) => setForm({ ...form, drink_dislikes })}
+        placeholder='e.g., anise, overly sweet (press Enter)'
+      />
       <div>
         <label className='block text-sm font-medium text-stone-700 mb-1'>
           Notes
@@ -160,6 +176,10 @@ export function FamilyManager() {
       favorites: formData.favorites,
       dietary_goals: formData.dietary_goals || undefined,
       notes: formData.notes || undefined,
+      drink_preferences: formData.drink_preferences.length > 0
+        ? formData.drink_preferences
+        : undefined,
+      drink_dislikes: formData.drink_dislikes.length > 0 ? formData.drink_dislikes : undefined,
     }
     createMutation.mutate(dto, {
       onSuccess: () => {
@@ -177,6 +197,8 @@ export function FamilyManager() {
       favorites: formData.favorites,
       dietary_goals: formData.dietary_goals || undefined,
       notes: formData.notes || undefined,
+      drink_preferences: formData.drink_preferences,
+      drink_dislikes: formData.drink_dislikes,
     }
     updateMutation.mutate({ id, data: dto }, {
       onSuccess: () => {
@@ -271,6 +293,8 @@ export function FamilyManager() {
                     dislikes: parsed.dislikes,
                     favorites: parsed.favorites,
                     notes: person.notes || '',
+                    drink_preferences: parsed.drink_preferences,
+                    drink_dislikes: parsed.drink_dislikes,
                   }}
                   onSubmit={(data) => handleUpdate(person.id, data)}
                   onCancel={() => setEditingId(null)}
@@ -350,6 +374,22 @@ export function FamilyManager() {
                   <span className='text-sm font-medium'>Dislikes:</span>
                   <span className='text-sm text-stone-600'>
                     {parsed.dislikes.join(', ')}
+                  </span>
+                </div>
+              )}
+              {parsed.drink_preferences.length > 0 && (
+                <div className='mt-1'>
+                  <span className='text-sm font-medium'>Drink Prefs:</span>
+                  <span className='text-sm text-stone-600'>
+                    {parsed.drink_preferences.join(', ')}
+                  </span>
+                </div>
+              )}
+              {parsed.drink_dislikes.length > 0 && (
+                <div className='mt-1'>
+                  <span className='text-sm font-medium'>Drink Dislikes:</span>
+                  <span className='text-sm text-stone-600'>
+                    {parsed.drink_dislikes.join(', ')}
                   </span>
                 </div>
               )}

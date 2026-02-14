@@ -39,6 +39,8 @@ impl PersonService {
             dislikes: Set(to_json(&data.dislikes)?),
             favorites: Set(to_json(&data.favorites)?),
             notes: Set(data.notes),
+            drink_preferences: Set(data.drink_preferences.map(|v| to_json(&v)).transpose()?),
+            drink_dislikes: Set(data.drink_dislikes.map(|v| to_json(&v)).transpose()?),
             is_active: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
@@ -81,6 +83,12 @@ impl PersonService {
         }
         if let Some(is_active) = data.is_active {
             person.is_active = Set(is_active);
+        }
+        if let Some(drink_preferences) = data.drink_preferences {
+            person.drink_preferences = Set(Some(to_json(&drink_preferences)?));
+        }
+        if let Some(drink_dislikes) = data.drink_dislikes {
+            person.drink_dislikes = Set(Some(to_json(&drink_dislikes)?));
         }
 
         person.updated_at = Set(chrono::Utc::now());

@@ -4,13 +4,21 @@ This file provides context for AI coding assistants (Claude Code, Copilot, etc.)
 
 ## Project Overview
 
-Family meal planner desktop app built with Tauri (Rust backend + React frontend). Stores data locally in SQLite. See `REQUIREMENTS.md` for full specifications and `IMPLEMENTATION_PLAN.md` for build order.
+Family meal planner & cocktail manager web app. Rust/Axum backend with SQLite, React frontend. See `REQUIREMENTS.md` for full specifications and `IMPLEMENTATION_PLAN.md` for build order.
 
 **Architecture:**
 
-- Backend: Rust + Tauri 2 + SeaORM + SQLite
-- Frontend: React 18 + TypeScript + Vite + TanStack Query + Tailwind
-- Desktop app for macOS (primary), Windows, Linux
+- Backend: Rust + Axum + SeaORM + SQLite (in `server/`)
+- Frontend: React 18 + TypeScript + Vite + TanStack Query + Tailwind (in `src/`)
+- Standalone web app (previously Tauri desktop app)
+
+**Navigation Structure:**
+
+Top-level tabs: **Family** | **Meals** | **Cocktails**
+- **Meals** sub-tabs: Recipes | Planner | Templates | Shopping
+- **Cocktails** sub-tabs: Suggest | Recipes | My Bar
+
+Sub-navigation uses a generic `SubNav<T>` component in `App.tsx`.
 
 ## Development Environment
 
@@ -23,8 +31,7 @@ Family meal planner desktop app built with Tauri (Rust backend + React frontend)
 **Required Tools:**
 
 - Rust toolchain (via rustup)
-- Bun.js (JavaScript runtime and package manager)
-- Tauri CLI: `cargo install tauri-cli`
+- Bun.js (JavaScript runtime and package manager) — **always use `bun`/`bunx`, never `npm`/`npx`**
 - dprint: `cargo install dprint` (code formatter)
 
 ## Project Principles
@@ -100,32 +107,28 @@ async fn get_all_people(db: &DatabaseConnection) -> Vec<Person>
 **Error Handling:**
 
 - Use `Result<T, E>` for fallible operations; `thiserror` for libs/internal, `anyhow` for apps/public
-- Convert SeaORM errors to Strings at command boundary
+- Convert SeaORM errors to appropriate HTTP error responses
 - Log errors before returning to frontend
 - Provide user-friendly error messages
 
 **Patterns:**
 
-- Service layer for business logic (`src/services/`)
-- DTOs for Tauri commands (`src/commands/`)
-- Entities mirror database tables (`src/entities/`)
-- Keep commands thin (validation + service call)
+- Service layer for business logic (`server/src/services/`)
+- DTOs in `server/src/dto.rs`
+- Route handlers in `server/src/routes/`
+- Entities mirror database tables (`server/src/entities/`)
+- Keep route handlers thin (validation + service call)
 
 **Example Structure:**
 
 ```rust
-// Command (thin)
-#[tauri::command]
+// Route handler (thin)
 pub async fn create_person(
-    state: State<'_, AppState>,
-    data: CreatePersonDto,
-) -> Result<person::Model, String> {
-    PersonService::create(&state.db, data)
-        .await
-        .map_err(|e| {
-            eprintln!("Failed to create person: {}", e);
-            format!("Could not create person: {}", e)
-        })
+    State(state): State<AppState>,
+    Json(data): Json<CreatePersonDto>,
+) -> Result<Json<person::Model>, AppError> {
+    let person = PersonService::create(&state.db, data).await?;
+    Ok(Json(person))
 }
 
 // Service (business logic)
@@ -198,7 +201,7 @@ export function MyComponent({ onSave }: Props) {
 
 ### Frontend Design System
 
-**Typography:** Self-hosted variable fonts in `public/fonts/` (for offline Tauri use):
+**Typography:** Self-hosted variable fonts in `public/fonts/`:
 - Headings: Playfair Display (serif) — configured as `fontFamily.heading` in Tailwind
 - Body: DM Sans (sans-serif) — configured as `fontFamily.sans` override in Tailwind
 
@@ -226,6 +229,8 @@ export function MyComponent({ onSave }: Props) {
 | `EmptyState.tsx` | Centered empty-state display. Props: `emoji`, `title`, `description`, optional `action` |
 | `TagInput.tsx` | Reusable tag editor. Props: `label`, `value`, `onChange`, optional `placeholder` |
 | `StarRating.tsx` | Star rating display/input with SVG stars |
+| `IngredientInput.tsx` | Reusable ingredient list editor (name, amount, unit, notes). Shared by food and drink recipe forms |
+| `DrinkRecipeForm.tsx` | Drink recipe add/edit form. Reuses `IngredientInput` + `TagInput`. Types live in `src/types/drinkRecipe.ts` (not the component file) to satisfy `react-refresh/only-export-components` |
 
 **Color Palette** (in `tailwind.config.js`):
 - `primary` — earthy greens (forest/sage tones)
@@ -276,7 +281,7 @@ mod tests {
 
 **Integration Tests:**
 
-- Test Tauri commands end-to-end
+- Test route handlers end-to-end
 - Use `tests/` directory
 
 ### React Tests
@@ -291,7 +296,7 @@ mod tests {
 
 - Vitest for test runner
 - React Testing Library for component tests
-- Mock Tauri API calls
+- Mock API calls (fetch)
 
 **Don’t Test:**
 
@@ -362,89 +367,44 @@ typos
 ```bash
 # Install dependencies
 bun install
-cd src-tauri && cargo build && cd ..
+cd server && cargo build && cd ..
 
-# Run dev mode (hot reload for both Rust and React)
-bun run tauri dev
+# Run both server + frontend (recommended)
+bun run dev:full
+
+# Or run separately:
+bun run dev:server   # Axum backend on port 3001
+bun run dev          # Vite frontend on port 5173
 ```
 
 **Dev Mode Features:**
 
 - React hot reload (Vite)
-- Rust recompiles on file change
-- Opens desktop window automatically
-- DevTools available (right-click → Inspect)
+- Axum server runs concurrently
+- Frontend proxies API requests to backend
 
 ### Building
 
 ```bash
-# Build for current architecture only
-bun run tauri build
+# Build frontend
+bun run build
 
-# Build macOS universal binary (Intel + Apple Silicon)
-bun run tauri:build:universal
+# Build server
+bun run build:server
 
-# Output (universal): src-tauri/target/universal-apple-darwin/release/bundle/
-# Output (single-arch): src-tauri/target/release/bundle/
-# macOS: .dmg and .app
-# Windows: .msi and .exe
-# Linux: .deb, .appimage
+# Build both
+bun run build:full
 ```
-
-**Universal binary prerequisites:**
-
-```bash
-# Install both Rust targets (one-time setup)
-rustup target add x86_64-apple-darwin    # Intel
-rustup target add aarch64-apple-darwin   # Apple Silicon (likely already installed)
-```
-
-**Verify a universal binary:**
-
-```bash
-file src-tauri/target/universal-apple-darwin/release/bundle/macos/fewd.app/Contents/MacOS/fewd
-# Expected: Mach-O universal binary with 2 architectures: [x86_64] [arm64]
-```
-
-**Distribute to another Mac:**
-
-1. Build: `bun run tauri:build:universal`
-2. The `.dmg` is at `src-tauri/target/universal-apple-darwin/release/bundle/dmg/`
-3. Copy the `.dmg` to the other Mac (AirDrop, USB, shared folder, etc.)
-4. On the other Mac, open the `.dmg` and drag the app to Applications
-5. First launch: right-click → Open (to bypass Gatekeeper), or run `xattr -cr /Applications/fewd.app`
 
 ### Database Location
 
 The database location is configurable via Settings → Database Location.
 
-**Default (local) paths:**
-
-- Dev: `~/Library/Application Support/com.fewd.dev/fewd.db`
-- Production: `~/Library/Application Support/com.fewd/fewd.db`
-
-**Config file** (always local, never synced):
-
-- `~/Library/Application Support/com.fewd.dev/config.json`
-- Contains `db_dir` — when set, the app uses `<db_dir>/fewd.db` instead of the default
-
-**Shared database (iCloud):**
-
-- Use Settings → Database Location → Change Location to point to a shared iCloud folder
-- The app switches to DELETE journal mode (single-file, safe for sync) when using a custom location
-- A `.fewd.lock` file is placed alongside the database to warn about concurrent access from other machines
-- Avoid using the app on two computers at the exact same time
-
 **Inspect Database:**
 
 ```bash
-# Default location (macOS dev)
-sqlite3 ~/Library/Application\ Support/com.fewd.dev/fewd.db
-
-# Check current location from config
-cat ~/Library/Application\ Support/com.fewd.dev/config.json
-
 # Or use GUI tool like DB Browser for SQLite
+sqlite3 <path-to-fewd.db>
 ```
 
 ## CI/CD (GitHub Actions)
@@ -478,12 +438,13 @@ typos
 
 ### Add a New Entity
 
-1. Create migration in `src-tauri/migration/src/`
-1. Add to `migration/src/lib.rs`
-1. Create entity in `src-tauri/src/entities/`
-1. Create service in `src-tauri/src/services/`
-1. Create DTOs and commands in `src-tauri/src/commands/`
-1. Register commands in `src-tauri/src/main.rs`
+1. Create migration in `server/migration/src/`
+1. Add to `server/migration/src/lib.rs`
+1. Create entity in `server/src/entities/`
+1. Create service in `server/src/services/`
+1. Add DTOs in `server/src/dto.rs`
+1. Create route handler in `server/src/routes/`
+1. Register routes in `server/src/main.rs`
 1. Create TypeScript types in `src/types/`
 1. Create hooks in `src/hooks/`
 1. Create UI component in `src/components/`
@@ -493,7 +454,7 @@ typos
 **Rust:**
 
 ```bash
-cd src-tauri
+cd server
 cargo add <crate-name>
 ```
 
@@ -503,39 +464,31 @@ cargo add <crate-name>
 bun add <package-name>
 ```
 
-### Debug Tauri Commands
+### Debug Route Handlers
 
 Add logging:
 
 ```rust
-#[tauri::command]
-pub async fn my_command(data: SomeDto) -> Result<Response, String> {
-    eprintln!("my_command called with: {:?}", data);
+pub async fn my_handler(Json(data): Json<SomeDto>) -> Result<Json<Response>, AppError> {
+    tracing::debug!("my_handler called with: {:?}", data);
     // ... rest of function
 }
 ```
 
 View logs:
 
-- Dev mode: Check terminal running `bun run tauri dev`
-- Production: macOS Console.app, filter by app name
+- Dev mode: Check terminal running `bun run dev:full` (server output in blue)
 
 ### Update Database Schema
 
 1. Create new migration
-1. Run `bun run tauri dev` (auto-applies migration)
+1. Run `bun run dev:full` (auto-applies migrations on startup)
 1. If migration fails, check logs and fix
 1. Test rollback: manually run `.down()` and `.up()` again
 
 ## Troubleshooting
 
 ### Common Issues
-
-**“command not found: tauri”**
-
-```bash
-cargo install tauri-cli --version "^2.0.0"
-```
 
 **SQLite locked errors**
 
@@ -551,7 +504,7 @@ cargo install tauri-cli --version "^2.0.0"
 **Rust compile errors after pulling**
 
 ```bash
-cd src-tauri
+cd server
 cargo clean
 cargo build
 ```
@@ -568,8 +521,8 @@ bun install
 ### Backend: Service Layer Pattern
 
 ```rust
-// Command delegates to service
-commands::person::create_person() 
+// Route handler delegates to service
+routes::person::create_person()
   → services::person_service::PersonService::create()
     → entities::person::ActiveModel::insert()
 ```
@@ -600,7 +553,7 @@ interface PersonDto { name: string }
 
 ## Resources
 
-- [Tauri Docs](https://tauri.app/)
+- [Axum Docs](https://docs.rs/axum/latest/axum/)
 - [SeaORM Docs](https://www.sea-ql.org/SeaORM/)
 - [TanStack Query Docs](https://tanstack.com/query/latest)
 - [Tailwind Docs](https://tailwindcss.com/docs)

@@ -32,6 +32,8 @@ pub async fn seed_if_empty(db: &DatabaseConnection) -> Result<(), DbErr> {
             dislikes: Set(empty_json.clone()),
             favorites: Set(empty_json.clone()),
             notes: Set(None),
+            drink_preferences: Set(None),
+            drink_dislikes: Set(None),
             is_active: Set(true),
             created_at: Set(now),
             updated_at: Set(now),

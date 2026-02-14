@@ -13,7 +13,7 @@ export function IngredientRow({
   const isRange = ingredient.amount.type === 'range'
 
   return (
-    <div className='flex gap-2 items-start'>
+    <div className='flex flex-wrap gap-2 items-start'>
       <button
         type='button'
         onClick={() => {
@@ -99,7 +99,7 @@ export function IngredientRow({
         type='text'
         value={ingredient.name}
         onChange={(e) => onChange({ ...ingredient, name: e.target.value })}
-        className='input-sm flex-1'
+        className='input-sm flex-1 min-w-[150px]'
         placeholder='Ingredient name'
       />
       <button

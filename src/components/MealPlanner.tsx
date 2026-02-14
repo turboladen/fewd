@@ -922,7 +922,7 @@ export function MealPlanner() {
   return (
     <div className='p-6'>
       {/* Header */}
-      <div className='flex items-center justify-between mb-6'>
+      <div className='flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6'>
         <h1 className='text-2xl font-bold text-stone-900'>Meal Planner</h1>
         <div className='flex items-center gap-3'>
           <button
@@ -931,7 +931,7 @@ export function MealPlanner() {
           >
             <IconArrowLeft className='w-4 h-4 mr-1' /> Prev
           </button>
-          <span className='text-sm font-medium text-stone-700 min-w-[180px] text-center'>
+          <span className='text-sm font-medium text-stone-700 text-center whitespace-nowrap'>
             {weekRangeLabel}
           </span>
           <button
@@ -956,7 +956,7 @@ export function MealPlanner() {
       )}
 
       {/* Calendar grid */}
-      <div className='grid grid-cols-7 gap-2'>
+      <div className='grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2'>
         {weekDates.map((date) => {
           const dateKey = formatDateKey(date)
           const dateMeals = mealsByDate.get(dateKey) ?? []
@@ -965,7 +965,7 @@ export function MealPlanner() {
           return (
             <div
               key={dateKey}
-              className={`rounded-lg border p-2 min-h-[200px] ${
+              className={`rounded-lg border p-2 min-h-[140px] lg:min-h-[200px] ${
                 isToday(date)
                   ? 'bg-primary-50 border-primary-200'
                   : 'bg-white border-stone-200'

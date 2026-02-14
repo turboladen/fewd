@@ -210,7 +210,7 @@ function RecipeForm({
         <label className='block text-sm font-medium text-stone-700 mb-1'>
           Serving size <span className='text-stone-400 font-normal'>(optional)</span>
         </label>
-        <div className='flex gap-2 items-center'>
+        <div className='flex flex-wrap gap-2 items-center'>
           <input
             type='number'
             min={0}
@@ -251,7 +251,7 @@ function RecipeForm({
               }
             }}
             placeholder='cookies, slices, pieces...'
-            className='input-sm w-48'
+            className='input-sm w-full sm:w-48'
           />
           <span className='text-xs text-stone-400'>per serving</span>
         </div>
@@ -806,7 +806,7 @@ function RecipeDetail({
   return (
     <div className='card p-6 md:col-span-2 animate-fade-in'>
       {/* Header */}
-      <div className='flex items-start justify-between mb-4'>
+      <div className='flex flex-col sm:flex-row items-start sm:justify-between gap-2 mb-4'>
         <div>
           <div className='flex items-center gap-2'>
             {parsed.icon && <span className='text-2xl'>{parsed.icon}</span>}
@@ -828,7 +828,7 @@ function RecipeDetail({
           </div>
           {parsed.description && <p className='text-stone-600 mt-1'>{parsed.description}</p>}
         </div>
-        <div className='flex gap-2 items-center'>
+        <div className='flex flex-wrap gap-2 items-center'>
           <button
             onClick={onEdit}
             className='text-primary-600 text-sm hover:underline'
