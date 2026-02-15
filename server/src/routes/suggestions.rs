@@ -137,6 +137,7 @@ pub async fn ai_suggest(
                         let _ = sse_tx.send(SsePayload::Complete(value)).await;
                     }
                     Err(e) => {
+                        tracing::error!("AI suggestion parse failed: {}", e);
                         let _ = sse_tx
                             .send(SsePayload::Error(format!("AI suggestion failed: {}", e)))
                             .await;
@@ -144,6 +145,7 @@ pub async fn ai_suggest(
                 }
             }
             Err(e) => {
+                tracing::error!("AI suggestion API call failed: {}", e);
                 let _ = sse_tx
                     .send(SsePayload::Error(format!("AI suggestion failed: {}", e)))
                     .await;

@@ -229,6 +229,7 @@ pub async fn adapt(
                         let _ = sse_tx.send(SsePayload::Complete(value)).await;
                     }
                     Err(e) => {
+                        tracing::error!("Recipe adaptation parse failed: {}", e);
                         let _ = sse_tx
                             .send(SsePayload::Error(format!("Adaptation failed: {}", e)))
                             .await;
@@ -236,6 +237,7 @@ pub async fn adapt(
                 }
             }
             Err(e) => {
+                tracing::error!("Recipe adaptation API call failed: {}", e);
                 let _ = sse_tx
                     .send(SsePayload::Error(format!("Adaptation failed: {}", e)))
                     .await;
@@ -278,6 +280,7 @@ pub async fn import_url(
         let html = match RecipeImportService::fetch_url(&url).await {
             Ok(html) => html,
             Err(e) => {
+                tracing::error!("URL fetch failed for {}: {}", url, e);
                 let _ = sse_tx
                     .send(SsePayload::Error(format!("Import failed: {}", e)))
                     .await;
@@ -287,6 +290,7 @@ pub async fn import_url(
 
         let content = RecipeImportService::extract_content(&html);
         if content.len() < crate::services::recipe_import_service::MIN_CONTENT_CHARS {
+            tracing::warn!("Insufficient content extracted from URL: {}", url);
             let _ = sse_tx
                 .send(SsePayload::Error(
                     "Could not extract enough text from the page.".to_string(),
@@ -339,6 +343,7 @@ pub async fn import_url(
                                 let _ = sse_tx.send(SsePayload::Complete(value)).await;
                             }
                             Err(e) => {
+                                tracing::error!("Failed to save imported recipe: {}", e);
                                 let _ = sse_tx
                                     .send(SsePayload::Error(format!(
                                         "Failed to save recipe: {}",
@@ -349,6 +354,7 @@ pub async fn import_url(
                         }
                     }
                     Err(e) => {
+                        tracing::error!("Recipe import AI response unparseable: {}", e);
                         let _ = sse_tx
                             .send(SsePayload::Error(format!(
                                 "AI returned an unparseable response: {}",
@@ -359,6 +365,7 @@ pub async fn import_url(
                 }
             }
             Err(e) => {
+                tracing::error!("Recipe import API call failed: {}", e);
                 let _ = sse_tx
                     .send(SsePayload::Error(format!("Import failed: {}", e)))
                     .await;

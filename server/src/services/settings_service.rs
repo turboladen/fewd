@@ -46,7 +46,7 @@ impl SettingsService {
         let txn = match db.begin().await {
             Ok(t) => t,
             Err(e) => {
-                eprintln!("Failed to begin transaction for token usage: {}", e);
+                tracing::warn!("Failed to begin transaction for token usage: {}", e);
                 return;
             }
         };
@@ -91,11 +91,11 @@ impl SettingsService {
         match result {
             Ok(()) => {
                 if let Err(e) = txn.commit().await {
-                    eprintln!("Failed to commit token usage update: {}", e);
+                    tracing::warn!("Failed to commit token usage update: {}", e);
                 }
             }
             Err(e) => {
-                eprintln!("Token usage update failed, rolling back: {}", e);
+                tracing::warn!("Token usage update failed, rolling back: {}", e);
                 let _ = txn.rollback().await;
             }
         }

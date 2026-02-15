@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type StreamProgressEvent } from '../lib/api'
 
 export type { StreamProgressEvent }
@@ -43,6 +43,11 @@ export function useStreamingMutation<TInput, TResult>(
   const [progress, setProgress] = useState<StreamProgressEvent | null>(null)
 
   const controllerRef = useRef<AbortController | null>(null)
+
+  // Abort any in-flight stream when the component unmounts
+  useEffect(() => () => {
+    controllerRef.current?.abort()
+  }, [])
 
   const reset = useCallback(() => {
     controllerRef.current?.abort()

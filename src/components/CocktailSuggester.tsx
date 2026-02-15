@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useBarItems } from '../hooks/useBarItems'
 import { useAiSuggestCocktails } from '../hooks/useCocktailSuggestions'
 import { useCreateDrinkRecipe, useDrinkRecipes } from '../hooks/useDrinkRecipes'
@@ -155,15 +155,20 @@ export function CocktailSuggester({ onSwitchToBar }: { onSwitchToBar: () => void
   const [peopleInitialized, setPeopleInitialized] = useState(false)
 
   // Initialize selections when data loads
-  if (barItems && !barInitialized) {
-    setSelectedBarIds(new Set(barItems.map((i) => i.id)))
-    setBarInitialized(true)
-  }
-  if (people && !peopleInitialized) {
-    const ofAge = people.filter((p) => computeAge(p.birthdate) >= 21)
-    setSelectedPersonIds(new Set(ofAge.map((p) => p.id)))
-    setPeopleInitialized(true)
-  }
+  useEffect(() => {
+    if (barItems && !barInitialized) {
+      setSelectedBarIds(new Set(barItems.map((i) => i.id)))
+      setBarInitialized(true)
+    }
+  }, [barItems, barInitialized])
+
+  useEffect(() => {
+    if (people && !peopleInitialized) {
+      const ofAge = people.filter((p) => computeAge(p.birthdate) >= 21)
+      setSelectedPersonIds(new Set(ofAge.map((p) => p.id)))
+      setPeopleInitialized(true)
+    }
+  }, [people, peopleInitialized])
 
   const [selectedStyles, setSelectedStyles] = useState<Set<string>>(new Set(['Ancestrals']))
   const [customMoodText, setCustomMoodText] = useState('')
@@ -173,6 +178,7 @@ export function CocktailSuggester({ onSwitchToBar }: { onSwitchToBar: () => void
   const [feedback, setFeedback] = useState('')
   const [previousNames, setPreviousNames] = useState<string[]>([])
   const [savingIndex, setSavingIndex] = useState<number | null>(null)
+  const [savedIndices, setSavedIndices] = useState<Set<number>>(new Set())
   const [showIngredients, setShowIngredients] = useState(false)
   const [suggestionSource, setSuggestionSource] = useState<SuggestionSource>('both')
   const [matchedRecipes, setMatchedRecipes] = useState<ParsedDrinkRecipe[]>([])
@@ -270,6 +276,7 @@ export function CocktailSuggester({ onSwitchToBar }: { onSwitchToBar: () => void
     setPhase('results')
     setExpandedIndex(null)
     setExpandedRecipeId(null)
+    setSavedIndices(new Set())
     setFeedback('')
 
     // Call AI for 'both' and 'ai-only'
@@ -299,6 +306,7 @@ export function CocktailSuggester({ onSwitchToBar }: { onSwitchToBar: () => void
     createDrinkMutation.mutate(suggestion, {
       onSuccess: () => {
         setSavingIndex(null)
+        setSavedIndices((prev) => new Set(prev).add(index))
         toast(`Saved "${suggestion.name}"`)
       },
       onError: () => {
@@ -501,10 +509,14 @@ export function CocktailSuggester({ onSwitchToBar }: { onSwitchToBar: () => void
                           )}
                           <button
                             onClick={() => handleSave(suggestion, i)}
-                            disabled={savingIndex === i}
+                            disabled={savingIndex === i || savedIndices.has(i)}
                             className='btn-md btn-primary'
                           >
-                            {savingIndex === i ? 'Saving...' : 'Save This Drink'}
+                            {savingIndex === i
+                              ? 'Saving...'
+                              : savedIndices.has(i)
+                              ? 'Saved'
+                              : 'Save This Drink'}
                           </button>
                         </div>
                       )}

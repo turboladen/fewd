@@ -426,6 +426,12 @@ impl ClaudeClient {
         let mut byte_stream = response.bytes_stream();
 
         while let Some(chunk_result) = byte_stream.next().await {
+            // Detect client disconnect early to avoid wasting Anthropic API tokens
+            if progress_tx.is_closed() {
+                tracing::info!("Client disconnected, stopping API stream consumption");
+                break;
+            }
+
             let chunk = chunk_result
                 .map_err(|e| ClaudeError::NetworkError(format!("Stream read error: {}", e)))?;
 
@@ -460,12 +466,19 @@ impl ClaudeClient {
                                         >= last_progress_tokens + PROGRESS_TOKEN_INTERVAL
                                     {
                                         last_progress_tokens = estimated_tokens;
-                                        let _ = progress_tx
+                                        if progress_tx
                                             .send(ProgressEvent::Generating {
                                                 message: "Generating...".to_string(),
                                                 tokens: estimated_tokens,
                                             })
-                                            .await;
+                                            .await
+                                            .is_err()
+                                        {
+                                            tracing::info!(
+                                                "Client disconnected during streaming, stopping"
+                                            );
+                                            break;
+                                        }
                                     }
                                 }
                                 StreamEvent::MessageDelta { usage, .. } => {
