@@ -1,0 +1,18 @@
+[Unit]
+Description=fewd — family meal planner & cocktail manager
+After=network.target
+
+[Service]
+Type=simple
+User=fewd
+Group=fewd
+ExecStart=/opt/fewd/fewd-server
+Environment="DATABASE_PATH=/opt/fewd/data/fewd.db"
+Environment="PORT=3000"
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

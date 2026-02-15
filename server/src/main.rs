@@ -50,15 +50,19 @@ async fn main() {
 async fn serve_spa(uri: Uri) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
 
-    let asset = if path.is_empty() {
-        Assets::get("index.html")
+    // Try the exact path first, fall back to index.html for SPA client-side routing
+    let (asset, mime_path) = if path.is_empty() {
+        (Assets::get("index.html"), "index.html")
     } else {
-        Assets::get(path).or_else(|| Assets::get("index.html"))
+        match Assets::get(path) {
+            Some(file) => (Some(file), path),
+            None => (Assets::get("index.html"), "index.html"),
+        }
     };
 
     match asset {
         Some(content) => {
-            let mime = mime_guess::from_path(path)
+            let mime = mime_guess::from_path(mime_path)
                 .first_or_octet_stream()
                 .as_ref()
                 .to_string();

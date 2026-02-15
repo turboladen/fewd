@@ -62,30 +62,49 @@ DATABASE_PATH=/path/to/fewd.db PORT=3000 ./fewd-server
 
 The database and its parent directory are created automatically on first run.
 
-## Cross-Compiling for Linux ARM64
+## Deploying to a Server
 
-For deploying to ARM64 devices (e.g., ODroid N2+, Raspberry Pi 4) without installing build tools on the target.
+The app runs as a single binary with no external dependencies. Ideal for ARM64 devices like Raspberry Pi, ODroid, or DietPi.
 
-**One-time setup (macOS):**
+### Prerequisites (macOS build machine)
 
 ```bash
 rustup target add aarch64-unknown-linux-gnu
 brew install messense/macos-cross-toolchains/aarch64-unknown-linux-gnu
 ```
 
-**Build:**
+### First-time setup
 
 ```bash
-just build-arm64
+just setup-remote user@hostname
 ```
 
-**Deploy to a remote host:**
+This SSHs into the target and creates a `fewd` system user, `/opt/fewd/` directories, and installs a systemd service that auto-starts on boot.
+
+### Deploy
 
 ```bash
 just deploy user@hostname
 ```
 
-This builds the ARM64 binary and copies it to `/opt/fewd/` on the target via scp.
+Cross-compiles for ARM64, copies the binary and service file, and restarts the service. Takes ~2 minutes.
+
+### Verify
+
+```bash
+ssh user@hostname "systemctl status fewd"     # Should show active (running)
+ssh user@hostname "journalctl -u fewd -n 20"  # View recent logs
+```
+
+Then open `http://hostname:3000` in a browser.
+
+### Useful commands
+
+```bash
+ssh user@hostname "sudo systemctl stop fewd"       # Stop
+ssh user@hostname "sudo systemctl restart fewd"     # Restart
+ssh user@hostname "journalctl -u fewd -f"           # Live log tail
+```
 
 ## Commands
 
@@ -98,7 +117,8 @@ just build                 # Build frontend + server (release)
 just build-arm64           # Cross-compile for Linux ARM64
 
 # Deploying
-just deploy user@host      # Build ARM64 + scp to remote host
+just setup-remote user@host  # First-time server setup (creates user, dirs, systemd service)
+just deploy user@host        # Build ARM64 + deploy + restart service
 
 # Testing & Linting
 just ci                    # Run all CI checks locally
@@ -125,6 +145,7 @@ fewd/
 │   │   ├── db.rs          # Database initialization
 │   │   └── main.rs
 │   └── migration/         # SeaORM database migrations
+├── deploy/                # Systemd service + setup script
 ├── .github/workflows/     # CI/CD
 └── Justfile               # Development commands
 ```

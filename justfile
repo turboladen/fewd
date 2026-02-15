@@ -22,9 +22,21 @@ build-arm64:
     bun run build
     cd server && cargo build --release --target {{arm64_target}}
 
-# Deploy to a remote Linux ARM64 host (e.g., just deploy odroid@192.168.1.50)
+# Deploy to a remote Linux ARM64 host (e.g., just deploy user@192.168.1.50)
 deploy host: build-arm64
-    scp server/target/{{arm64_target}}/release/fewd-server {{host}}:/opt/fewd/fewd-server
+    ssh {{host}} "sudo systemctl stop fewd || true"
+    cat target/{{arm64_target}}/release/fewd-server | ssh {{host}} "sudo tee /opt/fewd/fewd-server > /dev/null && sudo chmod +x /opt/fewd/fewd-server"
+    cat deploy/fewd.service | ssh {{host}} "sudo tee /opt/fewd/fewd.service > /dev/null"
+    ssh {{host}} "sudo chown -R fewd:fewd /opt/fewd && sudo systemctl daemon-reload && sudo systemctl start fewd"
+    @echo ""
+    @echo "✅ Deployed to {{host}}. Verify at http://$(echo {{host}} | cut -d@ -f2):3000"
+
+# First-time remote setup: creates fewd user, directories, and installs systemd service
+setup-remote host:
+    ssh {{host}} "sudo mkdir -p /opt/fewd && sudo chown \$(whoami) /opt/fewd"
+    cat deploy/fewd.service | ssh {{host}} "cat > /opt/fewd/fewd.service"
+    cat deploy/setup-remote.sh | ssh {{host}} "cat > /tmp/setup-remote.sh"
+    ssh {{host}} "bash /tmp/setup-remote.sh"
 
 # Type-check frontend without emitting
 check-frontend:
