@@ -1,5 +1,8 @@
+use std::convert::Infallible;
+
 use axum::extract::{Multipart, Path, Query, State};
 use axum::http::StatusCode;
+use axum::response::sse::{Event, Sse};
 use axum::Json;
 use serde::Deserialize;
 
@@ -9,8 +12,10 @@ use crate::dto::{
 };
 use crate::entities::recipe;
 use crate::error::AppError;
-use crate::services::claude_client::ClaudeClient;
+use crate::routes::sse_helpers::{sse_from_channel, SsePayload};
+use crate::services::claude_client::{ClaudeClient, ProgressEvent};
 use crate::services::person_service::PersonService;
+use crate::services::recipe_adapter::RecipeAdapter;
 use crate::services::recipe_enhancer;
 use crate::services::recipe_import_service::RecipeImportService;
 use crate::services::recipe_parser::RecipeParser;
@@ -152,7 +157,7 @@ pub async fn enhance(
 pub async fn adapt(
     State(state): State<AppState>,
     Json(data): Json<AdaptRecipeDto>,
-) -> Result<Json<CreateRecipeDto>, AppError> {
+) -> Result<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>, AppError> {
     let api_key = get_api_key(&state).await?;
     let model = get_model(&state).await;
 
@@ -170,44 +175,198 @@ pub async fn adapt(
         people.push(person);
     }
 
-    let result = crate::services::recipe_adapter::RecipeAdapter::adapt_recipe(
-        &api_key,
-        &model,
+    // Build prompts BEFORE spawning (avoids lifetime issues with borrowed references)
+    let system_prompt = RecipeAdapter::build_system_prompt();
+    let user_message = RecipeAdapter::build_user_message(
         &recipe,
         &people,
         &data.person_options,
         &data.user_instructions,
-    )
-    .await
-    .map_err(|e| AppError::Internal(format!("Adaptation failed: {}", e)))?;
+    );
+    let recipe_id = recipe.id.clone();
 
-    SettingsService::increment_token_usage(&state.db, result.input_tokens, result.output_tokens)
-        .await;
+    // Set up SSE channels
+    let (sse_tx, sse_rx) = tokio::sync::mpsc::channel::<SsePayload>(32);
+    let (progress_tx, progress_rx) = tokio::sync::mpsc::channel::<ProgressEvent>(32);
 
-    Ok(Json(result.recipe))
+    let db = state.db.clone();
+    let sse_tx_progress = sse_tx.clone();
+
+    tokio::spawn(super::sse_helpers::forward_progress(
+        progress_rx,
+        sse_tx_progress,
+    ));
+
+    // Spawn the AI task with only owned data
+    tokio::spawn(async move {
+        let _ = sse_tx
+            .send(SsePayload::Progress(ProgressEvent::Thinking {
+                message: "Adapting recipe...".to_string(),
+            }))
+            .await;
+
+        match ClaudeClient::send_message_streaming(
+            &api_key,
+            &model,
+            Some(&system_prompt),
+            &user_message,
+            crate::services::claude_client::DEFAULT_MAX_TOKENS,
+            progress_tx,
+        )
+        .await
+        {
+            Ok(response) => {
+                SettingsService::increment_token_usage(
+                    &db,
+                    response.input_tokens,
+                    response.output_tokens,
+                )
+                .await;
+
+                match RecipeAdapter::parse_response(&response.text, &recipe_id) {
+                    Ok(adapted) => {
+                        let value = serde_json::to_value(&adapted).unwrap_or_default();
+                        let _ = sse_tx.send(SsePayload::Complete(value)).await;
+                    }
+                    Err(e) => {
+                        let _ = sse_tx
+                            .send(SsePayload::Error(format!("Adaptation failed: {}", e)))
+                            .await;
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = sse_tx
+                    .send(SsePayload::Error(format!("Adaptation failed: {}", e)))
+                    .await;
+            }
+        }
+    });
+
+    Ok(sse_from_channel(sse_rx))
 }
 
 pub async fn import_url(
     State(state): State<AppState>,
     Json(data): Json<ImportRecipeFromUrlDto>,
-) -> Result<(StatusCode, Json<recipe::Model>), AppError> {
+) -> Result<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>, AppError> {
     let api_key = get_api_key(&state).await?;
     let model = get_model(&state).await;
 
-    let result = RecipeImportService::import_from_url(&api_key, &model, &data.url)
+    // Set up SSE channels
+    let (sse_tx, sse_rx) = tokio::sync::mpsc::channel::<SsePayload>(32);
+    let (progress_tx, progress_rx) = tokio::sync::mpsc::channel::<ProgressEvent>(32);
+
+    let db = state.db.clone();
+    let url = data.url.clone();
+    let sse_tx_progress = sse_tx.clone();
+
+    tokio::spawn(super::sse_helpers::forward_progress(
+        progress_rx,
+        sse_tx_progress,
+    ));
+
+    // Spawn the import task — URL fetch + AI extraction + DB save
+    tokio::spawn(async move {
+        // Phase 1: Fetch the page
+        let _ = sse_tx
+            .send(SsePayload::Progress(ProgressEvent::Thinking {
+                message: "Fetching page...".to_string(),
+            }))
+            .await;
+
+        let html = match RecipeImportService::fetch_url(&url).await {
+            Ok(html) => html,
+            Err(e) => {
+                let _ = sse_tx
+                    .send(SsePayload::Error(format!("Import failed: {}", e)))
+                    .await;
+                return;
+            }
+        };
+
+        let content = RecipeImportService::extract_content(&html);
+        if content.len() < crate::services::recipe_import_service::MIN_CONTENT_CHARS {
+            let _ = sse_tx
+                .send(SsePayload::Error(
+                    "Could not extract enough text from the page.".to_string(),
+                ))
+                .await;
+            return;
+        }
+
+        // Phase 2: Extract recipe with AI (streaming)
+        let _ = sse_tx
+            .send(SsePayload::Progress(ProgressEvent::Thinking {
+                message: "Extracting recipe...".to_string(),
+            }))
+            .await;
+
+        let system_prompt = RecipeImportService::build_system_prompt();
+        let user_message = format!(
+            "Extract the recipe from the following content and return it as JSON:\n\n{}",
+            content
+        );
+
+        match ClaudeClient::send_message_streaming(
+            &api_key,
+            &model,
+            Some(&system_prompt),
+            &user_message,
+            crate::services::claude_client::DEFAULT_MAX_TOKENS,
+            progress_tx,
+        )
         .await
-        .map_err(|e| AppError::Internal(format!("Import failed: {}", e)))?;
+        {
+            Ok(response) => {
+                SettingsService::increment_token_usage(
+                    &db,
+                    response.input_tokens,
+                    response.output_tokens,
+                )
+                .await;
 
-    SettingsService::increment_token_usage(&state.db, result.input_tokens, result.output_tokens)
-        .await;
+                let cleaned = crate::services::recipe_adapter::strip_code_fences(&response.text);
+                match serde_json::from_str::<CreateRecipeDto>(&cleaned) {
+                    Ok(mut dto) => {
+                        dto.source = "url_import".to_string();
+                        dto.parent_recipe_id = None;
+                        dto.source_url = Some(url);
 
-    let mut recipe = result.recipe;
-    recipe.source_url = Some(data.url);
+                        match RecipeService::create(&db, dto).await {
+                            Ok(recipe) => {
+                                let value = serde_json::to_value(&recipe).unwrap_or_default();
+                                let _ = sse_tx.send(SsePayload::Complete(value)).await;
+                            }
+                            Err(e) => {
+                                let _ = sse_tx
+                                    .send(SsePayload::Error(format!(
+                                        "Failed to save recipe: {}",
+                                        e
+                                    )))
+                                    .await;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = sse_tx
+                            .send(SsePayload::Error(format!(
+                                "AI returned an unparseable response: {}",
+                                e
+                            )))
+                            .await;
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = sse_tx
+                    .send(SsePayload::Error(format!("Import failed: {}", e)))
+                    .await;
+            }
+        }
+    });
 
-    RecipeService::create(&state.db, recipe)
-        .await
-        .map(|r| (StatusCode::CREATED, Json(r)))
-        .map_err(AppError::from)
+    Ok(sse_from_channel(sse_rx))
 }
 
 pub async fn import_file(

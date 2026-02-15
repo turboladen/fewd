@@ -1,6 +1,7 @@
 interface DraftReviewProps {
   children: React.ReactNode
   isLoading: boolean
+  loadingMessage?: string
   error: string | null
   onAccept: () => void
   onEdit: () => void
@@ -15,6 +16,7 @@ interface DraftReviewProps {
 export function DraftReview({
   children,
   isLoading,
+  loadingMessage,
   error,
   onAccept,
   onEdit,
@@ -43,7 +45,7 @@ export function DraftReview({
               style={{ animationDelay: '300ms' }}
             />
           </div>
-          <span className='text-sm text-primary-700'>Generating...</span>
+          <span className='text-sm text-primary-700'>{loadingMessage || 'Generating...'}</span>
           {onCancel && (
             <button
               onClick={onCancel}

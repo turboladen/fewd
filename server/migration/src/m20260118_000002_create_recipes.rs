@@ -11,7 +11,12 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Recipes::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(Recipes::Id).string().not_null().primary_key())
+                    .col(
+                        ColumnDef::new(Recipes::Id)
+                            .string()
+                            .not_null()
+                            .primary_key(),
+                    )
                     .col(ColumnDef::new(Recipes::Name).string().not_null())
                     .col(ColumnDef::new(Recipes::Description).string())
                     .col(ColumnDef::new(Recipes::Source).string().not_null())

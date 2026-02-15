@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import {
   useCreateRecipe,
@@ -331,6 +332,7 @@ function ImportRecipeForm({
   urlError,
   fileError,
   urlLoading,
+  urlLoadingMessage,
   fileLoading,
 }: {
   onSubmitMarkdown: (markdown: string) => void
@@ -341,6 +343,7 @@ function ImportRecipeForm({
   urlError?: string
   fileError?: string
   urlLoading?: boolean
+  urlLoadingMessage?: string
   fileLoading?: boolean
 }) {
   const [importMode, setImportMode] = useState<'markdown' | 'url' | 'pdf'>('url')
@@ -468,7 +471,7 @@ function ImportRecipeForm({
               disabled={urlLoading}
               className='btn-md btn-primary disabled:cursor-wait'
             >
-              {urlLoading ? 'Analyzing recipe...' : 'Import'}
+              {urlLoading ? (urlLoadingMessage || 'Analyzing recipe...') : 'Import'}
             </button>
             <button
               type='button'
@@ -1042,6 +1045,7 @@ function RecipeDetail({
 // --- Main Component ---
 
 export function RecipeManager() {
+  const queryClient = useQueryClient()
   const { toast } = useToast()
   const { data: recipes, isLoading, error } = useRecipes()
   const createMutation = useCreateRecipe()
@@ -1157,6 +1161,7 @@ export function RecipeManager() {
   const handleImportFromUrl = (url: string) => {
     importUrlMutation.mutate({ url }, {
       onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ['recipes'] })
         toast('Recipe imported from URL')
         setViewMode('list')
       },
@@ -1308,6 +1313,7 @@ export function RecipeManager() {
             urlError={importUrlMutation.error ? String(importUrlMutation.error) : undefined}
             fileError={importFileMutation.error ? String(importFileMutation.error) : undefined}
             urlLoading={importUrlMutation.isPending}
+            urlLoadingMessage={importUrlMutation.progress?.message}
             fileLoading={importFileMutation.isPending}
           />
         </div>

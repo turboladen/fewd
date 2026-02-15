@@ -156,6 +156,7 @@ export function AdaptRecipePanel({
         </h3>
         <DraftReview
           isLoading={adaptMutation.isPending}
+          loadingMessage={adaptMutation.progress?.message}
           error={adaptMutation.error ? String(adaptMutation.error) : null}
           onAccept={handleAccept}
           onEdit={handleEditDraft}

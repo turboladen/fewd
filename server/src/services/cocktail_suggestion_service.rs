@@ -28,7 +28,7 @@ pub struct CocktailContext<'a> {
 pub struct CocktailSuggestionService;
 
 impl CocktailSuggestionService {
-    const SUGGESTION_MAX_TOKENS: u32 = 8192;
+    pub(crate) const SUGGESTION_MAX_TOKENS: u32 = 8192;
 
     pub async fn suggest_cocktails(
         api_key: &str,

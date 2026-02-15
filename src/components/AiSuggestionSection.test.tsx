@@ -16,6 +16,7 @@ vi.mock('../hooks/useSuggestions', () => ({
     isPending: false,
     error: null,
     data: null,
+    progress: null,
     reset: vi.fn(),
   }),
 }))

@@ -26,16 +26,8 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(1),
                     )
-                    .col(
-                        ColumnDef::new(DrinkRecipes::Instructions)
-                            .text()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(DrinkRecipes::Ingredients)
-                            .text()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(DrinkRecipes::Instructions).text().not_null())
+                    .col(ColumnDef::new(DrinkRecipes::Ingredients).text().not_null())
                     .col(ColumnDef::new(DrinkRecipes::Technique).string())
                     .col(ColumnDef::new(DrinkRecipes::Glassware).string())
                     .col(ColumnDef::new(DrinkRecipes::Garnish).string())

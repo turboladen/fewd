@@ -1,5 +1,8 @@
+use std::convert::Infallible;
+
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::response::sse::{Event, Sse};
 use axum::Json;
 
 use crate::dto::{
@@ -7,12 +10,14 @@ use crate::dto::{
     ImportRecipeFromUrlDto, UpdateDrinkRecipeDto,
 };
 use crate::error::AppError;
+use crate::routes::sse_helpers::{sse_from_channel, SsePayload};
 use crate::services::bar_item_service::BarItemService;
-use crate::services::claude_client::ClaudeClient;
+use crate::services::claude_client::{ClaudeClient, ProgressEvent};
 use crate::services::cocktail_suggestion_service::{CocktailContext, CocktailSuggestionService};
 use crate::services::drink_recipe_import_service::DrinkRecipeImportService;
 use crate::services::drink_recipe_service::DrinkRecipeService;
 use crate::services::person_service::PersonService;
+use crate::services::recipe_import_service::RecipeImportService;
 use crate::services::settings_service::SettingsService;
 use crate::AppState;
 
@@ -132,7 +137,8 @@ pub async fn toggle_drink_favorite(
 pub async fn import_drink_recipe_url(
     State(state): State<AppState>,
     Json(data): Json<ImportRecipeFromUrlDto>,
-) -> Result<(StatusCode, Json<crate::entities::drink_recipe::Model>), AppError> {
+) -> Result<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>, AppError> {
+    // Validate inputs before SSE stream starts
     let api_key = SettingsService::get(&state.db, "anthropic_api_key".to_string())
         .await
         .map_err(AppError::from)?
@@ -150,20 +156,119 @@ pub async fn import_drink_recipe_url(
         .flatten()
         .unwrap_or_else(|| ClaudeClient::default_model().to_string());
 
-    let result = DrinkRecipeImportService::import_from_url(&api_key, &model, &data.url)
+    // Set up SSE channels
+    let (sse_tx, sse_rx) = tokio::sync::mpsc::channel::<SsePayload>(32);
+    let (progress_tx, progress_rx) = tokio::sync::mpsc::channel::<ProgressEvent>(32);
+
+    let db = state.db.clone();
+    let url = data.url.clone();
+    let sse_tx_progress = sse_tx.clone();
+
+    tokio::spawn(super::sse_helpers::forward_progress(
+        progress_rx,
+        sse_tx_progress,
+    ));
+
+    // Spawn the import task — URL fetch + AI extraction + DB save
+    tokio::spawn(async move {
+        // Phase 1: Fetch the page
+        let _ = sse_tx
+            .send(SsePayload::Progress(ProgressEvent::Thinking {
+                message: "Fetching page...".to_string(),
+            }))
+            .await;
+
+        let html = match RecipeImportService::fetch_url(&url).await {
+            Ok(html) => html,
+            Err(e) => {
+                let _ = sse_tx
+                    .send(SsePayload::Error(format!("Import failed: {}", e)))
+                    .await;
+                return;
+            }
+        };
+
+        let content = RecipeImportService::extract_content(&html);
+        if content.len() < crate::services::recipe_import_service::MIN_CONTENT_CHARS {
+            let _ = sse_tx
+                .send(SsePayload::Error(
+                    "Could not extract enough text from the page.".to_string(),
+                ))
+                .await;
+            return;
+        }
+
+        // Phase 2: Extract drink recipe with AI (streaming)
+        let _ = sse_tx
+            .send(SsePayload::Progress(ProgressEvent::Thinking {
+                message: "Extracting drink recipe...".to_string(),
+            }))
+            .await;
+
+        let system_prompt = DrinkRecipeImportService::build_system_prompt();
+        let user_message = format!(
+            "Extract the drink recipe from the following content and return it as JSON:\n\n{}",
+            content
+        );
+
+        match ClaudeClient::send_message_streaming(
+            &api_key,
+            &model,
+            Some(&system_prompt),
+            &user_message,
+            crate::services::claude_client::DEFAULT_MAX_TOKENS,
+            progress_tx,
+        )
         .await
-        .map_err(|e| AppError::Internal(format!("Import failed: {}", e)))?;
+        {
+            Ok(response) => {
+                SettingsService::increment_token_usage(
+                    &db,
+                    response.input_tokens,
+                    response.output_tokens,
+                )
+                .await;
 
-    SettingsService::increment_token_usage(&state.db, result.input_tokens, result.output_tokens)
-        .await;
+                let cleaned = crate::services::recipe_adapter::strip_code_fences(&response.text);
+                match serde_json::from_str::<CreateDrinkRecipeDto>(&cleaned) {
+                    Ok(mut dto) => {
+                        dto.source = "url_import".to_string();
+                        dto.source_url = Some(url);
 
-    let mut recipe = result.recipe;
-    recipe.source_url = Some(data.url);
+                        match DrinkRecipeService::create(&db, dto).await {
+                            Ok(recipe) => {
+                                let value = serde_json::to_value(&recipe).unwrap_or_default();
+                                let _ = sse_tx.send(SsePayload::Complete(value)).await;
+                            }
+                            Err(e) => {
+                                let _ = sse_tx
+                                    .send(SsePayload::Error(format!(
+                                        "Failed to save recipe: {}",
+                                        e
+                                    )))
+                                    .await;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = sse_tx
+                            .send(SsePayload::Error(format!(
+                                "AI returned an unparseable response: {}",
+                                e
+                            )))
+                            .await;
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = sse_tx
+                    .send(SsePayload::Error(format!("Import failed: {}", e)))
+                    .await;
+            }
+        }
+    });
 
-    DrinkRecipeService::create(&state.db, recipe)
-        .await
-        .map(|r| (StatusCode::CREATED, Json(r)))
-        .map_err(AppError::from)
+    Ok(sse_from_channel(sse_rx))
 }
 
 // ─── AI Cocktail Suggestions ───────────────────────────────────
@@ -171,7 +276,8 @@ pub async fn import_drink_recipe_url(
 pub async fn ai_suggest_cocktails(
     State(state): State<AppState>,
     Json(data): Json<AiSuggestCocktailsDto>,
-) -> Result<Json<Vec<CreateDrinkRecipeDto>>, AppError> {
+) -> Result<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>, AppError> {
+    // Validate inputs before SSE stream starts
     let api_key = SettingsService::get(&state.db, "anthropic_api_key".to_string())
         .await
         .map_err(AppError::from)?
@@ -213,6 +319,7 @@ pub async fn ai_suggest_cocktails(
         .await
         .map_err(AppError::from)?;
 
+    // Build prompts BEFORE spawning (avoids lifetime issues with CocktailContext<'a>)
     let ctx = CocktailContext {
         people: &people,
         bar_items: &selected_bar_items,
@@ -225,13 +332,73 @@ pub async fn ai_suggest_cocktails(
             .as_deref()
             .map(|v| v as &[String]),
     };
+    let system_prompt = CocktailSuggestionService::build_system_prompt();
+    let user_message = CocktailSuggestionService::build_user_message(&ctx);
 
-    let result = CocktailSuggestionService::suggest_cocktails(&api_key, &model, &ctx)
+    // Set up SSE channels
+    let (sse_tx, sse_rx) = tokio::sync::mpsc::channel::<SsePayload>(32);
+    let (progress_tx, progress_rx) = tokio::sync::mpsc::channel::<ProgressEvent>(32);
+
+    let db = state.db.clone();
+    let sse_tx_progress = sse_tx.clone();
+
+    // Forward progress events from Claude client to SSE stream
+    tokio::spawn(super::sse_helpers::forward_progress(
+        progress_rx,
+        sse_tx_progress,
+    ));
+
+    // Spawn the AI task with only owned data
+    tokio::spawn(async move {
+        let _ = sse_tx
+            .send(SsePayload::Progress(ProgressEvent::Thinking {
+                message: "Thinking about cocktails...".to_string(),
+            }))
+            .await;
+
+        match ClaudeClient::send_message_streaming(
+            &api_key,
+            &model,
+            Some(&system_prompt),
+            &user_message,
+            CocktailSuggestionService::SUGGESTION_MAX_TOKENS,
+            progress_tx,
+        )
         .await
-        .map_err(|e| AppError::Internal(format!("Cocktail suggestion failed: {}", e)))?;
+        {
+            Ok(response) => {
+                SettingsService::increment_token_usage(
+                    &db,
+                    response.input_tokens,
+                    response.output_tokens,
+                )
+                .await;
 
-    SettingsService::increment_token_usage(&state.db, result.input_tokens, result.output_tokens)
-        .await;
+                match CocktailSuggestionService::parse_response(&response.text) {
+                    Ok(suggestions) => {
+                        let value = serde_json::to_value(&suggestions).unwrap_or_default();
+                        let _ = sse_tx.send(SsePayload::Complete(value)).await;
+                    }
+                    Err(e) => {
+                        let _ = sse_tx
+                            .send(SsePayload::Error(format!(
+                                "Cocktail suggestion failed: {}",
+                                e
+                            )))
+                            .await;
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = sse_tx
+                    .send(SsePayload::Error(format!(
+                        "Cocktail suggestion failed: {}",
+                        e
+                    )))
+                    .await;
+            }
+        }
+    });
 
-    Ok(Json(result.suggestions))
+    Ok(sse_from_channel(sse_rx))
 }

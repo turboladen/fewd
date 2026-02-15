@@ -5,6 +5,7 @@ mod people;
 mod recipes;
 mod settings;
 mod shopping;
+pub(crate) mod sse_helpers;
 mod suggestions;
 
 use axum::routing::{delete, get, post, put};

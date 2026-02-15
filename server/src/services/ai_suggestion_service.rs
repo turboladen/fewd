@@ -46,7 +46,7 @@ pub struct AiSuggestionService;
 
 impl AiSuggestionService {
     /// Max tokens for AI meal suggestions (3-5 full recipes need more than default 4096)
-    const SUGGESTION_MAX_TOKENS: u32 = 8192;
+    pub(crate) const SUGGESTION_MAX_TOKENS: u32 = 8192;
 
     /// Generate 3-5 AI meal suggestions based on people, meal context, and preferences
     pub async fn suggest_meals(

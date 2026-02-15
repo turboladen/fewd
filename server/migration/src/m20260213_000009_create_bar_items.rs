@@ -11,7 +11,12 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(BarItems::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(BarItems::Id).string().not_null().primary_key())
+                    .col(
+                        ColumnDef::new(BarItems::Id)
+                            .string()
+                            .not_null()
+                            .primary_key(),
+                    )
                     .col(ColumnDef::new(BarItems::Name).string().not_null())
                     .col(ColumnDef::new(BarItems::Category).string().not_null())
                     .col(

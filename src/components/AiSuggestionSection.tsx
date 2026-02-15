@@ -185,10 +185,13 @@ export function AiSuggestionSection({
           </button>
         </div>
 
-        {/* Loading */}
+        {/* Loading with streaming progress */}
         {aiMutation.isPending && (
           <div className='text-sm text-secondary-600 animate-pulse'>
-            Generating suggestions...
+            {aiMutation.progress?.message ?? 'Preparing...'}
+            {aiMutation.progress?.phase === 'generating' && aiMutation.progress.tokens
+              ? ` (${aiMutation.progress.tokens} tokens)`
+              : ''}
           </div>
         )}
 

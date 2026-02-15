@@ -54,9 +54,10 @@ impl DrinkRecipeImportService {
                 e,
                 &json_str[..json_str.len().min(500)]
             );
-            ImportError::ParseError(format!(
+            ImportError::ParseError(
                 "AI returned an unparseable response. Try again or try a different URL."
-            ))
+                    .to_string(),
+            )
         })?;
 
         dto.source = "url_import".to_string();
@@ -69,7 +70,7 @@ impl DrinkRecipeImportService {
     }
 
     /// Build the cocktail-specific extraction prompt
-    fn build_system_prompt() -> String {
+    pub(crate) fn build_system_prompt() -> String {
         r#"You are a cocktail recipe extraction assistant. You will be given content from a webpage that contains a drink or cocktail recipe. Extract the recipe and return it as structured JSON.
 
 Return ONLY valid JSON matching this exact schema (no markdown fences, no commentary, no explanation outside the JSON):

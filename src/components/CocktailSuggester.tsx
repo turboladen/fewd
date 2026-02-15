@@ -409,10 +409,13 @@ export function CocktailSuggester({ onSwitchToBar }: { onSwitchToBar: () => void
             )}
             {aiMutation.isPending && (
               <div className='card p-4 text-stone-500 animate-pulse text-center'>
-                Generating AI suggestions...
+                {aiMutation.progress?.message ?? 'Preparing...'}
+                {aiMutation.progress?.phase === 'generating' && aiMutation.progress.tokens
+                  ? ` (${aiMutation.progress.tokens} tokens)`
+                  : ''}
               </div>
             )}
-            {aiMutation.isError && (
+            {aiMutation.error && (
               <div className='panel-error text-sm text-red-700'>
                 {aiMutation.error instanceof Error
                   ? aiMutation.error.message

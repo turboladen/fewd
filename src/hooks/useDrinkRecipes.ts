@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { CreateDrinkRecipeDto, DrinkRecipe, UpdateDrinkRecipeDto } from '../types/drinkRecipe'
+import { useStreamingMutation } from './useStreamingMutation'
 
 export function useDrinkRecipes() {
   return useQuery({
@@ -52,13 +53,8 @@ export function useDeleteDrinkRecipe() {
 }
 
 export function useImportDrinkRecipeFromUrl() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: (data: { url: string }) => api.post<DrinkRecipe>('/drink-recipes/import/url', data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['drink-recipes'] })
-    },
+  return useStreamingMutation<{ url: string }, DrinkRecipe>({
+    path: '/drink-recipes/import/url',
   })
 }
 

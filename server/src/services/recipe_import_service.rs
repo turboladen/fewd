@@ -176,7 +176,7 @@ impl RecipeImportService {
         })
     }
 
-    fn build_system_prompt() -> String {
+    pub(crate) fn build_system_prompt() -> String {
         r#"You are a recipe extraction assistant. You will be given content from a webpage or document that contains a recipe. Extract the recipe and return it as structured JSON.
 
 Return ONLY valid JSON matching this exact schema (no markdown fences, no commentary, no explanation outside the JSON):

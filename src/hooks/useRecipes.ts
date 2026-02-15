@@ -8,6 +8,7 @@ import type {
   ScaleResult,
   UpdateRecipeDto,
 } from '../types/recipe'
+import { useStreamingMutation } from './useStreamingMutation'
 
 export function useRecipes() {
   return useQuery({
@@ -91,9 +92,8 @@ export function useEnhanceInstructions() {
 }
 
 export function useAdaptRecipe() {
-  return useMutation({
-    mutationFn: (data: AdaptRecipeDto) =>
-      api.post<CreateRecipeDto>('/recipes/' + data.recipe_id + '/adapt', data),
+  return useStreamingMutation<AdaptRecipeDto, CreateRecipeDto>({
+    path: (data) => '/recipes/' + data.recipe_id + '/adapt',
   })
 }
 
@@ -109,13 +109,8 @@ export function useImportRecipe() {
 }
 
 export function useImportRecipeFromUrl() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: (data: { url: string }) => api.post<Recipe>('/recipes/import/url', data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['recipes'] })
-    },
+  return useStreamingMutation<{ url: string }, Recipe>({
+    path: '/recipes/import/url',
   })
 }
 

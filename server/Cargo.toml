@@ -37,7 +37,12 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # HTTP client (for Claude API and URL import)
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"] }
+
+# Streaming support (SSE from Claude API → SSE to browser)
+tokio-stream = "0.1"
+async-stream = "0.3"
+futures = "0.3"
 
 # PDF and HTML processing
 pdf-extract = "0.10.0"

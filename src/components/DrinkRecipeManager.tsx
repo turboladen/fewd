@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import {
   useCreateDrinkRecipe,
@@ -30,6 +31,7 @@ import { StarRating } from './StarRating'
 import { useToast } from './Toast'
 
 export function DrinkRecipeManager({ onSwitchToSuggest }: { onSwitchToSuggest: () => void }) {
+  const queryClient = useQueryClient()
   const { data: drinkRecipes, isLoading, error } = useDrinkRecipes()
   const createMutation = useCreateDrinkRecipe()
   const updateMutation = useUpdateDrinkRecipe()
@@ -136,6 +138,7 @@ export function DrinkRecipeManager({ onSwitchToSuggest }: { onSwitchToSuggest: (
     e.preventDefault()
     importUrlMutation.mutate({ url: importUrl }, {
       onSuccess: (recipe) => {
+        queryClient.invalidateQueries({ queryKey: ['drink-recipes'] })
         toast(`Imported "${recipe.name}"`)
         setImportUrl('')
         setExpandedId(recipe.id)
@@ -222,7 +225,9 @@ export function DrinkRecipeManager({ onSwitchToSuggest }: { onSwitchToSuggest: (
                 disabled={importUrlMutation.isPending}
                 className='btn-md btn-primary disabled:cursor-wait'
               >
-                {importUrlMutation.isPending ? 'Analyzing recipe...' : 'Import'}
+                {importUrlMutation.isPending
+                  ? (importUrlMutation.progress?.message || 'Analyzing recipe...')
+                  : 'Import'}
               </button>
               <button
                 type='button'

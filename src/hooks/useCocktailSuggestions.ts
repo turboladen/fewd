@@ -1,10 +1,8 @@
-import { useMutation } from '@tanstack/react-query'
-import { api } from '../lib/api'
 import type { AiSuggestCocktailsDto, CreateDrinkRecipeDto } from '../types/drinkRecipe'
+import { useStreamingMutation } from './useStreamingMutation'
 
 export function useAiSuggestCocktails() {
-  return useMutation({
-    mutationFn: (data: AiSuggestCocktailsDto) =>
-      api.post<CreateDrinkRecipeDto[]>('/cocktails/suggest', data),
+  return useStreamingMutation<AiSuggestCocktailsDto, CreateDrinkRecipeDto[]>({
+    path: '/cocktails/suggest',
   })
 }
