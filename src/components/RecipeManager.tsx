@@ -24,8 +24,19 @@ import type {
 import { formatAmount, formatServings, formatTime, parseRecipe } from '../types/recipe'
 import { AdaptRecipePanel } from './AdaptRecipePanel'
 import { EmptyState } from './EmptyState'
-import { IconArrowRight, IconCheck, IconClose, IconPlus, IconStar, IconStarFilled } from './Icon'
+import {
+  IconArrowRight,
+  IconCheck,
+  IconClose,
+  IconEdit,
+  IconPlus,
+  IconRefresh,
+  IconStar,
+  IconStarFilled,
+  IconTrash,
+} from './Icon'
 import { IngredientInput } from './IngredientInput'
+import { NumberInput } from './NumberInput'
 import { StarRating } from './StarRating'
 import { TagInput } from './TagInput'
 import { useToast } from './Toast'
@@ -196,12 +207,11 @@ function RecipeForm({
           <label className='block text-sm font-medium text-stone-700 mb-1'>
             Servings
           </label>
-          <input
-            type='number'
+          <NumberInput
+            value={form.servings}
+            onChange={(servings) => setForm({ ...form, servings })}
             min={1}
             required
-            value={form.servings}
-            onChange={(e) => setForm({ ...form, servings: parseInt(e.target.value) || 1 })}
             className='input-sm w-20'
           />
         </div>
@@ -596,11 +606,10 @@ function ScaleRecipePanel({
         <span className='text-stone-400'>
           <IconArrowRight className='w-4 h-4' />
         </span>
-        <input
-          type='number'
-          min={1}
+        <NumberInput
           value={targetServings}
-          onChange={(e) => setTargetServings(parseInt(e.target.value) || 1)}
+          onChange={setTargetServings}
+          min={1}
           className='input-sm w-20'
         />
         <span className='text-sm text-stone-600'>servings</span>
@@ -831,39 +840,27 @@ function RecipeDetail({
           </div>
           {parsed.description && <p className='text-stone-600 mt-1'>{parsed.description}</p>}
         </div>
-        <div className='flex flex-wrap gap-2 items-center'>
-          <button
-            onClick={onEdit}
-            className='text-primary-600 text-sm hover:underline'
-          >
+        <div className='flex flex-wrap gap-1.5 items-center'>
+          <button onClick={onEdit} className='btn-xs btn-primary'>
+            <IconEdit className='w-3.5 h-3.5' />
             Edit
           </button>
-          <button
-            onClick={onScale}
-            className='text-secondary-600 text-sm hover:underline'
-          >
+          <button onClick={onScale} className='btn-xs btn-outline'>
             Scale
           </button>
-          <button
-            onClick={onAdapt}
-            className='text-secondary-600 text-sm hover:underline'
-          >
+          <button onClick={onAdapt} className='btn-xs btn-outline'>
+            <IconRefresh className='w-3.5 h-3.5' />
             Adapt
           </button>
+          <span className='text-stone-200 mx-0.5'>|</span>
           {confirmingDelete
             ? (
-              <span className='flex gap-1 items-center text-sm'>
-                <span className='text-red-600'>Delete?</span>
-                <button
-                  onClick={onConfirmDelete}
-                  className='text-red-700 font-semibold hover:underline'
-                >
+              <span className='flex gap-1 items-center'>
+                <span className='text-red-600 text-xs'>Delete?</span>
+                <button onClick={onConfirmDelete} className='btn-xs btn-danger-solid'>
                   Yes
                 </button>
-                <button
-                  onClick={onCancelDelete}
-                  className='text-stone-500 hover:underline'
-                >
+                <button onClick={onCancelDelete} className='btn-xs btn-outline'>
                   No
                 </button>
               </span>
@@ -871,14 +868,15 @@ function RecipeDetail({
             : (
               <button
                 onClick={onDelete}
-                className='text-red-600 text-sm hover:underline'
+                className='btn-xs border border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300'
               >
+                <IconTrash className='w-3.5 h-3.5' />
                 Delete
               </button>
             )}
           <button
             onClick={onClose}
-            className='ml-2 text-stone-400 hover:text-stone-600 text-lg'
+            className='ml-auto p-1 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded'
             title='Back to list'
           >
             <IconClose className='w-5 h-5' />

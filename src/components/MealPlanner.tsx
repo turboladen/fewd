@@ -28,6 +28,7 @@ import {
 } from '../utils/dates'
 import { IconArrowLeft, IconArrowRight, IconClose, IconPlus, IconWarning } from './Icon'
 import { IngredientInput } from './IngredientInput'
+import { NumberInput } from './NumberInput'
 import { ServingMismatchBanner } from './ServingMismatchBanner'
 import { SuggestionPanel } from './SuggestionPanel'
 import { useToast } from './Toast'
@@ -42,40 +43,42 @@ const DEFAULT_MEALS = [
 
 function PersonServingEditor({
   person,
-  serving,
+  servings,
   recipes,
   onChange,
 }: {
   person: Person
-  serving: PersonServing | undefined
+  servings: PersonServing[]
   recipes: { id: string; name: string; servings: number }[]
-  onChange: (serving: PersonServing | undefined) => void
+  onChange: (servings: PersonServing[]) => void
 }) {
-  const mode: 'skip' | 'recipe' | 'adhoc' = !serving
-    ? 'skip'
-    : serving.food_type === 'recipe'
-    ? 'recipe'
-    : 'adhoc'
+  const handleAddRecipe = () => {
+    onChange([...servings, {
+      food_type: 'recipe',
+      person_id: person.id,
+      recipe_id: recipes[0]?.id ?? '',
+      servings_count: 1,
+      notes: null,
+    }])
+  }
 
-  const setMode = (newMode: 'skip' | 'recipe' | 'adhoc') => {
-    if (newMode === 'skip') {
-      onChange(undefined)
-    } else if (newMode === 'recipe') {
-      onChange({
-        food_type: 'recipe',
-        person_id: person.id,
-        recipe_id: recipes[0]?.id ?? '',
-        servings_count: 1,
-        notes: null,
-      })
-    } else {
-      onChange({
-        food_type: 'adhoc',
-        person_id: person.id,
-        adhoc_items: [],
-        notes: null,
-      })
-    }
+  const handleAddAdhoc = () => {
+    onChange([...servings, {
+      food_type: 'adhoc',
+      person_id: person.id,
+      adhoc_items: [],
+      notes: null,
+    }])
+  }
+
+  const handleRemoveItem = (index: number) => {
+    onChange(servings.filter((_, i) => i !== index))
+  }
+
+  const handleUpdateItem = (index: number, updated: PersonServing) => {
+    const next = [...servings]
+    next[index] = updated
+    onChange(next)
   }
 
   return (
@@ -83,60 +86,97 @@ function PersonServingEditor({
       <div className='flex items-center gap-3 mb-2'>
         <span className='font-medium text-sm w-24'>{person.name}</span>
         <div className='flex gap-1'>
-          {(['skip', 'recipe', 'adhoc'] as const).map((m) => (
-            <button
-              key={m}
-              type='button'
-              onClick={() => setMode(m)}
-              className={`text-xs px-2 py-1 rounded border ${
-                mode === m
-                  ? 'bg-primary-50 border-primary-300 text-primary-700'
-                  : 'bg-white border-stone-300 text-stone-500 hover:border-primary-300'
-              }`}
-            >
-              {m === 'skip' ? 'Skip' : m === 'recipe' ? 'Recipe' : 'Ad-hoc'}
-            </button>
-          ))}
+          <button type='button' onClick={handleAddRecipe} className='btn btn-xs btn-outline'>
+            <IconPlus className='w-3 h-3' /> Recipe
+          </button>
+          <button type='button' onClick={handleAddAdhoc} className='btn btn-xs btn-outline'>
+            <IconPlus className='w-3 h-3' /> Ingredients
+          </button>
         </div>
       </div>
 
-      {mode === 'recipe' && serving?.food_type === 'recipe' && (
-        <div className='flex gap-2 items-center ml-27'>
-          <select
-            value={serving.recipe_id}
-            onChange={(e) => onChange({ ...serving, recipe_id: e.target.value })}
-            className='input-sm flex-1'
-          >
-            <option value=''>Select recipe...</option>
-            {recipes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-          </select>
-          <input
-            type='number'
-            min='0.1'
-            step='0.1'
-            value={serving.servings_count}
-            onChange={(e) =>
-              onChange({ ...serving, servings_count: parseFloat(e.target.value) || 0.1 })}
-            className='input-sm w-16'
-            title='Servings count'
-          />
-          <span className='text-xs text-stone-500'>servings</span>
-        </div>
+      {servings.length === 0 && (
+        <div className='text-xs text-stone-400 ml-27'>Skipping this meal</div>
       )}
 
-      {mode === 'adhoc' && serving?.food_type === 'adhoc' && (
-        <div className='ml-27'>
-          <IngredientInput
-            value={serving.adhoc_items}
-            onChange={(items: Ingredient[]) => onChange({ ...serving, adhoc_items: items })}
-          />
-        </div>
-      )}
+      <div className='space-y-2'>
+        {servings.map((item, index) => (
+          <div key={index} className='ml-27'>
+            {item.food_type === 'recipe'
+              ? (
+                <div className='flex gap-2 items-center'>
+                  <select
+                    value={item.recipe_id}
+                    onChange={(e) =>
+                      handleUpdateItem(index, { ...item, recipe_id: e.target.value })}
+                    className='input-sm flex-1'
+                  >
+                    <option value=''>Select recipe...</option>
+                    {recipes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
+                  <NumberInput
+                    value={item.servings_count}
+                    onChange={(v) => handleUpdateItem(index, { ...item, servings_count: v })}
+                    min={0.1}
+                    step={0.1}
+                    className='input-sm w-16'
+                    title='Servings count'
+                  />
+                  <span className='text-xs text-stone-500'>servings</span>
+                  <button
+                    type='button'
+                    onClick={() => handleRemoveItem(index)}
+                    className='text-red-400 hover:text-red-600'
+                  >
+                    <IconClose className='w-3.5 h-3.5' />
+                  </button>
+                </div>
+              )
+              : (
+                <div>
+                  <div className='flex items-center justify-between mb-1'>
+                    <span className='text-xs text-stone-500'>Ad-hoc ingredients</span>
+                    <button
+                      type='button'
+                      onClick={() => handleRemoveItem(index)}
+                      className='text-red-400 hover:text-red-600'
+                    >
+                      <IconClose className='w-3.5 h-3.5' />
+                    </button>
+                  </div>
+                  <IngredientInput
+                    value={item.adhoc_items}
+                    onChange={(items: Ingredient[]) =>
+                      handleUpdateItem(index, { ...item, adhoc_items: items })}
+                  />
+                </div>
+              )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
 
 // --- MealSlot ---
+
+function groupServingsByPerson(servings: PersonServing[]) {
+  const grouped = new Map<string, PersonServing[]>()
+  for (const s of servings) {
+    const list = grouped.get(s.person_id) ?? []
+    list.push(s)
+    grouped.set(s.person_id, list)
+  }
+  return grouped
+}
+
+function formatFoodLabel(items: PersonServing[], recipeNames: Map<string, string>) {
+  return items.map((s) =>
+    s.food_type === 'recipe'
+      ? (recipeNames.get(s.recipe_id) ?? 'Unknown recipe')
+      : `${s.adhoc_items.length} item${s.adhoc_items.length !== 1 ? 's' : ''}`
+  ).join(' + ')
+}
 
 function MealSlot({
   mealType,
@@ -152,6 +192,7 @@ function MealSlot({
   onClick: () => void
 }) {
   const hasServings = meal && meal.servings.length > 0
+  const grouped = meal ? groupServingsByPerson(meal.servings) : new Map()
 
   return (
     <button
@@ -166,14 +207,12 @@ function MealSlot({
       {hasServings
         ? (
           <div className='space-y-0.5'>
-            {meal.servings.map((s, i) => {
-              const personName = people.find((p) => p.id === s.person_id)?.name ?? '?'
-              const food = s.food_type === 'recipe'
-                ? (recipeNames.get(s.recipe_id) ?? 'Unknown recipe')
-                : `${s.adhoc_items.length} item${s.adhoc_items.length !== 1 ? 's' : ''}`
+            {[...grouped.entries()].map(([personId, items]) => {
+              const personName = people.find((p) => p.id === personId)?.name ?? '?'
               return (
-                <div key={i} className='text-stone-500 truncate'>
-                  <span className='text-stone-700'>{personName}</span>: {food}
+                <div key={personId} className='text-stone-500 truncate'>
+                  <span className='text-stone-700'>{personName}</span>:{' '}
+                  {formatFoodLabel(items, recipeNames)}
                 </div>
               )
             })}
@@ -213,12 +252,9 @@ function TemplateRow({
       >
         <span className='font-medium'>{template.name}</span>
         <div className='text-xs text-stone-500 mt-0.5'>
-          {template.servings.map((s) => {
-            const name = people.find((p) => p.id === s.person_id)?.name ?? '?'
-            const food = s.food_type === 'recipe'
-              ? (recipeNames.get(s.recipe_id) ?? '?')
-              : `${s.adhoc_items.length} items`
-            return `${name}: ${food}`
+          {[...groupServingsByPerson(template.servings).entries()].map(([personId, items]) => {
+            const name = people.find((p) => p.id === personId)?.name ?? '?'
+            return `${name}: ${formatFoodLabel(items, recipeNames)}`
           }).join(', ')}
         </div>
       </button>
@@ -399,11 +435,13 @@ function MealEditor({
   onSaveAsTemplate?: (mealId: string, name: string) => void
   onDeleteTemplate: (id: string) => void
 }) {
-  const [servingsMap, setServingsMap] = useState<Map<string, PersonServing>>(() => {
-    const map = new Map<string, PersonServing>()
+  const [servingsMap, setServingsMap] = useState<Map<string, PersonServing[]>>(() => {
+    const map = new Map<string, PersonServing[]>()
     if (existingMeal) {
       for (const s of existingMeal.servings) {
-        map.set(s.person_id, s)
+        const list = map.get(s.person_id) ?? []
+        list.push(s)
+        map.set(s.person_id, list)
       }
     }
     return map
@@ -425,22 +463,24 @@ function MealEditor({
       { totalPlanned: number; recipeName: string; recipeServings: number; personIds: string[] }
     >()
 
-    for (const [personId, serving] of servingsMap) {
-      if (serving.food_type !== 'recipe') continue
-      const recipe = recipes.find((r) => r.id === serving.recipe_id)
-      if (!recipe) continue
+    for (const [personId, items] of servingsMap) {
+      for (const serving of items) {
+        if (serving.food_type !== 'recipe') continue
+        const recipe = recipes.find((r) => r.id === serving.recipe_id)
+        if (!recipe) continue
 
-      const existing = recipeGroups.get(serving.recipe_id)
-      if (existing) {
-        existing.totalPlanned += serving.servings_count
-        existing.personIds.push(personId)
-      } else {
-        recipeGroups.set(serving.recipe_id, {
-          totalPlanned: serving.servings_count,
-          recipeName: recipe.name,
-          recipeServings: recipe.servings,
-          personIds: [personId],
-        })
+        const existing = recipeGroups.get(serving.recipe_id)
+        if (existing) {
+          existing.totalPlanned += serving.servings_count
+          if (!existing.personIds.includes(personId)) existing.personIds.push(personId)
+        } else {
+          recipeGroups.set(serving.recipe_id, {
+            totalPlanned: serving.servings_count,
+            recipeName: recipe.name,
+            recipeServings: recipe.servings,
+            personIds: [personId],
+          })
+        }
       }
     }
 
@@ -455,10 +495,15 @@ function MealEditor({
 
     const perPerson = mismatch.recipeServings / mismatch.personIds.length
     const newMap = new Map(servingsMap)
-    for (const [personId, serving] of newMap) {
-      if (serving.food_type === 'recipe' && serving.recipe_id === recipeId) {
-        newMap.set(personId, { ...serving, servings_count: perPerson })
-      }
+    for (const [personId, items] of newMap) {
+      newMap.set(
+        personId,
+        items.map((s) =>
+          s.food_type === 'recipe' && s.recipe_id === recipeId
+            ? { ...s, servings_count: perPerson }
+            : s
+        ),
+      )
     }
     setServingsMap(newMap)
   }
@@ -469,9 +514,10 @@ function MealEditor({
 
   const handleApplyTemplate = (template: ParsedMealTemplate) => {
     const newMap = new Map(servingsMap)
-    // Only fill in people defined in the template; leave others untouched
+    // Add template items to existing items for each person
     for (const s of template.servings) {
-      newMap.set(s.person_id, s)
+      const existing = newMap.get(s.person_id) ?? []
+      newMap.set(s.person_id, [...existing, s])
     }
     setServingsMap(newMap)
     setShowTemplatePicker(false)
@@ -480,13 +526,14 @@ function MealEditor({
   const handleApplySuggestion = (recipeId: string, personIds: string[]) => {
     const newMap = new Map(servingsMap)
     for (const personId of personIds) {
-      newMap.set(personId, {
-        food_type: 'recipe',
+      const existing = newMap.get(personId) ?? []
+      newMap.set(personId, [...existing, {
+        food_type: 'recipe' as const,
         person_id: personId,
         recipe_id: recipeId,
         servings_count: 1,
         notes: null,
-      })
+      }])
     }
     setServingsMap(newMap)
     setShowSuggestionPanel(false)
@@ -499,10 +546,10 @@ function MealEditor({
     setTemplateName('')
   }
 
-  const handlePersonChange = (personId: string, serving: PersonServing | undefined) => {
+  const handlePersonChange = (personId: string, items: PersonServing[]) => {
     const newMap = new Map(servingsMap)
-    if (serving) {
-      newMap.set(personId, serving)
+    if (items.length > 0) {
+      newMap.set(personId, items)
     } else {
       newMap.delete(personId)
     }
@@ -515,18 +562,20 @@ function MealEditor({
       return
     }
 
-    // Filter out empty-name ingredients from ad-hoc servings
+    // Flatten map and filter out empty-name ingredients from ad-hoc servings
     const servings: PersonServing[] = []
-    for (const serving of servingsMap.values()) {
-      if (serving.food_type === 'adhoc') {
-        const validItems = serving.adhoc_items.filter((item) => item.name.trim() !== '')
-        if (validItems.length === 0) {
-          setValidationError('Ad-hoc items must have at least one ingredient with a name')
-          return
+    for (const items of servingsMap.values()) {
+      for (const serving of items) {
+        if (serving.food_type === 'adhoc') {
+          const validItems = serving.adhoc_items.filter((item) => item.name.trim() !== '')
+          if (validItems.length === 0) {
+            setValidationError('Ad-hoc items must have at least one ingredient with a name')
+            return
+          }
+          servings.push({ ...serving, adhoc_items: validItems })
+        } else {
+          servings.push(serving)
         }
-        servings.push({ ...serving, adhoc_items: validItems })
-      } else {
-        servings.push(serving)
       }
     }
 
@@ -624,7 +673,7 @@ function MealEditor({
           <PersonServingEditor
             key={person.id}
             person={person}
-            serving={servingsMap.get(person.id)}
+            servings={servingsMap.get(person.id) ?? []}
             recipes={recipes}
             onChange={(s) => handlePersonChange(person.id, s)}
           />

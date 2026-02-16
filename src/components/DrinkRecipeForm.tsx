@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { DrinkRecipeFormData } from '../types/drinkRecipe'
 import { IngredientInput } from './IngredientInput'
+import { NumberInput } from './NumberInput'
 import { TagInput } from './TagInput'
 
 export function DrinkRecipeForm({
@@ -70,12 +71,11 @@ export function DrinkRecipeForm({
       <div className='grid grid-cols-1 sm:grid-cols-3 gap-3'>
         <div>
           <label className='block text-sm font-medium text-stone-700 mb-1'>Servings</label>
-          <input
-            type='number'
+          <NumberInput
+            value={form.servings}
+            onChange={(servings) => setForm({ ...form, servings })}
             min={1}
             required
-            value={form.servings}
-            onChange={(e) => setForm({ ...form, servings: parseInt(e.target.value) || 1 })}
             className='input-sm w-20'
           />
         </div>
