@@ -46,6 +46,11 @@ pub async fn bulk_create_bar_items(
     State(state): State<AppState>,
     Json(data): Json<BulkBarItemsDto>,
 ) -> Result<(StatusCode, Json<Vec<crate::entities::bar_item::Model>>), AppError> {
+    if data.items.len() > 500 {
+        return Err(AppError::BadRequest(
+            "Too many items (max 500 per request)".into(),
+        ));
+    }
     BarItemService::bulk_create(&state.db, data)
         .await
         .map(|items| (StatusCode::CREATED, Json(items)))

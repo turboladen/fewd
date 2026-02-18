@@ -48,5 +48,8 @@ futures = "0.3"
 pdf-extract = "0.10.0"
 html2text = "0.16.7"
 
+# URL parsing & validation
+url = "2"
+
 # Misc
 hostname = "0.4.2"

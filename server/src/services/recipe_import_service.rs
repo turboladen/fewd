@@ -1,6 +1,8 @@
 use std::fmt;
+use std::net::IpAddr;
 
 use serde::Serialize;
+use url::Url;
 
 use crate::dto::CreateRecipeDto;
 use crate::services::claude_client::{ClaudeClient, ClaudeError};
@@ -104,8 +106,11 @@ impl RecipeImportService {
     }
 
     pub async fn fetch_url(url: &str) -> Result<String, ImportError> {
+        validate_url(url)?;
+
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::limited(5))
             .build()
             .map_err(|e| ImportError::NetworkError(e.to_string()))?;
 
@@ -123,10 +128,18 @@ impl RecipeImportService {
             )));
         }
 
-        response
-            .text()
+        // Cap response body at 5 MB to prevent memory exhaustion
+        let bytes = response
+            .bytes()
             .await
-            .map_err(|e| ImportError::NetworkError(e.to_string()))
+            .map_err(|e| ImportError::NetworkError(e.to_string()))?;
+        if bytes.len() > 5 * 1024 * 1024 {
+            return Err(ImportError::NetworkError(
+                "Response too large (max 5 MB)".to_string(),
+            ));
+        }
+        String::from_utf8(bytes.to_vec())
+            .map_err(|e| ImportError::NetworkError(format!("Invalid UTF-8 response: {}", e)))
     }
 
     /// Try JSON-LD extraction first (most token-efficient), fall back to html2text
@@ -136,8 +149,9 @@ impl RecipeImportService {
             return jsonld;
         }
 
-        // Fall back to html2text conversion
-        let text = html2text::from_read(html.as_bytes(), 120).unwrap_or_default();
+        // Cap raw HTML before parsing to prevent excessive memory use (2 MB)
+        let capped = truncate_content(html, 2 * 1024 * 1024);
+        let text = html2text::from_read(capped.as_bytes(), 120).unwrap_or_default();
         truncate_content(&text, MAX_CONTENT_CHARS).to_string()
     }
 
@@ -225,6 +239,73 @@ Rules:
 - IMPORTANT: ingredient "unit" must ALWAYS be a string, never null. Use "" (empty string) for unitless items
 - If the recipe specifies a yield in countable items (e.g., "makes 36 cookies", "yields 12 muffins"), set portion_size to describe each serving (e.g., {"value": 2, "unit": "cookies"}) and set servings to the total yield divided by the portion value (e.g., 18 servings of 2 cookies). If the recipe just says "serves 4" with no countable yield, set portion_size to null"#
             .to_string()
+    }
+}
+
+/// Validate that a URL is safe to fetch (no SSRF to internal networks)
+fn validate_url(raw: &str) -> Result<(), ImportError> {
+    let parsed =
+        Url::parse(raw).map_err(|e| ImportError::NetworkError(format!("Invalid URL: {}", e)))?;
+
+    match parsed.scheme() {
+        "http" | "https" => {}
+        scheme => {
+            return Err(ImportError::NetworkError(format!(
+                "Unsupported URL scheme: {}",
+                scheme
+            )));
+        }
+    }
+
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| ImportError::NetworkError("URL has no host".to_string()))?;
+
+    // Resolve hostname to check for private IPs
+    let addrs: Vec<IpAddr> = match host.parse::<IpAddr>() {
+        Ok(ip) => vec![ip],
+        Err(_) => {
+            // DNS lookup — use std blocking resolution in a blocking task context.
+            // If resolution fails, allow the request (reqwest will fail with a clear error).
+            use std::net::ToSocketAddrs;
+            match (host, 0u16).to_socket_addrs() {
+                Ok(iter) => iter.map(|sa| sa.ip()).collect(),
+                Err(_) => return Ok(()),
+            }
+        }
+    };
+
+    for addr in &addrs {
+        if is_private_ip(addr) {
+            return Err(ImportError::NetworkError(
+                "URLs pointing to private/internal networks are not allowed".to_string(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn is_private_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()                        // 127.0.0.0/8
+                || v4.is_private()                   // 10/8, 172.16/12, 192.168/16
+                || v4.is_link_local()                // 169.254/16
+                || v4.is_broadcast()                 // 255.255.255.255
+                || v4.is_unspecified()               // 0.0.0.0
+                || v4.octets()[0] == 100 && v4.octets()[1] >= 64 && v4.octets()[1] <= 127 // CGNAT 100.64/10
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()                         // ::1
+                || v6.is_unspecified()               // ::
+                || {
+                    let segments = v6.segments();
+                    segments[0] == 0xfe80             // link-local fe80::/10
+                        || segments[0] == 0xfc00      // unique-local fc00::/7
+                        || segments[0] == 0xfd00
+                }
+        }
     }
 }
 

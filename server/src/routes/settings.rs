@@ -8,14 +8,53 @@ use crate::services::claude_client::ClaudeClient;
 use crate::services::settings_service::SettingsService;
 use crate::AppState;
 
+/// Allowed setting keys — reject anything not in this list
+const ALLOWED_KEYS: &[&str] = &[
+    "anthropic_api_key",
+    "claude_model",
+    "token_usage_input",
+    "token_usage_output",
+    "token_usage_requests",
+    "database_path",
+    "cost_input_price_per_mtok",
+    "cost_output_price_per_mtok",
+];
+
+fn validate_key(key: &str) -> Result<(), AppError> {
+    if ALLOWED_KEYS.contains(&key) {
+        Ok(())
+    } else {
+        Err(AppError::BadRequest(format!("Unknown setting: {}", key)))
+    }
+}
+
+/// Mask a secret so the client can see it's configured without exposing the full value
+fn mask_api_key(key: &str) -> String {
+    if key.len() <= 8 {
+        return "*".repeat(key.len());
+    }
+    let suffix = &key[key.len() - 4..];
+    format!("{}...{}", &key[..8], suffix)
+}
+
 pub async fn get_setting(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<Option<String>>, AppError> {
-    SettingsService::get(&state.db, key)
+    validate_key(&key)?;
+
+    let value = SettingsService::get(&state.db, key.clone())
         .await
-        .map(Json)
-        .map_err(AppError::from)
+        .map_err(AppError::from)?;
+
+    // Never return the raw API key
+    let value = if key == "anthropic_api_key" {
+        value.map(|v| mask_api_key(&v))
+    } else {
+        value
+    };
+
+    Ok(Json(value))
 }
 
 pub async fn set_setting(
@@ -23,6 +62,8 @@ pub async fn set_setting(
     Path(key): Path<String>,
     Json(body): Json<SetSettingBody>,
 ) -> Result<StatusCode, AppError> {
+    validate_key(&key)?;
+
     let value = if key == "anthropic_api_key" {
         body.value.trim().to_string()
     } else {

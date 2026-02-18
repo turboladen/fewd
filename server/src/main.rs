@@ -1,11 +1,12 @@
 use std::net::SocketAddr;
 
-use axum::http::{header, StatusCode, Uri};
+use axum::extract::DefaultBodyLimit;
+use axum::http::{header, Method, StatusCode, Uri};
 use axum::response::IntoResponse;
 use axum::Router;
 use fewd_lib::{db, routes, AppState};
 use rust_embed::Embed;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 #[derive(Embed)]
@@ -29,10 +30,29 @@ async fn main() {
 
     let state = AppState { db };
 
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::list([
+            "http://localhost:5173".parse().unwrap(), // Vite dev server
+            "http://localhost:3000".parse().unwrap(),
+            "http://localhost:3001".parse().unwrap(),
+        ]))
+        .allow_methods(AllowMethods::list([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ]))
+        .allow_headers(AllowHeaders::list([
+            header::CONTENT_TYPE,
+            header::ACCEPT,
+        ]));
+
     let app = Router::new()
         .nest("/api", routes::api_routes())
         .fallback(serve_spa)
-        .layer(CorsLayer::permissive())
+        .layer(DefaultBodyLimit::max(10 * 1024 * 1024)) // 10 MB
+        .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

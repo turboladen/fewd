@@ -28,11 +28,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [inputPrice, setInputPrice] = useState('')
   const [outputPrice, setOutputPrice] = useState('')
 
-  useEffect(() => {
-    if (apiKeyQuery.data) {
-      setApiKeyInput(apiKeyQuery.data)
-    }
-  }, [apiKeyQuery.data])
+  // The GET endpoint returns a masked key (e.g. "sk-ant-a...XXXX").
+  // Only pre-fill when the user hasn't started typing yet.
+  const maskedKey = apiKeyQuery.data ?? ''
+  const hasExistingKey = !!maskedKey
 
   useEffect(() => {
     if (inputPriceQuery.data) setInputPrice(inputPriceQuery.data)
@@ -52,11 +51,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   }, [onClose])
 
   const handleSaveKey = () => {
+    if (!apiKeyInput) return
     setSetting.mutate(
       { key: 'anthropic_api_key', value: apiKeyInput },
       {
         onSuccess: () => {
           setShowKey(false)
+          setApiKeyInput('')
           toast('API key saved')
         },
       },
@@ -68,7 +69,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   }
 
   const handleRefreshModels = () => {
-    if (!apiKeyQuery.data) {
+    if (!hasExistingKey) {
       setHighlightApiKey(true)
       setTimeout(() => setHighlightApiKey(false), 2000)
       return
@@ -102,7 +103,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   })()
 
   const currentModel = modelQuery.data || 'claude-sonnet-4-20250514'
-  const apiKeyChanged = apiKeyInput !== (apiKeyQuery.data ?? '')
+  const apiKeyChanged = apiKeyInput.length > 0
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center'>
@@ -142,7 +143,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 type={showKey ? 'text' : 'password'}
                 value={apiKeyInput}
                 onChange={(e) => setApiKeyInput(e.target.value)}
-                placeholder='sk-ant-...'
+                placeholder={hasExistingKey ? maskedKey : 'sk-ant-...'}
                 className={`input w-full pr-12 ${
                   highlightApiKey
                     ? 'border-amber-400'
@@ -206,7 +207,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         <div className='mb-4'>
           <button
             onClick={() => testConnection.mutate()}
-            disabled={testConnection.isPending || !apiKeyInput}
+            disabled={testConnection.isPending || !hasExistingKey}
             className='btn-sm btn-outline'
           >
             {testConnection.isPending ? 'Testing...' : 'Test Connection'}
