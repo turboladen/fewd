@@ -419,85 +419,64 @@
 
 ---
 
-## Phase 14: Multi-Mac Distribution
+## Phase 14: Database Configuration
 
-**Goal:** Make the app accessible across multiple Macs in the household, with a shared database via iCloud.
+**Goal:** Allow configuring the database location via the Settings UI.
 
 ### Tasks:
 
-**14.1: Universal macOS Binary**
+**14.1: Configurable Database Location**
 
-- Install Intel cross-compilation target: `rustup target add x86_64-apple-darwin`
-- Add `tauri:build:universal` npm script using `--target universal-apple-darwin`
-- Update `.github/workflows/build.yml` to build universal binary for macOS
-- Update macOS artifact paths from `target/release/` to `target/universal-apple-darwin/release/`
+- Add `GET /settings/db-location` and `PUT /settings/db-location` routes
+- Read current `DATABASE_PATH` from environment/config, expose via API
+- Support setting a new path, validate it's writable, copy existing data if needed
+- Server restart required after changing location
 
-**14.2: Configurable Database Location**
-
-- Create `src-tauri/src/config.rs` — `AppConfig` with `db_dir` field, read from local `config.json`
-- Modify `src-tauri/src/db.rs` — read config before connecting, resolve DB path
-- Expand `AppState` with `config_dir` and `db_path`
-- Add `tauri-plugin-dialog` for native folder picker
-- Create config Tauri commands: `get_db_config`, `set_db_location`, `validate_db_location`, `copy_db_to_location`
-
-**14.3: SQLite Safety for Synced Filesystems**
-
-- When using a custom (non-default) DB location, apply: `PRAGMA journal_mode=DELETE`, `PRAGMA busy_timeout=5000`, `PRAGMA synchronous=FULL`
-- DELETE journal mode avoids the multi-file sync problem (no `-wal`/`-shm` companion files)
-- Default local path keeps WAL mode for better performance
-
-**14.4: Database Location Settings UI**
+**14.2: Database Location Settings UI**
 
 - Add "Database Location" section to `SettingsPanel.tsx`
-- Folder picker via `@tauri-apps/plugin-dialog`
-- Validation (writable, existing DB detection, iCloud path detection)
-- iCloud warning banner, data copy option, restart notice
-
-**14.5: Lock File Concurrency Warning**
-
-- `.fewd.lock` file alongside shared database containing machine name + timestamp
-- Check for foreign (non-stale) locks on startup
-- Show amber warning banner when another machine may be active
-- Lock released on clean shutdown; stale after 5 minutes
+- Text input showing current path with a "Browse" or manual edit option
+- Validation feedback (writable, existing DB detection)
+- "Copy data to new location" option when changing paths
+- Restart notice after changing location
 
 **Verify Phase 14:**
 
-- [x] Universal binary runs on both Intel and Apple Silicon Macs
-- [x] Default DB location unchanged when no config file exists
-- [x] Can change DB location via Settings and restart to use it
-- [x] Data is copied to new location when no existing DB found
-- [x] iCloud warning appears when selecting an iCloud folder
-- [x] DELETE journal mode applied for custom locations
-- [x] Lock file warns when another machine is active
-- [x] CI passes (fmt, clippy, test, dprint, lint, bun test)
+- [x] Default DB location unchanged when no config exists
+- [x] Can view current DB location in Settings
+- [ ] Can change DB location via Settings
+- [ ] Data is copied to new location when requested
+- [ ] CI passes (fmt, clippy, test, dprint, lint, bun test)
 
-**Deliverable:** Multi-Mac distribution with shared iCloud database
+**Deliverable:** Configurable database location via Settings UI
 
 ---
 
-## Phase 15: App Icon
+## Phase 15: Favicon & Branding
 
-**Goal:** Replace the Tauri placeholder icon (solid blue square) with a custom app icon.
+**Goal:** Add a custom favicon and browser tab icon for the web app.
 
 ### Tasks:
 
 **15.1: Create Icon Source**
 
 - Design a programmatic SVG: fork and knife crossed over a circular plate, sage green background
-- Simple geometric shapes that read well at 32x32
+- Simple geometric shapes that read well at 16x16 and 32x32
 
-**15.2: Generate All Sizes**
+**15.2: Generate Favicon Files**
 
-- Convert SVG to 1024x1024 PNG
-- Run `cargo tauri icon` to generate all required sizes (512, 256, 128, 32, .ico, .icns)
-- Replace files in `src-tauri/icons/`
+- Create `favicon.svg` (scalable, used by modern browsers)
+- Generate `favicon.ico` (16x16 + 32x32 for legacy browsers)
+- Generate `apple-touch-icon.png` (180x180 for iOS home screen)
+- Add to `public/` directory and reference in `index.html`
 
 **Verify Phase 15:**
 
-- [ ] Dock icon shows the new design in dev mode
-- [ ] `.app` and `.dmg` bundles show the icon
+- [ ] Browser tab shows custom favicon
+- [ ] iOS "Add to Home Screen" shows the icon
+- [ ] SVG favicon matches the app's color palette
 
-**Deliverable:** Custom app icon
+**Deliverable:** Custom favicon and browser branding
 
 ---
 
@@ -529,7 +508,7 @@
 - Add `useImportRecipeFromUrl` and `useImportRecipeFromFile` mutation hooks
 - Update `ImportRecipeForm` with three-tab UI: Markdown (existing), URL, PDF
 - URL tab: text input + "Import" button with "Analyzing recipe with AI..." loading state
-- PDF tab: file picker via `@tauri-apps/plugin-dialog` with PDF filter + "Import" button
+- PDF tab: file upload input with PDF filter + "Import" button
 - Rename "Import Markdown" button to "Import"
 
 **Verify Phase 16:**
@@ -597,8 +576,8 @@ Give these tasks to Claude Code in order:
 6. **Phase 11** — AI infrastructure (API key, client, prompt builder, DraftReview pattern)
 7. **Phase 12** — AI recipe adaptation (first AI feature, uses all Phase 11 infra)
 8. **Phase 13** — AI meal suggestions (builds on Phases 10, 11, and 12)
-9. **Phase 14** — Multi-Mac distribution (universal binary, shared database via iCloud)
-10. **Phase 15** — App icon (custom icon replacing Tauri placeholder)
+9. **Phase 14** — Database configuration (configurable DB location via Settings UI)
+10. **Phase 15** — Favicon & branding (custom favicon for the web app)
 11. **Phase 16** — AI recipe import from URL and PDF (extends import system)
 12. **Phase 17** — Styling facelift (warm color palette, heading font, polish)
 

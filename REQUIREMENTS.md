@@ -2,14 +2,14 @@
 
 ## Overview
 
-A family meal planning application for a household of 4 people. The app helps plan meals for the week, manage recipes, and generate shopping lists. Built as a desktop application using Tauri (Rust backend + React frontend) with local SQLite database.
+A family meal planning application for a household of 4 people. The app helps plan meals for the week, manage recipes, and generate shopping lists. Built as a web application with a Rust/Axum backend and React frontend, using a local SQLite database.
 
 ## Core Assumptions
 
 - **Single Family**: App serves one family, all persons belong to that family
 - **Local Storage**: SQLite database stored locally, accessed from same computer
 - **No Multi-tenancy**: No user accounts or authentication needed for MVP
-- **Desktop First**: Tauri desktop app (macOS/Windows/Linux)
+- **Web App**: Rust/Axum backend + React frontend (accessed via browser)
 
 ## Future Features (Parking Lot)
 
@@ -546,7 +546,7 @@ Servings: 4
 **Backend:**
 
 - Language: Rust
-- Framework: Tauri 2
+- Framework: Axum
 - ORM: SeaORM 1.1
 - Database: SQLite (local file)
 - Unit Conversion: `uom` crate
@@ -556,14 +556,13 @@ Servings: 4
 - Framework: React 18 + TypeScript
 - Build Tool: Vite
 - Data Fetching: TanStack Query (React Query)
-- Routing: TanStack Router
 - Styling: Tailwind CSS
-- Icons: lucide-react
+- Icons: Heroicons (custom SVG components)
 
-**Package:**
+**Deployment:**
 
-- Desktop app via Tauri
-- Supported platforms: macOS, Windows, Linux
+- Standalone Axum server serving both API and static frontend
+- Supported platforms: macOS, Linux (wherever Rust compiles)
 
 ### Database Schema
 
