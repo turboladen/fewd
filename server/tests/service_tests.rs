@@ -1,8 +1,6 @@
-use fewd_lib::commands::meal::{CreateMealDto, PersonServingDto};
-use fewd_lib::commands::meal_template::CreateMealTemplateDto;
-use fewd_lib::commands::person::CreatePersonDto;
-use fewd_lib::commands::recipe::{
-    CreateRecipeDto, IngredientAmountDto, IngredientDto, UpdateRecipeDto,
+use fewd_lib::dto::{
+    CreateMealDto, CreateMealTemplateDto, CreatePersonDto, CreateRecipeDto, IngredientAmountDto,
+    IngredientDto, PersonServingDto, UpdateRecipeDto,
 };
 use fewd_lib::services::meal_service::MealService;
 use fewd_lib::services::meal_template_service::MealTemplateService;
@@ -33,6 +31,8 @@ fn test_person_dto(name: &str) -> CreatePersonDto {
         dislikes: vec!["olives".to_string()],
         favorites: vec!["pasta".to_string()],
         notes: None,
+        drink_preferences: None,
+        drink_dislikes: None,
     }
 }
 
@@ -41,6 +41,7 @@ fn test_recipe_dto(name: &str) -> CreateRecipeDto {
         name: name.to_string(),
         description: Some("A test recipe".to_string()),
         source: "manual".to_string(),
+        source_url: None,
         parent_recipe_id: None,
         prep_time: None,
         cook_time: None,
@@ -95,7 +96,7 @@ async fn person_get_all_filters_inactive() {
         .unwrap();
 
     // Deactivate via update
-    let update = fewd_lib::commands::person::UpdatePersonDto {
+    let update = fewd_lib::dto::UpdatePersonDto {
         name: None,
         birthdate: None,
         dietary_goals: None,
@@ -103,6 +104,8 @@ async fn person_get_all_filters_inactive() {
         favorites: None,
         notes: None,
         is_active: Some(false),
+        drink_preferences: None,
+        drink_dislikes: None,
     };
     PersonService::update(&db, person.id.clone(), update)
         .await
@@ -142,7 +145,7 @@ async fn person_update_partial_fields() {
         .await
         .unwrap();
 
-    let update = fewd_lib::commands::person::UpdatePersonDto {
+    let update = fewd_lib::dto::UpdatePersonDto {
         name: Some("Alice Updated".to_string()),
         birthdate: None,
         dietary_goals: Some("more protein".to_string()),
@@ -150,6 +153,8 @@ async fn person_update_partial_fields() {
         favorites: None,
         notes: None,
         is_active: None,
+        drink_preferences: None,
+        drink_dislikes: None,
     };
     let updated = PersonService::update(&db, person.id, update).await.unwrap();
     assert_eq!(updated.name, "Alice Updated");
@@ -168,6 +173,8 @@ async fn person_invalid_birthdate_fails() {
         dislikes: vec![],
         favorites: vec![],
         notes: None,
+        drink_preferences: None,
+        drink_dislikes: None,
     };
     let result = PersonService::create(&db, dto).await;
     assert!(result.is_err());
@@ -194,6 +201,8 @@ async fn person_json_fields_roundtrip() {
         dislikes: vec!["olives".to_string(), "mushrooms".to_string()],
         favorites: vec!["pizza".to_string()],
         notes: None,
+        drink_preferences: None,
+        drink_dislikes: None,
     };
     let person = PersonService::create(&db, dto).await.unwrap();
 
@@ -397,7 +406,7 @@ async fn recipe_rating_rejects_invalid_values() {
         .await
         .is_err());
 
-    // Not a whole number
+    // Below minimum (0.4 rounds to 0, which is < 1)
     let update = UpdateRecipeDto {
         name: None,
         description: None,
@@ -413,7 +422,7 @@ async fn recipe_rating_rejects_invalid_values() {
         notes: None,
         icon: None,
         is_favorite: None,
-        rating: Some(3.5),
+        rating: Some(0.4),
     };
     assert!(RecipeService::update(&db, recipe.id, update).await.is_err());
 }
@@ -819,7 +828,7 @@ async fn meal_template_update() {
     };
     let template = MealTemplateService::create(&db, dto).await.unwrap();
 
-    let update = fewd_lib::commands::meal_template::UpdateMealTemplateDto {
+    let update = fewd_lib::dto::UpdateMealTemplateDto {
         name: Some("Sunday Brekkie".to_string()),
         meal_type: None,
         servings: None,

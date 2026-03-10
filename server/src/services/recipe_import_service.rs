@@ -106,11 +106,11 @@ impl RecipeImportService {
     }
 
     pub async fn fetch_url(url: &str) -> Result<String, ImportError> {
-        validate_url(url)?;
+        validate_url(url).await?;
 
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::limited(5))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| ImportError::NetworkError(e.to_string()))?;
 
@@ -243,7 +243,7 @@ Rules:
 }
 
 /// Validate that a URL is safe to fetch (no SSRF to internal networks)
-fn validate_url(raw: &str) -> Result<(), ImportError> {
+async fn validate_url(raw: &str) -> Result<(), ImportError> {
     let parsed =
         Url::parse(raw).map_err(|e| ImportError::NetworkError(format!("Invalid URL: {}", e)))?;
 
@@ -261,17 +261,23 @@ fn validate_url(raw: &str) -> Result<(), ImportError> {
         .host_str()
         .ok_or_else(|| ImportError::NetworkError("URL has no host".to_string()))?;
 
-    // Resolve hostname to check for private IPs
+    // Resolve hostname to check for private IPs (use spawn_blocking to avoid
+    // blocking the Tokio worker thread during DNS resolution)
     let addrs: Vec<IpAddr> = match host.parse::<IpAddr>() {
         Ok(ip) => vec![ip],
         Err(_) => {
-            // DNS lookup — use std blocking resolution in a blocking task context.
-            // If resolution fails, allow the request (reqwest will fail with a clear error).
-            use std::net::ToSocketAddrs;
-            match (host, 0u16).to_socket_addrs() {
-                Ok(iter) => iter.map(|sa| sa.ip()).collect(),
-                Err(_) => return Ok(()),
-            }
+            let host_owned = host.to_string();
+            tokio::task::spawn_blocking(move || {
+                use std::net::ToSocketAddrs;
+                (host_owned.as_str(), 0u16)
+                    .to_socket_addrs()
+                    .map(|iter| iter.map(|sa| sa.ip()).collect::<Vec<_>>())
+            })
+            .await
+            // spawn_blocking panicked — treat as DNS failure, allow through
+            .unwrap_or(Ok(vec![]))
+            // DNS resolution failed — allow through (reqwest will fail with a clear error)
+            .unwrap_or_default()
         }
     };
 
@@ -294,16 +300,16 @@ fn is_private_ip(ip: &IpAddr) -> bool {
                 || v4.is_link_local()                // 169.254/16
                 || v4.is_broadcast()                 // 255.255.255.255
                 || v4.is_unspecified()               // 0.0.0.0
-                || v4.octets()[0] == 100 && v4.octets()[1] >= 64 && v4.octets()[1] <= 127 // CGNAT 100.64/10
+                || v4.octets()[0] == 100 && v4.octets()[1] >= 64 && v4.octets()[1] <= 127
+            // CGNAT 100.64/10
         }
         IpAddr::V6(v6) => {
             v6.is_loopback()                         // ::1
                 || v6.is_unspecified()               // ::
                 || {
-                    let segments = v6.segments();
-                    segments[0] == 0xfe80             // link-local fe80::/10
-                        || segments[0] == 0xfc00      // unique-local fc00::/7
-                        || segments[0] == 0xfd00
+                    let first = v6.segments()[0];
+                    (first & 0xffc0) == 0xfe80        // link-local fe80::/10
+                        || (first & 0xfe00) == 0xfc00 // unique-local fc00::/7
                 }
         }
     }

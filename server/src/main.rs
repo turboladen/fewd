@@ -43,10 +43,7 @@ async fn main() {
             Method::DELETE,
             Method::OPTIONS,
         ]))
-        .allow_headers(AllowHeaders::list([
-            header::CONTENT_TYPE,
-            header::ACCEPT,
-        ]));
+        .allow_headers(AllowHeaders::list([header::CONTENT_TYPE, header::ACCEPT]));
 
     let app = Router::new()
         .nest("/api", routes::api_routes())

@@ -30,11 +30,13 @@ fn validate_key(key: &str) -> Result<(), AppError> {
 
 /// Mask a secret so the client can see it's configured without exposing the full value
 fn mask_api_key(key: &str) -> String {
-    if key.len() <= 8 {
-        return "*".repeat(key.len());
+    let chars: Vec<char> = key.chars().collect();
+    if chars.len() <= 8 {
+        return "*".repeat(chars.len());
     }
-    let suffix = &key[key.len() - 4..];
-    format!("{}...{}", &key[..8], suffix)
+    let prefix: String = chars[..8].iter().collect();
+    let suffix: String = chars[chars.len() - 4..].iter().collect();
+    format!("{}...{}", prefix, suffix)
 }
 
 pub async fn get_setting(
