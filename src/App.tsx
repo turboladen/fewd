@@ -21,18 +21,18 @@ const queryClient = new QueryClient({
   },
 })
 
-type TopTab = 'family' | 'meals' | 'cocktails'
-type MealsSubTab = 'recipes' | 'planner' | 'templates' | 'shopping'
+type TopTab = 'family' | 'meals' | 'recipes' | 'cocktails'
+type MealsSubTab = 'planner' | 'templates' | 'shopping'
 type CocktailsSubTab = 'suggest' | 'drink-recipes' | 'bar'
 
 const topTabs: { key: TopTab; label: string }[] = [
   { key: 'family', label: 'Family' },
   { key: 'meals', label: 'Meals' },
+  { key: 'recipes', label: 'Recipes' },
   { key: 'cocktails', label: 'Cocktails' },
 ]
 
 const mealsSubTabs: { key: MealsSubTab; label: string }[] = [
-  { key: 'recipes', label: 'Recipes' },
   { key: 'planner', label: 'Planner' },
   { key: 'templates', label: 'Templates' },
   { key: 'shopping', label: 'Shopping' },
@@ -76,7 +76,7 @@ function SubNav<T extends string>({
 
 function App() {
   const [activeTopTab, setActiveTopTab] = useState<TopTab>('family')
-  const [activeMealsSubTab, setActiveMealsSubTab] = useState<MealsSubTab>('recipes')
+  const [activeMealsSubTab, setActiveMealsSubTab] = useState<MealsSubTab>('planner')
   const [activeCocktailsSubTab, setActiveCocktailsSubTab] = useState<CocktailsSubTab>('suggest')
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
@@ -142,7 +142,7 @@ function App() {
           <main className='flex-1 overflow-y-auto'>
             <div key={contentKey} className='animate-fade-in'>
               {activeTopTab === 'family' && <FamilyManager />}
-              {activeTopTab === 'meals' && activeMealsSubTab === 'recipes' && <RecipeManager />}
+              {activeTopTab === 'recipes' && <RecipeManager />}
               {activeTopTab === 'meals' && activeMealsSubTab === 'planner' && <MealPlanner />}
               {activeTopTab === 'meals' && activeMealsSubTab === 'templates' && <TemplateManager />}
               {activeTopTab === 'meals' && activeMealsSubTab === 'shopping' && <ShoppingList />}

@@ -14,8 +14,8 @@ Family meal planner & cocktail manager web app. Rust/Axum backend with SQLite, R
 
 **Navigation Structure:**
 
-Top-level tabs: **Family** | **Meals** | **Cocktails**
-- **Meals** sub-tabs: Recipes | Planner | Templates | Shopping
+Top-level tabs: **Family** | **Meals** | **Recipes** | **Cocktails**
+- **Meals** sub-tabs: Planner | Templates | Shopping
 - **Cocktails** sub-tabs: Suggest | Recipes | My Bar
 
 Sub-navigation uses a generic `SubNav<T>` component in `App.tsx`.
