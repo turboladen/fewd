@@ -9,6 +9,7 @@ Scaffold a new entity: $ARGUMENTS
 Follow the project's established patterns. For each step, use existing files as templates:
 
 ## Steps
+
 1. Create migration in `server/migration/src/` (use `m20260214_000011_create_settings.rs` as template for naming)
 2. Register migration in `server/migration/src/lib.rs`
 3. Create entity in `server/src/entities/` (follow `person.rs` pattern)
@@ -21,7 +22,7 @@ Follow the project's established patterns. For each step, use existing files as 
 10. Create UI component stub in `src/components/`
 
 ## Context
+
 - DB status: !`ls server/migration/src/m*.rs | tail -3`
 - Existing entities: !`ls server/src/entities/*.rs`
 - Existing services: !`ls server/src/services/*_service.rs`
-
