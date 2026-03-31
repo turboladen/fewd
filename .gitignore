@@ -58,3 +58,6 @@ dist-ssr
 .beads/metadata.json
 .dolt/
 *.db
+
+# Beads / Dolt files (added by bd init)
+.beads-credential-key

@@ -54,3 +54,5 @@
 # - github.repo
 
 sync.git-remote: "ssh://git@github.com/turboladen/fewd.git"
+dolt:
+  port: 59308
