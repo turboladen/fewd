@@ -129,7 +129,7 @@ export const api = {
                     callbacks.onError(new Error(parsed.message || 'Unknown streaming error'))
                   }
                 } catch {
-                  // Ignore unparseable SSE data
+                  // Ignore unparsable SSE data
                 }
               }
               currentEvent = ''

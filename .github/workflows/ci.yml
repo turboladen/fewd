@@ -7,6 +7,12 @@ on:
   pull_request:
     branches: [main, develop]
 
+# Cancel in-progress runs when a newer commit lands on the same ref. This also
+# prevents the duplicate push+pull_request pair from both running to completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -43,6 +49,9 @@ jobs:
   rust-checks:
     name: Rust Checks
     runs-on: macos-latest
+    # Only on PR events — the push event that initiated the PR would otherwise
+    # trigger a second, redundant run.
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
 
@@ -81,12 +90,9 @@ jobs:
   frontend-checks:
     name: Frontend Checks
     runs-on: macos-latest
-    needs: [auto-format]
-    if: always()
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
@@ -111,6 +117,7 @@ jobs:
   typos-check:
     name: Typos Check
     runs-on: macos-latest
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
 
@@ -122,8 +129,8 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [auto-format, rust-checks, frontend-checks, typos-check]
-    if: always()
+    needs: [rust-checks, frontend-checks, typos-check]
+    if: github.event_name == 'pull_request'
     runs-on: macos-latest
     steps:
       - run: echo "All checks passed!"

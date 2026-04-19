@@ -354,10 +354,10 @@ pub async fn import_url(
                         }
                     }
                     Err(e) => {
-                        tracing::error!("Recipe import AI response unparseable: {}", e);
+                        tracing::error!("Recipe import AI response unparsable: {}", e);
                         let _ = sse_tx
                             .send(SsePayload::Error(format!(
-                                "AI returned an unparseable response: {}",
+                                "AI returned an unparsable response: {}",
                                 e
                             )))
                             .await;

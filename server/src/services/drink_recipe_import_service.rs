@@ -55,8 +55,7 @@ impl DrinkRecipeImportService {
                 &json_str[..json_str.len().min(500)]
             );
             ImportError::ParseError(
-                "AI returned an unparseable response. Try again or try a different URL."
-                    .to_string(),
+                "AI returned an unparsable response. Try again or try a different URL.".to_string(),
             )
         })?;
 
