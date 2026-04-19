@@ -21,14 +21,32 @@ impl RecipeService {
         Recipe::find_by_id(id).one(db).await
     }
 
+    /// Look up a recipe by its UUID or its slug. UUID format wins (direct primary-key hit);
+    /// anything else falls through to a slug lookup.
+    pub async fn get_by_id_or_slug(
+        db: &DatabaseConnection,
+        id_or_slug: String,
+    ) -> Result<Option<recipe::Model>, DbErr> {
+        if uuid::Uuid::parse_str(&id_or_slug).is_ok() {
+            Recipe::find_by_id(id_or_slug).one(db).await
+        } else {
+            Recipe::find()
+                .filter(recipe::Column::Slug.eq(id_or_slug))
+                .one(db)
+                .await
+        }
+    }
+
     pub async fn create(
         db: &DatabaseConnection,
         data: CreateRecipeDto,
     ) -> Result<recipe::Model, DbErr> {
         let now = chrono::Utc::now();
+        let slug = generate_unique_slug(db, &data.name).await?;
 
         let recipe = recipe::ActiveModel {
             id: Set(uuid::Uuid::new_v4().to_string()),
+            slug: Set(slug),
             name: Set(data.name),
             description: Set(data.description),
             source: Set(data.source),
@@ -159,5 +177,25 @@ impl RecipeService {
         recipe.updated_at = Set(chrono::Utc::now());
 
         recipe.update(db).await
+    }
+}
+
+/// Derive a slug from the recipe name, suffixing `-2`, `-3`, ... until unique.
+/// Slug is pinned at creation; renames do not rewrite it.
+async fn generate_unique_slug(db: &DatabaseConnection, name: &str) -> Result<String, DbErr> {
+    let base = migration::slugify(name);
+    let mut candidate = base.clone();
+    let mut suffix = 2u32;
+    loop {
+        let exists = Recipe::find()
+            .filter(recipe::Column::Slug.eq(candidate.clone()))
+            .one(db)
+            .await?
+            .is_some();
+        if !exists {
+            return Ok(candidate);
+        }
+        candidate = format!("{}-{}", base, suffix);
+        suffix += 1;
     }
 }

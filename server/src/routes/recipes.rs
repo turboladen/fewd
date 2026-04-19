@@ -33,9 +33,9 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<recipe::Mode
 
 pub async fn get_one(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id_or_slug): Path<String>,
 ) -> Result<Json<Option<recipe::Model>>, AppError> {
-    RecipeService::get_by_id(&state.db, id)
+    RecipeService::get_by_id_or_slug(&state.db, id_or_slug)
         .await
         .map(Json)
         .map_err(AppError::from)

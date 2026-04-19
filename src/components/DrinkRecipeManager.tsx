@@ -72,7 +72,7 @@ export function DrinkRecipeManager() {
       onSuccess: (recipe) => {
         setViewMode('list')
         toast('Drink recipe added')
-        navigate(`/cocktails/recipes/${recipe.id}`)
+        navigate(`/cocktails/recipes/${recipe.slug}`)
       },
     })
   }
@@ -265,7 +265,7 @@ export function DrinkRecipeManager() {
             >
               <div className='flex items-start justify-between'>
                 <Link
-                  to={`/cocktails/recipes/${recipe.id}`}
+                  to={`/cocktails/recipes/${recipe.slug}`}
                   className='flex items-center gap-2 text-left flex-1 min-w-0 rounded-md hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400'
                 >
                   <span className='text-xl flex-shrink-0'>{recipe.icon || '🍸'}</span>
