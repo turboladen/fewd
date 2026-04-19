@@ -24,11 +24,9 @@ type Mode = 'view' | 'edit' | 'scale' | 'adapt' | 'adapt-edit'
 
 export function RecipeDetailPage() {
   const { id } = useParams<{ id: string }>()
-  if (!id) throw new Error('RecipeDetailPage rendered without :id param')
-
   const navigate = useNavigate()
   const { toast } = useToast()
-  const { data: recipe, isLoading, error } = useRecipe(id)
+  const { data: recipe, isLoading, error } = useRecipe(id ?? '')
   const { data: parentRecipe } = useRecipe(recipe?.parent_recipe_id ?? '')
   const createMutation = useCreateRecipe()
   const updateMutation = useUpdateRecipe()
@@ -57,6 +55,19 @@ export function RecipeDetailPage() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [mode, confirmingDelete, navigate])
+
+  if (!id) {
+    return (
+      <div className='p-6'>
+        <EmptyState
+          emoji='⚠️'
+          title='Invalid recipe link'
+          description='This page is missing its recipe ID.'
+          action={{ label: 'Back to Recipes', onClick: () => navigate('/recipes') }}
+        />
+      </div>
+    )
+  }
 
   if (isLoading) {
     return <div className='p-6 text-stone-500 animate-pulse'>Loading recipe...</div>

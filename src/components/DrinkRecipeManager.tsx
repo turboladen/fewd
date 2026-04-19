@@ -275,7 +275,11 @@ export function DrinkRecipeManager() {
                       <p className='text-sm text-stone-500 line-clamp-1'>{recipe.description}</p>
                     )}
                   </div>
-                  <IconChevronRight className='w-4 h-4 text-stone-400 flex-shrink-0' />
+                  <IconChevronRight
+                    className='w-4 h-4 text-stone-400 flex-shrink-0'
+                    aria-hidden='true'
+                    focusable={false}
+                  />
                 </Link>
 
                 <div className='flex items-center gap-2 flex-shrink-0 ml-2'>
