@@ -78,6 +78,13 @@ jobs:
           path: server/target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
+      # The server embeds the frontend bundle via RustEmbed (`folder =
+      # "../dist"`), and the macro checks that the folder exists at compile
+      # time. We don't need the real build artifacts for clippy/tests, so a
+      # placeholder satisfies the macro without adding the frontend toolchain.
+      - name: Create placeholder dist for RustEmbed
+        run: mkdir -p dist && touch dist/.gitkeep
+
       - name: Check formatting
         run: cd server && cargo fmt --all -- --check
 

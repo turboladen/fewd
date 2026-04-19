@@ -100,7 +100,7 @@ export const api = {
         let currentEvent = ''
         let currentData = ''
 
-        while (true) {
+        for (;;) {
           const { done, value } = await reader.read()
           if (done) break
 
