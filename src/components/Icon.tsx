@@ -1,6 +1,4 @@
-interface IconProps {
-  className?: string
-}
+type IconProps = React.SVGProps<SVGSVGElement>
 
 export function IconGear({ className = 'w-5 h-5' }: IconProps) {
   return (
@@ -81,9 +79,10 @@ export function IconChevronUp({ className = 'w-4 h-4' }: IconProps) {
   )
 }
 
-export function IconChevronRight({ className = 'w-3 h-3' }: IconProps) {
+export function IconChevronRight({ className = 'w-3 h-3', ...rest }: IconProps) {
   return (
     <svg
+      {...rest}
       className={className}
       fill='none'
       viewBox='0 0 24 24'

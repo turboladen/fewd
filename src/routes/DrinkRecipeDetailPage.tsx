@@ -15,10 +15,10 @@ import type { DrinkRecipeFormData, UpdateDrinkRecipeDto } from '../types/drinkRe
 import { parseDrinkRecipe } from '../types/drinkRecipe'
 
 export function DrinkRecipeDetailPage() {
-  const { id = '' } = useParams<{ id: string }>()
+  const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { toast } = useToast()
-  const { data: recipe, isLoading, error } = useDrinkRecipe(id)
+  const { data: recipe, isLoading, error } = useDrinkRecipe(id ?? '')
   const updateMutation = useUpdateDrinkRecipe()
   const deleteMutation = useDeleteDrinkRecipe()
   const toggleFavoriteMutation = useToggleDrinkFavorite()
@@ -40,6 +40,22 @@ export function DrinkRecipeDetailPage() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isEditing, confirmingDelete, navigate])
+
+  if (!id) {
+    return (
+      <div className='p-6'>
+        <EmptyState
+          emoji='⚠️'
+          title='Invalid drink recipe link'
+          description='This page is missing its recipe ID.'
+          action={{
+            label: 'Back to Drink Recipes',
+            onClick: () => navigate('/cocktails/recipes'),
+          }}
+        />
+      </div>
+    )
+  }
 
   if (isLoading) {
     return <div className='p-6 text-stone-500 animate-pulse'>Loading drink recipe...</div>

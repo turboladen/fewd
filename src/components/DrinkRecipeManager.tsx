@@ -12,7 +12,7 @@ import type { CreateDrinkRecipeDto, DrinkRecipeFormData } from '../types/drinkRe
 import { emptyDrinkRecipeForm, parseDrinkRecipe } from '../types/drinkRecipe'
 import { DrinkRecipeForm } from './DrinkRecipeForm'
 import { EmptyState } from './EmptyState'
-import { IconPlus, IconSearch, IconStar, IconStarFilled } from './Icon'
+import { IconChevronRight, IconPlus, IconSearch, IconStar, IconStarFilled } from './Icon'
 import { StarRating } from './StarRating'
 import { useToast } from './Toast'
 
@@ -266,15 +266,20 @@ export function DrinkRecipeManager() {
               <div className='flex items-start justify-between'>
                 <Link
                   to={`/cocktails/recipes/${recipe.id}`}
-                  className='flex items-center gap-2 text-left flex-1 min-w-0 hover:text-primary-600'
+                  className='flex items-center gap-2 text-left flex-1 min-w-0 rounded-md hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400'
                 >
                   <span className='text-xl flex-shrink-0'>{recipe.icon || '🍸'}</span>
-                  <div className='min-w-0'>
+                  <div className='min-w-0 flex-1'>
                     <h3 className='font-semibold text-stone-900 truncate'>{recipe.name}</h3>
                     {recipe.description && (
                       <p className='text-sm text-stone-500 line-clamp-1'>{recipe.description}</p>
                     )}
                   </div>
+                  <IconChevronRight
+                    className='w-4 h-4 text-stone-400 flex-shrink-0'
+                    aria-hidden='true'
+                    focusable={false}
+                  />
                 </Link>
 
                 <div className='flex items-center gap-2 flex-shrink-0 ml-2'>

@@ -86,7 +86,7 @@ impl SuggestionService {
 
         // Sort by count descending
         let mut sorted: Vec<(String, u32)> = recipe_counts.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
         sorted.truncate(MAX_PER_CATEGORY);
 
         // Look up recipe details

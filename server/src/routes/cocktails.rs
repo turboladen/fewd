@@ -259,10 +259,10 @@ pub async fn import_drink_recipe_url(
                         }
                     }
                     Err(e) => {
-                        tracing::error!("Drink recipe import AI response unparseable: {}", e);
+                        tracing::error!("Drink recipe import AI response unparsable: {}", e);
                         let _ = sse_tx
                             .send(SsePayload::Error(format!(
-                                "AI returned an unparseable response: {}",
+                                "AI returned an unparsable response: {}",
                                 e
                             )))
                             .await;
