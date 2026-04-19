@@ -15,7 +15,9 @@ import type { DrinkRecipeFormData, UpdateDrinkRecipeDto } from '../types/drinkRe
 import { parseDrinkRecipe } from '../types/drinkRecipe'
 
 export function DrinkRecipeDetailPage() {
-  const { id = '' } = useParams<{ id: string }>()
+  const { id } = useParams<{ id: string }>()
+  if (!id) throw new Error('DrinkRecipeDetailPage rendered without :id param')
+
   const navigate = useNavigate()
   const { toast } = useToast()
   const { data: recipe, isLoading, error } = useDrinkRecipe(id)

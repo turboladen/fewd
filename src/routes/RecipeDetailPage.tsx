@@ -14,7 +14,6 @@ import {
   useCreateRecipe,
   useDeleteRecipe,
   useRecipe,
-  useRecipes,
   useToggleFavorite,
   useUpdateRecipe,
 } from '../hooks/useRecipes'
@@ -24,11 +23,13 @@ import { parseRecipe } from '../types/recipe'
 type Mode = 'view' | 'edit' | 'scale' | 'adapt' | 'adapt-edit'
 
 export function RecipeDetailPage() {
-  const { id = '' } = useParams<{ id: string }>()
+  const { id } = useParams<{ id: string }>()
+  if (!id) throw new Error('RecipeDetailPage rendered without :id param')
+
   const navigate = useNavigate()
   const { toast } = useToast()
   const { data: recipe, isLoading, error } = useRecipe(id)
-  const { data: recipes } = useRecipes()
+  const { data: parentRecipe } = useRecipe(recipe?.parent_recipe_id ?? '')
   const createMutation = useCreateRecipe()
   const updateMutation = useUpdateRecipe()
   const deleteMutation = useDeleteRecipe()
@@ -42,16 +43,16 @@ export function RecipeDetailPage() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      if (mode === 'adapt-edit') {
+      if (mode !== 'view') {
         setMode('view')
         setAdaptDraft(null)
-      } else if (mode !== 'view') {
-        setMode('view')
-      } else if (confirmingDelete) {
-        setConfirmingDelete(false)
-      } else {
-        navigate('/recipes')
+        return
       }
+      if (confirmingDelete) {
+        setConfirmingDelete(false)
+        return
+      }
+      navigate('/recipes')
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
@@ -77,9 +78,7 @@ export function RecipeDetailPage() {
   }
 
   const parsed = parseRecipe(recipe)
-  const parentName = parsed.parent_recipe_id
-    ? recipes?.find((r) => r.id === parsed.parent_recipe_id)?.name ?? null
-    : null
+  const parentName = parentRecipe?.name ?? null
 
   const handleUpdate = (formData: RecipeFormData) => {
     const dto: UpdateRecipeDto = {
