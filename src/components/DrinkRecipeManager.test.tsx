@@ -10,7 +10,6 @@ import { DrinkRecipeManager } from './DrinkRecipeManager'
 function makeDrink(overrides: Partial<DrinkRecipe> = {}): DrinkRecipe {
   return {
     id: 'd1',
-    slug: 'old-fashioned',
     name: 'Old Fashioned',
     description: null,
     source: 'manual',

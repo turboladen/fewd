@@ -2,7 +2,6 @@ import type { Ingredient } from './recipe'
 
 export interface DrinkRecipe {
   id: string
-  slug: string
   name: string
   description: string | null
   source: string

@@ -144,7 +144,7 @@ export function RecipeDetailPage() {
     createMutation.mutate(dto, {
       onSuccess: (created) => {
         setMode('view')
-        navigate(`/recipes/${created.slug}`)
+        navigate(`/recipes/${created.id}`)
       },
       onError: (err) => setScaleError(String(err)),
     })
@@ -181,7 +181,7 @@ export function RecipeDetailPage() {
       onSuccess: (created) => {
         setMode('view')
         setAdaptDraft(null)
-        navigate(`/recipes/${created.slug}`)
+        navigate(`/recipes/${created.id}`)
       },
     })
   }
@@ -279,9 +279,9 @@ export function RecipeDetailPage() {
         {backLink}
         <AdaptRecipePanel
           parsed={parsed}
-          onComplete={(newSlug) => {
+          onComplete={(newId) => {
             setMode('view')
-            navigate(`/recipes/${newSlug}`)
+            navigate(`/recipes/${newId}`)
           }}
           onEdit={(draft) => {
             setAdaptDraft(draft)

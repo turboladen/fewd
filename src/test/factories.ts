@@ -28,7 +28,6 @@ export function makeRecipe(overrides: Partial<Recipe> = {}): Recipe {
   ]
   return {
     id: 'r1',
-    slug: 'pasta',
     name: 'Pasta',
     description: null,
     source: 'manual',

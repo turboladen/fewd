@@ -1087,7 +1087,7 @@ export function RecipeManager() {
       onSuccess: (recipe) => {
         toast('Recipe created')
         setViewMode('list')
-        navigate(`/recipes/${recipe.slug}`)
+        navigate(`/recipes/${recipe.id}`)
       },
     })
   }
@@ -1097,7 +1097,7 @@ export function RecipeManager() {
       onSuccess: (recipe) => {
         toast('Recipe imported')
         setViewMode('list')
-        navigate(`/recipes/${recipe.slug}`)
+        navigate(`/recipes/${recipe.id}`)
       },
     })
   }
@@ -1108,7 +1108,7 @@ export function RecipeManager() {
         queryClient.invalidateQueries({ queryKey: ['recipes'] })
         toast('Recipe imported from URL')
         setViewMode('list')
-        navigate(`/recipes/${recipe.slug}`)
+        navigate(`/recipes/${recipe.id}`)
       },
     })
   }
@@ -1118,7 +1118,7 @@ export function RecipeManager() {
       onSuccess: (recipe) => {
         toast('Recipe imported from PDF')
         setViewMode('list')
-        navigate(`/recipes/${recipe.slug}`)
+        navigate(`/recipes/${recipe.id}`)
       },
     })
   }
@@ -1232,7 +1232,7 @@ export function RecipeManager() {
                 <div className='flex items-center gap-2'>
                   {recipe.icon && <span className='text-xl'>{recipe.icon}</span>}
                   <button
-                    onClick={() => navigate(`/recipes/${recipe.slug}`)}
+                    onClick={() => navigate(`/recipes/${recipe.id}`)}
                     className='font-semibold text-lg hover:text-primary-600 text-left'
                   >
                     {recipe.name}

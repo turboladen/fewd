@@ -29,7 +29,6 @@ export interface Nutrition {
 
 export interface Recipe {
   id: string
-  slug: string
   name: string
   description: string | null
   source: string

@@ -43,12 +43,11 @@ describe('RecipeManager', () => {
     expect(vi.mocked(fetch).mock.calls.length).toBe(callsBefore)
   })
 
-  it('clicking a recipe card navigates to its detail page by slug', async () => {
+  it('clicking a recipe card navigates to its detail page', async () => {
     // Mount both routes so navigate() from the card actually resolves.
-    const pasta = makeRecipe({ id: 'r1', slug: 'pasta', name: 'Pasta' })
+    const pasta = makeRecipe({ id: 'r1', name: 'Pasta' })
     mockJson('GET', '/api/recipes', [pasta])
-    // The card now navigates by slug, so the detail fetch goes through the slug URL.
-    mockJson('GET', '/api/recipes/pasta', pasta)
+    mockJson('GET', '/api/recipes/r1', pasta)
 
     renderWithProviders(
       <Routes>

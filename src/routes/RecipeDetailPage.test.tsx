@@ -41,18 +41,6 @@ describe('RecipeDetailPage', () => {
     expect(screen.getByRole('heading', { name: 'Instructions' })).toBeInTheDocument()
   })
 
-  it('resolves a recipe from a slug-based URL', async () => {
-    // Backend accepts either a UUID or a slug on the recipes/:id_or_slug route.
-    // This test shadows that: the page URL is /recipes/pasta and the fetch fires
-    // against /api/recipes/pasta — verifying end-to-end slug resolution.
-    const pasta = makeRecipe({ id: 'r1', slug: 'pasta', name: 'Pasta' })
-    mockJson('GET', '/api/recipes/pasta', pasta)
-
-    renderDetail('/recipes/pasta')
-
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Pasta' })).toBeInTheDocument())
-  })
-
   it('toggling favorite POSTs and invalidates the recipes cache', async () => {
     const pasta = makeRecipe({ id: 'r1', name: 'Pasta', is_favorite: false })
     mockJson('GET', '/api/recipes/r1', pasta)
