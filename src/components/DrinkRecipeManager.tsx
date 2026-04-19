@@ -1,52 +1,35 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   useCreateDrinkRecipe,
-  useDeleteDrinkRecipe,
   useDrinkRecipes,
   useImportDrinkRecipeFromUrl,
   useToggleDrinkFavorite,
   useUpdateDrinkRecipe,
 } from '../hooks/useDrinkRecipes'
-import type {
-  CreateDrinkRecipeDto,
-  DrinkRecipeFormData,
-  UpdateDrinkRecipeDto,
-} from '../types/drinkRecipe'
+import type { CreateDrinkRecipeDto, DrinkRecipeFormData } from '../types/drinkRecipe'
 import { emptyDrinkRecipeForm, parseDrinkRecipe } from '../types/drinkRecipe'
-import { formatAmount } from '../types/recipe'
 import { DrinkRecipeForm } from './DrinkRecipeForm'
 import { EmptyState } from './EmptyState'
-import {
-  IconChevronDown,
-  IconChevronRight,
-  IconEdit,
-  IconPlus,
-  IconSearch,
-  IconStar,
-  IconStarFilled,
-  IconTrash,
-} from './Icon'
+import { IconPlus, IconSearch, IconStar, IconStarFilled } from './Icon'
 import { StarRating } from './StarRating'
 import { useToast } from './Toast'
 
-export function DrinkRecipeManager({ onSwitchToSuggest }: { onSwitchToSuggest: () => void }) {
+export function DrinkRecipeManager() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const { data: drinkRecipes, isLoading, error } = useDrinkRecipes()
   const createMutation = useCreateDrinkRecipe()
   const updateMutation = useUpdateDrinkRecipe()
-  const deleteMutation = useDeleteDrinkRecipe()
   const toggleFavMutation = useToggleDrinkFavorite()
   const importUrlMutation = useImportDrinkRecipeFromUrl()
   const { toast } = useToast()
 
   const [viewMode, setViewMode] = useState<'list' | 'add' | 'import'>('list')
   const [importUrl, setImportUrl] = useState('')
-  const [editingId, setEditingId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [highlightId, setHighlightId] = useState<string | null>(null)
-  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
   const highlightRef = useRef<HTMLDivElement>(null)
 
   // Scroll to and highlight a newly imported recipe
@@ -58,20 +41,16 @@ export function DrinkRecipeManager({ onSwitchToSuggest }: { onSwitchToSuggest: (
     }
   }, [highlightId, drinkRecipes])
 
-  // Escape key to close add/edit mode
+  // Escape key to close add/import mode
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (editingId) {
-          setEditingId(null)
-        } else if (viewMode === 'add' || viewMode === 'import') {
-          setViewMode('list')
-        }
+      if (e.key === 'Escape' && (viewMode === 'add' || viewMode === 'import')) {
+        setViewMode('list')
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [editingId, viewMode])
+  }, [viewMode])
 
   const handleCreate = (formData: DrinkRecipeFormData) => {
     const dto: CreateDrinkRecipeDto = {
@@ -90,42 +69,10 @@ export function DrinkRecipeManager({ onSwitchToSuggest }: { onSwitchToSuggest: (
       is_non_alcoholic: formData.is_non_alcoholic,
     }
     createMutation.mutate(dto, {
-      onSuccess: () => {
+      onSuccess: (recipe) => {
         setViewMode('list')
         toast('Drink recipe added')
-      },
-    })
-  }
-
-  const handleUpdate = (formData: DrinkRecipeFormData) => {
-    if (!editingId) return
-    const dto: UpdateDrinkRecipeDto = {
-      name: formData.name,
-      servings: formData.servings,
-      instructions: formData.instructions,
-      ingredients: formData.ingredients,
-      technique: formData.technique || undefined,
-      glassware: formData.glassware || undefined,
-      garnish: formData.garnish || undefined,
-      tags: formData.tags,
-      description: formData.description || undefined,
-      notes: formData.notes || undefined,
-      icon: formData.icon || undefined,
-      is_non_alcoholic: formData.is_non_alcoholic,
-    }
-    updateMutation.mutate({ id: editingId, data: dto }, {
-      onSuccess: () => {
-        setEditingId(null)
-        toast('Drink recipe updated')
-      },
-    })
-  }
-
-  const handleDelete = (id: string) => {
-    deleteMutation.mutate(id, {
-      onSuccess: () => {
-        setConfirmingDeleteId(null)
-        toast('Drink recipe deleted')
+        navigate(`/cocktails/recipes/${recipe.id}`)
       },
     })
   }
@@ -141,7 +88,6 @@ export function DrinkRecipeManager({ onSwitchToSuggest }: { onSwitchToSuggest: (
         queryClient.invalidateQueries({ queryKey: ['drink-recipes'] })
         toast(`Imported "${recipe.name}"`)
         setImportUrl('')
-        setExpandedId(recipe.id)
         setHighlightId(recipe.id)
         setViewMode('list')
       },
@@ -150,11 +96,6 @@ export function DrinkRecipeManager({ onSwitchToSuggest }: { onSwitchToSuggest: (
 
   const handleRate = (id: string, rating: number) => {
     updateMutation.mutate({ id, data: { rating } })
-  }
-
-  const startEdit = (recipeId: string) => {
-    setEditingId(recipeId)
-    setExpandedId(null)
   }
 
   if (isLoading) {
@@ -244,44 +185,6 @@ export function DrinkRecipeManager({ onSwitchToSuggest }: { onSwitchToSuggest: (
     )
   }
 
-  // --- Edit mode ---
-  if (editingId) {
-    const recipe = drinkRecipes?.find((r) => r.id === editingId)
-    if (!recipe) {
-      setEditingId(null)
-      return null
-    }
-    const parsed = parseDrinkRecipe(recipe)
-    const initialData: DrinkRecipeFormData = {
-      name: recipe.name,
-      description: recipe.description || '',
-      icon: recipe.icon || '',
-      servings: recipe.servings,
-      instructions: recipe.instructions,
-      ingredients: parsed.ingredients,
-      technique: recipe.technique || '',
-      glassware: recipe.glassware || '',
-      garnish: recipe.garnish || '',
-      tags: parsed.tags,
-      notes: recipe.notes || '',
-      is_non_alcoholic: recipe.is_non_alcoholic,
-    }
-
-    return (
-      <div className='p-6'>
-        <h2 className='text-lg font-semibold text-stone-900 mb-4'>Edit: {recipe.name}</h2>
-        <div className='card p-4 animate-slide-up'>
-          <DrinkRecipeForm
-            initialData={initialData}
-            onSubmit={handleUpdate}
-            onCancel={() => setEditingId(null)}
-            submitLabel='Save Changes'
-          />
-        </div>
-      </div>
-    )
-  }
-
   // --- List mode ---
 
   const filtered = (drinkRecipes ?? []).filter((r) =>
@@ -307,7 +210,10 @@ export function DrinkRecipeManager({ onSwitchToSuggest }: { onSwitchToSuggest: (
           emoji='🍹'
           title='No drink recipes yet'
           description='Add your own recipes or use the Suggester to discover new cocktails.'
-          action={{ label: 'Go to Suggester', onClick: onSwitchToSuggest }}
+          action={{
+            label: 'Go to Suggester',
+            onClick: () => navigate('/cocktails/suggest'),
+          }}
         />
       </div>
     )
@@ -347,8 +253,6 @@ export function DrinkRecipeManager({ onSwitchToSuggest }: { onSwitchToSuggest: (
       <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
         {filtered.map((recipe) => {
           const parsed = parseDrinkRecipe(recipe)
-          const isExpanded = expandedId === recipe.id
-
           const isHighlighted = highlightId === recipe.id
 
           return (
@@ -360,9 +264,9 @@ export function DrinkRecipeManager({ onSwitchToSuggest }: { onSwitchToSuggest: (
               }`}
             >
               <div className='flex items-start justify-between'>
-                <button
-                  onClick={() => setExpandedId(isExpanded ? null : recipe.id)}
-                  className='flex items-center gap-2 text-left flex-1 min-w-0'
+                <Link
+                  to={`/cocktails/recipes/${recipe.id}`}
+                  className='flex items-center gap-2 text-left flex-1 min-w-0 hover:text-primary-600'
                 >
                   <span className='text-xl flex-shrink-0'>{recipe.icon || '🍸'}</span>
                   <div className='min-w-0'>
@@ -371,10 +275,7 @@ export function DrinkRecipeManager({ onSwitchToSuggest }: { onSwitchToSuggest: (
                       <p className='text-sm text-stone-500 line-clamp-1'>{recipe.description}</p>
                     )}
                   </div>
-                  {isExpanded
-                    ? <IconChevronDown className='w-4 h-4 text-stone-400 flex-shrink-0' />
-                    : <IconChevronRight className='w-4 h-4 text-stone-400 flex-shrink-0' />}
-                </button>
+                </Link>
 
                 <div className='flex items-center gap-2 flex-shrink-0 ml-2'>
                   <button
@@ -407,102 +308,6 @@ export function DrinkRecipeManager({ onSwitchToSuggest }: { onSwitchToSuggest: (
                   size='sm'
                 />
               </div>
-
-              {/* Expanded details */}
-              {isExpanded && (
-                <div className='mt-4 pt-4 border-t border-stone-200 space-y-3 animate-fade-in'>
-                  {/* Ingredients */}
-                  <div>
-                    <h4 className='text-sm font-semibold text-stone-700 mb-1'>Ingredients</h4>
-                    <ul className='text-sm text-stone-600 space-y-0.5'>
-                      {parsed.ingredients.map((ing, i) => (
-                        <li key={i}>
-                          {formatAmount(ing.amount)} {ing.unit} {ing.name}
-                          {ing.notes && <span className='text-stone-400'>({ing.notes})</span>}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  {/* Instructions */}
-                  <div>
-                    <h4 className='text-sm font-semibold text-stone-700 mb-1'>Instructions</h4>
-                    <p className='text-sm text-stone-600 whitespace-pre-line'>
-                      {recipe.instructions}
-                    </p>
-                  </div>
-
-                  {/* Garnish */}
-                  {recipe.garnish && (
-                    <p className='text-sm'>
-                      <span className='font-semibold text-stone-700'>Garnish:</span>{' '}
-                      <span className='text-stone-600'>{recipe.garnish}</span>
-                    </p>
-                  )}
-
-                  {/* Source URL */}
-                  {recipe.source_url && (
-                    <p className='text-sm text-stone-500'>
-                      Source:{' '}
-                      <a
-                        href={recipe.source_url}
-                        target='_blank'
-                        rel='noopener noreferrer'
-                        className='text-primary-600 hover:underline'
-                      >
-                        {(() => {
-                          try {
-                            return new URL(recipe.source_url).hostname.replace(/^www\./, '')
-                          } catch {
-                            return recipe.source_url
-                          }
-                        })()}
-                      </a>
-                    </p>
-                  )}
-
-                  {/* Notes */}
-                  {recipe.notes && <p className='text-sm text-stone-500 italic'>{recipe.notes}</p>}
-
-                  {/* Actions */}
-                  <div className='flex gap-2 pt-2'>
-                    <button
-                      onClick={() => startEdit(recipe.id)}
-                      className='btn-xs btn-outline'
-                    >
-                      <IconEdit className='w-3 h-3' />
-                      Edit
-                    </button>
-                    {confirmingDeleteId === recipe.id
-                      ? (
-                        <span className='flex gap-2 items-center text-sm'>
-                          <span className='text-red-600'>Delete?</span>
-                          <button
-                            onClick={() => handleDelete(recipe.id)}
-                            className='text-red-700 font-semibold hover:underline'
-                          >
-                            Yes
-                          </button>
-                          <button
-                            onClick={() => setConfirmingDeleteId(null)}
-                            className='text-stone-500 hover:underline'
-                          >
-                            No
-                          </button>
-                        </span>
-                      )
-                      : (
-                        <button
-                          onClick={() => setConfirmingDeleteId(recipe.id)}
-                          className='btn-xs btn-danger'
-                        >
-                          <IconTrash className='w-3 h-3' />
-                          Delete
-                        </button>
-                      )}
-                  </div>
-                </div>
-              )}
             </div>
           )
         })}

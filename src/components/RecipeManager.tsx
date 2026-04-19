@@ -1,8 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   useCreateRecipe,
-  useDeleteRecipe,
   useEnhanceInstructions,
   useImportRecipe,
   useImportRecipeFromFile,
@@ -10,7 +10,6 @@ import {
   usePreviewScaleRecipe,
   useRecipes,
   useToggleFavorite,
-  useUpdateRecipe,
 } from '../hooks/useRecipes'
 import type {
   CreateRecipeDto,
@@ -19,10 +18,8 @@ import type {
   PortionSize,
   ScaleResult,
   TimeValue,
-  UpdateRecipeDto,
 } from '../types/recipe'
 import { formatAmount, formatServings, formatTime, parseRecipe } from '../types/recipe'
-import { AdaptRecipePanel } from './AdaptRecipePanel'
 import { EmptyState } from './EmptyState'
 import {
   IconArrowRight,
@@ -93,7 +90,7 @@ function TimeInput({
 
 // --- Form data ---
 
-interface RecipeFormData {
+export interface RecipeFormData {
   name: string
   description: string
   prep_time?: TimeValue
@@ -121,7 +118,7 @@ const emptyForm: RecipeFormData = {
 
 // --- Recipe Form ---
 
-function RecipeForm({
+export function RecipeForm({
   initialData,
   onSubmit,
   onCancel,
@@ -554,7 +551,7 @@ function ImportRecipeForm({
 
 // --- Scale Recipe Panel ---
 
-function ScaleRecipePanel({
+export function ScaleRecipePanel({
   parsed,
   onSaveAsNew,
   onUpdateInPlace,
@@ -766,7 +763,7 @@ function EnhancedInstructions({ text }: { text: string }) {
 
 // --- Recipe Detail View ---
 
-function RecipeDetail({
+export function RecipeDetail({
   parsed,
   parentName,
   onEdit,
@@ -1044,11 +1041,10 @@ function RecipeDetail({
 
 export function RecipeManager() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const { toast } = useToast()
   const { data: recipes, isLoading, error } = useRecipes()
   const createMutation = useCreateRecipe()
-  const updateMutation = useUpdateRecipe()
-  const deleteMutation = useDeleteRecipe()
   const toggleFavoriteMutation = useToggleFavorite()
   const importMutation = useImportRecipe()
   const importUrlMutation = useImportRecipeFromUrl()
@@ -1056,36 +1052,16 @@ export function RecipeManager() {
 
   const [searchQuery, setSearchQuery] = useState('')
   const [viewMode, setViewMode] = useState<'list' | 'add' | 'import'>('list')
-  const [viewingId, setViewingId] = useState<string | null>(null)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [scalingId, setScalingId] = useState<string | null>(null)
-  const [adaptingId, setAdaptingId] = useState<string | null>(null)
-  const [adaptDraft, setAdaptDraft] = useState<CreateRecipeDto | null>(null)
-  const [scaleError, setScaleError] = useState<string | null>(null)
-  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (adaptingId) {
-          setAdaptingId(null)
-          setAdaptDraft(null)
-        } else if (scalingId) {
-          setScalingId(null)
-        } else if (editingId) {
-          setEditingId(null)
-          setAdaptDraft(null)
-        } else if (viewingId) {
-          setViewingId(null)
-          setConfirmingDeleteId(null)
-        } else if (viewMode !== 'list') {
-          setViewMode('list')
-        }
+      if (e.key === 'Escape' && viewMode !== 'list') {
+        setViewMode('list')
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [adaptingId, scalingId, editingId, viewingId, viewMode])
+  }, [viewMode])
 
   const filteredRecipes = recipes?.filter((r) =>
     r.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -1108,140 +1084,41 @@ export function RecipeManager() {
       icon: formData.icon || undefined,
     }
     createMutation.mutate(dto, {
-      onSuccess: () => {
+      onSuccess: (recipe) => {
         toast('Recipe created')
         setViewMode('list')
-      },
-    })
-  }
-
-  const handleUpdate = (id: string, formData: RecipeFormData) => {
-    const dto: UpdateRecipeDto = {
-      name: formData.name,
-      servings: formData.servings,
-      portion_size: formData.portion_size,
-      instructions: formData.instructions,
-      ingredients: formData.ingredients,
-      tags: formData.tags,
-      description: formData.description || undefined,
-      prep_time: formData.prep_time,
-      cook_time: formData.cook_time,
-      total_time: formData.total_time,
-      notes: formData.notes || undefined,
-      icon: formData.icon || undefined,
-    }
-    updateMutation.mutate({ id, data: dto }, {
-      onSuccess: () => {
-        toast('Recipe updated')
-        setEditingId(null)
-      },
-    })
-  }
-
-  const handleDelete = (id: string) => {
-    deleteMutation.mutate(id, {
-      onSuccess: () => {
-        toast('Recipe deleted')
-        setConfirmingDeleteId(null)
+        navigate(`/recipes/${recipe.id}`)
       },
     })
   }
 
   const handleImport = (markdown: string) => {
     importMutation.mutate({ markdown }, {
-      onSuccess: () => {
+      onSuccess: (recipe) => {
         toast('Recipe imported')
         setViewMode('list')
+        navigate(`/recipes/${recipe.id}`)
       },
     })
   }
 
   const handleImportFromUrl = (url: string) => {
     importUrlMutation.mutate({ url }, {
-      onSuccess: () => {
+      onSuccess: (recipe) => {
         queryClient.invalidateQueries({ queryKey: ['recipes'] })
         toast('Recipe imported from URL')
         setViewMode('list')
+        navigate(`/recipes/${recipe.id}`)
       },
     })
   }
 
   const handleImportFromFile = (file: File) => {
     importFileMutation.mutate(file, {
-      onSuccess: () => {
+      onSuccess: (recipe) => {
         toast('Recipe imported from PDF')
         setViewMode('list')
-      },
-    })
-  }
-
-  const handleScaleSaveAsNew = (
-    recipeId: string,
-    ingredients: Ingredient[],
-    servings: number,
-  ) => {
-    const source = recipes?.find((r) => r.id === recipeId)
-    if (!source) return
-    const parsed = parseRecipe(source)
-    const dto: CreateRecipeDto = {
-      name: `${source.name} (${servings} servings)`,
-      source: 'scaled',
-      parent_recipe_id: recipeId,
-      servings,
-      portion_size: parsed.portion_size ?? undefined,
-      instructions: source.instructions,
-      ingredients,
-      tags: parsed.tags,
-      description: source.description || undefined,
-      prep_time: parsed.prep_time ?? undefined,
-      cook_time: parsed.cook_time ?? undefined,
-      total_time: parsed.total_time ?? undefined,
-      notes: source.notes || undefined,
-      icon: source.icon || undefined,
-    }
-    setScaleError(null)
-    createMutation.mutate(dto, {
-      onSuccess: () => setScalingId(null),
-      onError: (err) => setScaleError(String(err)),
-    })
-  }
-
-  const handleScaleUpdateInPlace = (
-    recipeId: string,
-    ingredients: Ingredient[],
-    servings: number,
-  ) => {
-    const dto: UpdateRecipeDto = { ingredients, servings }
-    setScaleError(null)
-    updateMutation.mutate({ id: recipeId, data: dto }, {
-      onSuccess: () => setScalingId(null),
-      onError: (err) => setScaleError(String(err)),
-    })
-  }
-
-  const handleAdaptDraftSave = (formData: RecipeFormData) => {
-    if (!adaptDraft) return
-    const dto: CreateRecipeDto = {
-      name: formData.name,
-      source: adaptDraft.source,
-      parent_recipe_id: adaptDraft.parent_recipe_id,
-      servings: formData.servings,
-      portion_size: formData.portion_size,
-      instructions: formData.instructions,
-      ingredients: formData.ingredients,
-      tags: formData.tags,
-      description: formData.description || undefined,
-      prep_time: formData.prep_time,
-      cook_time: formData.cook_time,
-      total_time: formData.total_time,
-      notes: formData.notes || undefined,
-      icon: formData.icon || undefined,
-    }
-    createMutation.mutate(dto, {
-      onSuccess: (recipe) => {
-        setEditingId(null)
-        setAdaptDraft(null)
-        setViewingId(recipe.id)
+        navigate(`/recipes/${recipe.id}`)
       },
     })
   }
@@ -1346,147 +1223,6 @@ export function RecipeManager() {
         {filteredRecipes?.map((recipe) => {
           const parsed = parseRecipe(recipe)
 
-          if (editingId === recipe.id) {
-            const isAdaptEdit = !!adaptDraft
-            const formInitial = isAdaptEdit
-              ? {
-                name: adaptDraft.name,
-                description: adaptDraft.description || '',
-                prep_time: adaptDraft.prep_time,
-                cook_time: adaptDraft.cook_time,
-                total_time: adaptDraft.total_time,
-                servings: adaptDraft.servings,
-                portion_size: adaptDraft.portion_size,
-                instructions: adaptDraft.instructions,
-                ingredients: adaptDraft.ingredients,
-                tags: adaptDraft.tags,
-                notes: adaptDraft.notes || '',
-                icon: adaptDraft.icon || '',
-              }
-              : {
-                name: recipe.name,
-                description: recipe.description || '',
-                prep_time: parsed.prep_time ?? undefined,
-                cook_time: parsed.cook_time ?? undefined,
-                total_time: parsed.total_time ?? undefined,
-                servings: recipe.servings,
-                portion_size: parsed.portion_size ?? undefined,
-                instructions: recipe.instructions,
-                ingredients: parsed.ingredients,
-                tags: parsed.tags,
-                notes: recipe.notes || '',
-                icon: recipe.icon || '',
-              }
-            return (
-              <div
-                key={recipe.id}
-                className={`md:col-span-2 animate-slide-up ${
-                  isAdaptEdit
-                    ? 'panel-secondary'
-                    : 'panel-primary'
-                }`}
-              >
-                <h3 className='font-semibold text-lg mb-3'>
-                  {isAdaptEdit ? 'Edit Adapted Recipe' : `Edit ${recipe.name}`}
-                </h3>
-                <RecipeForm
-                  initialData={formInitial}
-                  onSubmit={isAdaptEdit
-                    ? handleAdaptDraftSave
-                    : (data) => handleUpdate(recipe.id, data)}
-                  onCancel={() => {
-                    setEditingId(null)
-                    setAdaptDraft(null)
-                  }}
-                  submitLabel={isAdaptEdit ? 'Save Adapted Recipe' : 'Save Changes'}
-                />
-                {(isAdaptEdit ? createMutation.error : updateMutation.error) && (
-                  <div className='mt-2 panel-error text-red-700 text-sm'>
-                    {String(isAdaptEdit ? createMutation.error : updateMutation.error)}
-                  </div>
-                )}
-              </div>
-            )
-          }
-
-          if (scalingId === recipe.id) {
-            return (
-              <div key={recipe.id} className='md:col-span-2'>
-                <ScaleRecipePanel
-                  parsed={parsed}
-                  onSaveAsNew={(ingredients, servings) =>
-                    handleScaleSaveAsNew(recipe.id, ingredients, servings)}
-                  onUpdateInPlace={(ingredients, servings) =>
-                    handleScaleUpdateInPlace(recipe.id, ingredients, servings)}
-                  onCancel={() => {
-                    setScalingId(null)
-                    setScaleError(null)
-                  }}
-                  error={scaleError ?? undefined}
-                />
-              </div>
-            )
-          }
-
-          if (adaptingId === recipe.id) {
-            return (
-              <div key={recipe.id} className='md:col-span-2'>
-                <AdaptRecipePanel
-                  parsed={parsed}
-                  onComplete={(newId) => {
-                    setAdaptingId(null)
-                    setViewingId(newId)
-                  }}
-                  onEdit={(draft) => {
-                    setAdaptDraft(draft)
-                    setAdaptingId(null)
-                    setEditingId(recipe.id)
-                  }}
-                  onCancel={() => setAdaptingId(null)}
-                />
-              </div>
-            )
-          }
-
-          if (viewingId === recipe.id) {
-            const parentName = parsed.parent_recipe_id
-              ? recipes?.find((r) => r.id === parsed.parent_recipe_id)?.name ?? null
-              : null
-            return (
-              <RecipeDetail
-                key={recipe.id}
-                parsed={parsed}
-                parentName={parentName}
-                onEdit={() => {
-                  setViewingId(null)
-                  setEditingId(recipe.id)
-                }}
-                onScale={() => {
-                  setViewingId(null)
-                  setScalingId(recipe.id)
-                }}
-                onAdapt={() => {
-                  setViewingId(null)
-                  setAdaptingId(recipe.id)
-                }}
-                onDelete={() => setConfirmingDeleteId(recipe.id)}
-                onToggleFavorite={() => toggleFavoriteMutation.mutate(recipe.id)}
-                onRatingChange={(rating) =>
-                  updateMutation.mutate({ id: recipe.id, data: { rating } })}
-                onClose={() => {
-                  setViewingId(null)
-                  setConfirmingDeleteId(null)
-                }}
-                confirmingDelete={confirmingDeleteId === recipe.id}
-                onConfirmDelete={() => {
-                  handleDelete(recipe.id)
-                  setViewingId(null)
-                }}
-                onCancelDelete={() => setConfirmingDeleteId(null)}
-              />
-            )
-          }
-
           return (
             <div
               key={recipe.id}
@@ -1496,7 +1232,7 @@ export function RecipeManager() {
                 <div className='flex items-center gap-2'>
                   {recipe.icon && <span className='text-xl'>{recipe.icon}</span>}
                   <button
-                    onClick={() => setViewingId(recipe.id)}
+                    onClick={() => navigate(`/recipes/${recipe.id}`)}
                     className='font-semibold text-lg hover:text-primary-600 text-left'
                   >
                     {recipe.name}

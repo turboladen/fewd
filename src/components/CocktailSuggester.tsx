@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useBarItems } from '../hooks/useBarItems'
 import { useAiSuggestCocktails } from '../hooks/useCocktailSuggestions'
 import { useCreateDrinkRecipe, useDrinkRecipes } from '../hooks/useDrinkRecipes'
@@ -136,7 +137,7 @@ function computeAge(birthdate: string): number {
   )
 }
 
-export function CocktailSuggester({ onSwitchToBar }: { onSwitchToBar: () => void }) {
+export function CocktailSuggester() {
   const { data: barItems, isLoading: barLoading } = useBarItems()
   const { data: people, isLoading: peopleLoading } = usePeople()
   const apiKeyQuery = useSetting('anthropic_api_key')
@@ -727,9 +728,9 @@ export function CocktailSuggester({ onSwitchToBar }: { onSwitchToBar: () => void
               <p className='text-sm text-stone-500 mb-2'>
                 No bar items yet. Add your ingredients first.
               </p>
-              <button onClick={onSwitchToBar} className='btn-sm btn-primary'>
+              <Link to='/cocktails/bar' className='btn-sm btn-primary'>
                 Set Up My Bar
-              </button>
+              </Link>
             </div>
           )
           : (
