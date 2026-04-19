@@ -21,7 +21,16 @@ export function installFetchMock(): void {
       ? input.toString()
       : input.url
     const method = (init?.method ?? 'GET').toUpperCase()
-    const route = routes.find(r => r.method === method && r.url === url)
+    // Scan from the end so later registrations shadow earlier ones —
+    // lets tests stage a post-mutation refetch with a different body.
+    let route: Route | undefined
+    for (let i = routes.length - 1; i >= 0; i--) {
+      const r = routes[i]
+      if (r.method === method && r.url === url) {
+        route = r
+        break
+      }
+    }
     if (!route) {
       const known = routes.map(r => `${r.method} ${r.url}`).join(', ') || '(none)'
       throw new Error(`No mock for ${method} ${url}. Registered: ${known}`)
