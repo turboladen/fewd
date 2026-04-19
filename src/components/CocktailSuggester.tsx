@@ -761,7 +761,7 @@ export function CocktailSuggester() {
                       return (
                         <div
                           key={cat.value}
-                          className='rounded-xl border border-stone-200 bg-white p-3 space-y-2'
+                          className='card p-3 space-y-2'
                         >
                           <div className='flex items-center gap-1.5'>
                             <span className='text-base'>{cat.emoji}</span>
