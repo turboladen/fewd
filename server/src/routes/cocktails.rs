@@ -87,9 +87,9 @@ pub async fn list_drink_recipes(
 
 pub async fn get_drink_recipe(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id_or_slug): Path<String>,
 ) -> Result<Json<crate::entities::drink_recipe::Model>, AppError> {
-    DrinkRecipeService::get_by_id(&state.db, id)
+    DrinkRecipeService::get_by_id_or_slug(&state.db, id_or_slug)
         .await
         .map_err(AppError::from)?
         .map(Json)

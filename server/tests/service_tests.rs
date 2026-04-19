@@ -231,6 +231,75 @@ async fn recipe_create_and_get_all() {
 }
 
 #[tokio::test]
+async fn recipe_create_derives_slug_from_name() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pizza Margherita"))
+        .await
+        .unwrap();
+    assert_eq!(recipe.slug, "pizza-margherita");
+}
+
+#[tokio::test]
+async fn recipe_slug_collision_gets_suffix() {
+    let db = setup_db().await;
+    let first = RecipeService::create(&db, test_recipe_dto("Pizza"))
+        .await
+        .unwrap();
+    let second = RecipeService::create(&db, test_recipe_dto("Pizza"))
+        .await
+        .unwrap();
+    let third = RecipeService::create(&db, test_recipe_dto("Pizza"))
+        .await
+        .unwrap();
+    assert_eq!(first.slug, "pizza");
+    assert_eq!(second.slug, "pizza-2");
+    assert_eq!(third.slug, "pizza-3");
+}
+
+#[tokio::test]
+async fn recipe_slug_survives_rename() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Untitled Recipe"))
+        .await
+        .unwrap();
+    assert_eq!(recipe.slug, "untitled-recipe");
+
+    let renamed = RecipeService::update(
+        &db,
+        recipe.id.clone(),
+        UpdateRecipeDto {
+            name: Some("Grandma's Bolognese".to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(renamed.name, "Grandma's Bolognese");
+    // Slug is pinned at creation — renames do not rewrite it.
+    assert_eq!(renamed.slug, "untitled-recipe");
+}
+
+#[tokio::test]
+async fn recipe_get_by_id_or_slug_resolves_both() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+
+    let by_id = RecipeService::get_by_id_or_slug(&db, recipe.id.clone())
+        .await
+        .unwrap()
+        .expect("found by UUID");
+    let by_slug = RecipeService::get_by_id_or_slug(&db, recipe.slug.clone())
+        .await
+        .unwrap()
+        .expect("found by slug");
+
+    assert_eq!(by_id.id, recipe.id);
+    assert_eq!(by_slug.id, recipe.id);
+}
+
+#[tokio::test]
 async fn recipe_toggle_favorite() {
     let db = setup_db().await;
     let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))

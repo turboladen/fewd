@@ -79,7 +79,7 @@ pub struct CreateRecipeDto {
     pub icon: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct UpdateRecipeDto {
     pub name: Option<String>,
     pub description: Option<String>,
