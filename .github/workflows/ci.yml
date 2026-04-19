@@ -119,7 +119,9 @@ jobs:
         run: bun run lint
 
       - name: Run tests
-        run: bun test
+        # `bun test` uses Bun's built-in runner (no jsdom); `bun run test`
+        # invokes the npm script which runs vitest with the jsdom env.
+        run: bun run test
 
   typos-check:
     name: Typos Check
