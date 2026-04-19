@@ -21,20 +21,22 @@ impl RecipeService {
         Recipe::find_by_id(id).one(db).await
     }
 
-    /// Look up a recipe by its UUID or its slug. UUID format wins (direct primary-key hit);
-    /// anything else falls through to a slug lookup.
+    /// Look up a recipe by UUID or slug. UUID-shaped input hits the primary key first,
+    /// but if no row matches (e.g., a slug happens to parse as a UUID) we fall through to
+    /// the slug lookup so the record is still reachable.
     pub async fn get_by_id_or_slug(
         db: &DatabaseConnection,
         id_or_slug: String,
     ) -> Result<Option<recipe::Model>, DbErr> {
         if uuid::Uuid::parse_str(&id_or_slug).is_ok() {
-            Recipe::find_by_id(id_or_slug).one(db).await
-        } else {
-            Recipe::find()
-                .filter(recipe::Column::Slug.eq(id_or_slug))
-                .one(db)
-                .await
+            if let Some(r) = Recipe::find_by_id(id_or_slug.clone()).one(db).await? {
+                return Ok(Some(r));
+            }
         }
+        Recipe::find()
+            .filter(recipe::Column::Slug.eq(id_or_slug))
+            .one(db)
+            .await
     }
 
     pub async fn create(

@@ -37,7 +37,9 @@ impl MigrationTrait for Migration {
 }
 
 /// Adds a nullable `slug` column so the migration can run against a populated DB.
-/// We backfill immediately after, then enforce NOT NULL + UNIQUE via the index.
+/// Backfill happens next, then a unique index guards against duplicates. The column
+/// stays nullable at the SQL level (SQLite can't promote to NOT NULL via ALTER); the
+/// application enforces non-null at write time through the SeaORM entity's `slug: String`.
 async fn add_slug_column<T, C>(manager: &SchemaManager<'_>, table: T, slug: C) -> Result<(), DbErr>
 where
     T: IntoIden + 'static,
@@ -54,7 +56,7 @@ where
 }
 
 /// Backfill slugs from `name` on the given table, suffixing collisions with `-2`, `-3`, ...
-/// Then enforce uniqueness via a unique index (SQLite can't add NOT NULL + UNIQUE with ALTER).
+/// Then create a UNIQUE index so future writes can't introduce duplicates.
 async fn backfill_slugs(manager: &SchemaManager<'_>, table: &str) -> Result<(), DbErr> {
     let db = manager.get_connection();
     let backend = manager.get_database_backend();
