@@ -1,9 +1,9 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../lib/api'
+import { makePerson } from '../test/factories'
 import { installFetchMock, mockJson, resetFetchMock } from '../test/fetchMock'
 import { createQueryWrapper } from '../test/queryClient'
-import type { Person } from '../types/person'
 import {
   useCreatePerson,
   useDeletePerson,
@@ -11,24 +11,6 @@ import {
   usePerson,
   useUpdatePerson,
 } from './usePeople'
-
-function makePerson(overrides: Partial<Person> = {}): Person {
-  return {
-    id: 'p1',
-    name: 'Alice',
-    birthdate: '1990-01-01',
-    dietary_goals: null,
-    dislikes: '[]',
-    favorites: '[]',
-    notes: null,
-    drink_preferences: null,
-    drink_dislikes: null,
-    is_active: true,
-    created_at: '2026-01-01T00:00:00Z',
-    updated_at: '2026-01-01T00:00:00Z',
-    ...overrides,
-  }
-}
 
 beforeEach(() => installFetchMock())
 afterEach(() => resetFetchMock())
