@@ -373,7 +373,7 @@ cd server && cargo build && cd ..
 bun run dev:full
 
 # Or run separately:
-bun run dev:server   # Axum backend on port 3001
+bun run dev:server   # Axum backend on port 3000
 bun run dev          # Vite frontend on port 5173
 ```
 
