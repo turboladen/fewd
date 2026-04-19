@@ -35,6 +35,9 @@ export interface Recipe {
   source: string
   source_url: string | null
   parent_recipe_id: string | null
+  /** Resolved server-side on single-recipe GETs when parent_recipe_id is set. */
+  parent_name?: string | null
+  parent_slug?: string | null
   prep_time: string | null
   cook_time: string | null
   total_time: string | null

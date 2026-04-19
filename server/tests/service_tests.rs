@@ -280,81 +280,22 @@ async fn recipe_slug_survives_rename() {
 }
 
 #[tokio::test]
-async fn recipe_get_by_id_or_slug_resolves_both() {
+async fn recipe_get_by_slug() {
     let db = setup_db().await;
     let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
         .await
         .unwrap();
 
-    let by_id = RecipeService::get_by_id_or_slug(&db, recipe.id.clone())
-        .await
-        .unwrap()
-        .expect("found by UUID");
-    let by_slug = RecipeService::get_by_id_or_slug(&db, recipe.slug.clone())
+    let found = RecipeService::get_by_slug(&db, recipe.slug.clone())
         .await
         .unwrap()
         .expect("found by slug");
+    assert_eq!(found.id, recipe.id);
 
-    assert_eq!(by_id.id, recipe.id);
-    assert_eq!(by_slug.id, recipe.id);
-}
-
-#[tokio::test]
-async fn recipe_uuid_shaped_slug_is_still_resolvable() {
-    // If a recipe name happens to produce a slug that parses as a UUID, we must
-    // still be able to look it up by that slug. The resolver tries UUID->id first,
-    // and on a miss falls through to a slug lookup.
-    let db = setup_db().await;
-
-    // Use an active-model insert so we can fix the slug to a UUID-shaped value
-    // without going through RecipeService::create (which would re-slugify the name).
-    use fewd_lib::entities::recipe;
-    use sea_orm::{ActiveModelTrait, Set};
-    let real_id = uuid::Uuid::new_v4().to_string();
-    let uuid_shaped_slug = "abcdef12-3456-7890-abcd-ef1234567890".to_string();
-    let now = chrono::Utc::now();
-    recipe::ActiveModel {
-        id: Set(real_id.clone()),
-        slug: Set(uuid_shaped_slug.clone()),
-        name: Set("Edge".to_string()),
-        description: Set(None),
-        source: Set("manual".to_string()),
-        source_url: Set(None),
-        parent_recipe_id: Set(None),
-        prep_time: Set(None),
-        cook_time: Set(None),
-        total_time: Set(None),
-        servings: Set(1),
-        portion_size: Set(None),
-        instructions: Set("x".to_string()),
-        ingredients: Set("[]".to_string()),
-        nutrition_per_serving: Set(None),
-        tags: Set("[]".to_string()),
-        notes: Set(None),
-        icon: Set(None),
-        is_favorite: Set(false),
-        times_made: Set(0),
-        last_made: Set(None),
-        rating: Set(None),
-        created_at: Set(now),
-        updated_at: Set(now),
-    }
-    .insert(&db)
-    .await
-    .unwrap();
-
-    // Primary-key lookup for the real id still works.
-    let found_by_id = RecipeService::get_by_id_or_slug(&db, real_id.clone())
+    let missing = RecipeService::get_by_slug(&db, "does-not-exist".to_string())
         .await
         .unwrap();
-    assert_eq!(found_by_id.as_ref().map(|r| &r.id), Some(&real_id));
-
-    // UUID-shaped slug — UUID::parse_str accepts, find_by_id misses, fall through
-    // to slug lookup succeeds.
-    let found_by_slug = RecipeService::get_by_id_or_slug(&db, uuid_shaped_slug)
-        .await
-        .unwrap();
-    assert_eq!(found_by_slug.map(|r| r.id), Some(real_id));
+    assert!(missing.is_none());
 }
 
 #[tokio::test]

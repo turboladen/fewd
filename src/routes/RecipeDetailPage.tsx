@@ -27,7 +27,6 @@ export function RecipeDetailPage() {
   const navigate = useNavigate()
   const { toast } = useToast()
   const { data: recipe, isLoading, error } = useRecipe(id ?? '')
-  const { data: parentRecipe } = useRecipe(recipe?.parent_recipe_id ?? '')
   const createMutation = useCreateRecipe()
   const updateMutation = useUpdateRecipe()
   const deleteMutation = useDeleteRecipe()
@@ -89,7 +88,7 @@ export function RecipeDetailPage() {
   }
 
   const parsed = parseRecipe(recipe)
-  const parentName = parentRecipe?.name ?? null
+  const parentName = recipe.parent_name ?? null
 
   const handleUpdate = (formData: RecipeFormData) => {
     const dto: UpdateRecipeDto = {
