@@ -116,7 +116,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       {/* Panel */}
       <div className='relative bg-white rounded-xl shadow-lifted w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto animate-scale-in'>
         <div className='flex items-center justify-between mb-4'>
-          <h2 className='text-lg font-semibold text-stone-900'>Settings</h2>
+          <h2 className='text-xl font-semibold text-stone-900'>Settings</h2>
           <button
             onClick={onClose}
             className='text-stone-400 hover:text-stone-600 text-lg'

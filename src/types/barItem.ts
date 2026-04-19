@@ -48,7 +48,7 @@ export const BAR_ITEM_CATEGORIES: BarCategoryMeta[] = [
     value: 'mixer',
     label: 'Mixers',
     emoji: '🫧',
-    tagColor: 'bg-cyan-50 text-cyan-700 border border-cyan-200',
+    tagColor: 'bg-teal-50 text-teal-700 border border-teal-200',
   },
   {
     value: 'bitter',

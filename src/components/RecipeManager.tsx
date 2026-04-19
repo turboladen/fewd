@@ -819,7 +819,7 @@ export function RecipeDetail({
         <div>
           <div className='flex items-center gap-2'>
             {parsed.icon && <span className='text-2xl'>{parsed.icon}</span>}
-            <h2 className='text-xl font-bold'>{parsed.name}</h2>
+            <h2 className='text-xl font-semibold'>{parsed.name}</h2>
             <button
               onClick={onToggleFavorite}
               className={`text-xl ${

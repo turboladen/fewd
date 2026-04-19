@@ -33,7 +33,7 @@ export function DrinkRecipeDetail({
         <div className='flex items-center gap-2 min-w-0'>
           <span className='text-2xl flex-shrink-0'>{recipe.icon || '🍸'}</span>
           <div className='min-w-0'>
-            <h2 className='text-xl font-bold text-stone-900'>{recipe.name}</h2>
+            <h2 className='text-xl font-semibold text-stone-900'>{recipe.name}</h2>
             {recipe.description && <p className='text-sm text-stone-600'>{recipe.description}</p>}
           </div>
         </div>

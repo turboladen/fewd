@@ -141,7 +141,7 @@ export function DrinkRecipeDetailPage() {
     return (
       <div className='p-6'>
         {backLink}
-        <h2 className='text-lg font-semibold text-stone-900 mb-4'>Edit: {recipe.name}</h2>
+        <h2 className='text-xl font-semibold text-stone-900 mb-4'>Edit: {recipe.name}</h2>
         <div className='card p-4 animate-slide-up'>
           <DrinkRecipeForm
             initialData={initialData}

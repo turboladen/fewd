@@ -116,7 +116,7 @@ export function DrinkRecipeManager() {
   if (viewMode === 'add') {
     return (
       <div className='p-6'>
-        <h2 className='text-lg font-semibold text-stone-900 mb-4'>Add Drink Recipe</h2>
+        <h2 className='text-xl font-semibold text-stone-900 mb-4'>Add Drink Recipe</h2>
         <div className='card p-4 animate-slide-up'>
           <DrinkRecipeForm
             initialData={emptyDrinkRecipeForm}
@@ -133,7 +133,7 @@ export function DrinkRecipeManager() {
   if (viewMode === 'import') {
     return (
       <div className='p-6'>
-        <h2 className='text-lg font-semibold text-stone-900 mb-4'>Import Drink Recipe</h2>
+        <h2 className='text-xl font-semibold text-stone-900 mb-4'>Import Drink Recipe</h2>
         <div className='card p-4 animate-slide-up'>
           <form onSubmit={handleImportFromUrl} className='space-y-3'>
             <div>
@@ -195,7 +195,7 @@ export function DrinkRecipeManager() {
     return (
       <div className='p-6'>
         <div className='flex items-center justify-between mb-6'>
-          <h2 className='text-lg font-semibold text-stone-900'>Drink Recipes</h2>
+          <h2 className='text-xl font-semibold text-stone-900'>Drink Recipes</h2>
           <div className='flex items-center gap-2'>
             <button onClick={() => setViewMode('import')} className='btn-sm btn-outline'>
               Import
@@ -223,7 +223,7 @@ export function DrinkRecipeManager() {
     <div className='p-6'>
       {/* Header */}
       <div className='flex items-center justify-between mb-4'>
-        <h2 className='text-lg font-semibold text-stone-900'>Drink Recipes</h2>
+        <h2 className='text-xl font-semibold text-stone-900'>Drink Recipes</h2>
         <div className='flex items-center gap-2'>
           <button onClick={() => setViewMode('import')} className='btn-sm btn-outline'>
             Import
