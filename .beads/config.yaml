@@ -56,3 +56,5 @@
 sync.git-remote: "ssh://git@github.com/turboladen/fewd.git"
 dolt:
   port: 59308
+
+sync.remote: "git+ssh://git@github.com/turboladen/fewd.git"
