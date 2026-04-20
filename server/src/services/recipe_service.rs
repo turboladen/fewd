@@ -21,42 +21,75 @@ impl RecipeService {
         Recipe::find_by_id(id).one(db).await
     }
 
+    pub async fn get_by_slug(
+        db: &DatabaseConnection,
+        slug: String,
+    ) -> Result<Option<recipe::Model>, DbErr> {
+        Recipe::find()
+            .filter(recipe::Column::Slug.eq(slug))
+            .one(db)
+            .await
+    }
+
     pub async fn create(
         db: &DatabaseConnection,
         data: CreateRecipeDto,
     ) -> Result<recipe::Model, DbErr> {
         let now = chrono::Utc::now();
+        let base_slug = migration::slugify(&data.name);
 
-        let recipe = recipe::ActiveModel {
-            id: Set(uuid::Uuid::new_v4().to_string()),
-            name: Set(data.name),
-            description: Set(data.description),
-            source: Set(data.source),
-            source_url: Set(data.source_url),
-            parent_recipe_id: Set(data.parent_recipe_id),
-            prep_time: Set(data.prep_time.map(|t| to_json(&t)).transpose()?),
-            cook_time: Set(data.cook_time.map(|t| to_json(&t)).transpose()?),
-            total_time: Set(data.total_time.map(|t| to_json(&t)).transpose()?),
-            servings: Set(data.servings),
-            portion_size: Set(data.portion_size.map(|p| to_json(&p)).transpose()?),
-            instructions: Set(data.instructions),
-            ingredients: Set(to_json(&data.ingredients)?),
-            nutrition_per_serving: Set(data
-                .nutrition_per_serving
-                .map(|n| to_json(&n))
-                .transpose()?),
-            tags: Set(to_json(&data.tags)?),
-            notes: Set(data.notes),
-            icon: Set(data.icon),
-            is_favorite: Set(false),
-            times_made: Set(0),
-            last_made: Set(None),
-            rating: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-        };
+        // Serialize the JSON fields once; reuse across retries.
+        let prep_time = data.prep_time.map(|t| to_json(&t)).transpose()?;
+        let cook_time = data.cook_time.map(|t| to_json(&t)).transpose()?;
+        let total_time = data.total_time.map(|t| to_json(&t)).transpose()?;
+        let portion_size = data.portion_size.map(|p| to_json(&p)).transpose()?;
+        let ingredients = to_json(&data.ingredients)?;
+        let nutrition_per_serving = data
+            .nutrition_per_serving
+            .map(|n| to_json(&n))
+            .transpose()?;
+        let tags = to_json(&data.tags)?;
 
-        recipe.insert(db).await
+        // Let the DB's UNIQUE index arbitrate slug collisions: try the base slug,
+        // then base-2, base-3, ... incrementing on any unique-constraint violation.
+        for attempt in 1..=MAX_SLUG_ATTEMPTS {
+            let candidate_slug = migration::slug::with_suffix(&base_slug, attempt);
+            let model = recipe::ActiveModel {
+                id: Set(uuid::Uuid::new_v4().to_string()),
+                slug: Set(candidate_slug),
+                name: Set(data.name.clone()),
+                description: Set(data.description.clone()),
+                source: Set(data.source.clone()),
+                source_url: Set(data.source_url.clone()),
+                parent_recipe_id: Set(data.parent_recipe_id.clone()),
+                prep_time: Set(prep_time.clone()),
+                cook_time: Set(cook_time.clone()),
+                total_time: Set(total_time.clone()),
+                servings: Set(data.servings),
+                portion_size: Set(portion_size.clone()),
+                instructions: Set(data.instructions.clone()),
+                ingredients: Set(ingredients.clone()),
+                nutrition_per_serving: Set(nutrition_per_serving.clone()),
+                tags: Set(tags.clone()),
+                notes: Set(data.notes.clone()),
+                icon: Set(data.icon.clone()),
+                is_favorite: Set(false),
+                times_made: Set(0),
+                last_made: Set(None),
+                rating: Set(None),
+                created_at: Set(now),
+                updated_at: Set(now),
+            };
+
+            match model.insert(db).await {
+                Ok(r) => return Ok(r),
+                Err(e) if is_slug_conflict(&e) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Err(DbErr::Custom(format!(
+            "Could not find a unique recipe slug after {MAX_SLUG_ATTEMPTS} attempts"
+        )))
     }
 
     pub async fn update(
@@ -160,4 +193,15 @@ impl RecipeService {
 
         recipe.update(db).await
     }
+}
+
+/// Cap on slug-suffix retries. `recipes` has only one UNIQUE constraint (slug),
+/// so any unique violation from INSERT is a slug collision and we bump the suffix.
+const MAX_SLUG_ATTEMPTS: u32 = 1000;
+
+fn is_slug_conflict(err: &DbErr) -> bool {
+    matches!(
+        err.sql_err(),
+        Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+    )
 }

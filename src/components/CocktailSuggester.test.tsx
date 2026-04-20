@@ -40,6 +40,7 @@ function makeBarItem(overrides: Partial<BarItem> = {}): BarItem {
 function makeDrinkRecipe(overrides: Partial<DrinkRecipe> = {}): DrinkRecipe {
   return {
     id: 'd1',
+    slug: 'old-fashioned',
     name: 'Old Fashioned',
     description: 'Classic ancestral cocktail',
     source: 'manual',

@@ -35,6 +35,7 @@ import { AdaptRecipePanel } from './AdaptRecipePanel'
 
 const mockParsed: ParsedRecipe = {
   id: 'recipe-1',
+  slug: 'grilled-chicken',
   name: 'Grilled Chicken',
   description: 'A simple grilled chicken',
   source: 'manual',

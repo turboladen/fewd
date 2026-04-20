@@ -231,6 +231,97 @@ async fn recipe_create_and_get_all() {
 }
 
 #[tokio::test]
+async fn recipe_create_derives_slug_from_name() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pizza Margherita"))
+        .await
+        .unwrap();
+    assert_eq!(recipe.slug, "pizza-margherita");
+}
+
+#[tokio::test]
+async fn recipe_slug_collision_gets_suffix() {
+    let db = setup_db().await;
+    let first = RecipeService::create(&db, test_recipe_dto("Pizza"))
+        .await
+        .unwrap();
+    let second = RecipeService::create(&db, test_recipe_dto("Pizza"))
+        .await
+        .unwrap();
+    let third = RecipeService::create(&db, test_recipe_dto("Pizza"))
+        .await
+        .unwrap();
+    assert_eq!(first.slug, "pizza");
+    assert_eq!(second.slug, "pizza-2");
+    assert_eq!(third.slug, "pizza-3");
+}
+
+#[tokio::test]
+async fn recipe_slug_collision_stays_under_length_cap() {
+    // Base name that, after slugify, is already at the 80-char cap. Two creates
+    // with the same name force collision handling to truncate the base and
+    // re-append the suffix so the final slug stays ≤ 80 chars.
+    let db = setup_db().await;
+    let long_name = "a".repeat(200);
+    let first = RecipeService::create(&db, test_recipe_dto(&long_name))
+        .await
+        .unwrap();
+    let second = RecipeService::create(&db, test_recipe_dto(&long_name))
+        .await
+        .unwrap();
+    assert_eq!(first.slug.len(), 80);
+    assert!(
+        second.slug.len() <= 80,
+        "second slug was {}",
+        second.slug.len()
+    );
+    assert!(second.slug.ends_with("-2"));
+    assert_ne!(first.slug, second.slug);
+}
+
+#[tokio::test]
+async fn recipe_slug_survives_rename() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Untitled Recipe"))
+        .await
+        .unwrap();
+    assert_eq!(recipe.slug, "untitled-recipe");
+
+    let renamed = RecipeService::update(
+        &db,
+        recipe.id.clone(),
+        UpdateRecipeDto {
+            name: Some("Grandma's Bolognese".to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(renamed.name, "Grandma's Bolognese");
+    // Slug is pinned at creation — renames do not rewrite it.
+    assert_eq!(renamed.slug, "untitled-recipe");
+}
+
+#[tokio::test]
+async fn recipe_get_by_slug() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+
+    let found = RecipeService::get_by_slug(&db, recipe.slug.clone())
+        .await
+        .unwrap()
+        .expect("found by slug");
+    assert_eq!(found.id, recipe.id);
+
+    let missing = RecipeService::get_by_slug(&db, "does-not-exist".to_string())
+        .await
+        .unwrap();
+    assert!(missing.is_none());
+}
+
+#[tokio::test]
 async fn recipe_toggle_favorite() {
     let db = setup_db().await;
     let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))

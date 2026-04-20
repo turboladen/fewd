@@ -38,6 +38,7 @@ describe('formatAmount', () => {
 describe('parseRecipe', () => {
   const makeRecipe = (overrides: Partial<Recipe> = {}): Recipe => ({
     id: 'test-id',
+    slug: 'test-recipe',
     name: 'Test Recipe',
     description: null,
     source: 'manual',

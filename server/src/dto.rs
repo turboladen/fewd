@@ -79,7 +79,7 @@ pub struct CreateRecipeDto {
     pub icon: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct UpdateRecipeDto {
     pub name: Option<String>,
     pub description: Option<String>,
@@ -101,6 +101,17 @@ pub struct UpdateRecipeDto {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ImportRecipeDto {
     pub markdown: String,
+}
+
+/// Single-recipe GET response: the stored row plus the parent's display
+/// name and slug (resolved server-side) so the frontend doesn't have to
+/// do a second round-trip to render "adapted from X".
+#[derive(Debug, Serialize)]
+pub struct RecipeResponse {
+    #[serde(flatten)]
+    pub recipe: crate::entities::recipe::Model,
+    pub parent_name: Option<String>,
+    pub parent_slug: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -11,7 +11,7 @@ import { FieldToggle, PersonSummary } from './PersonFieldToggles'
 
 interface AdaptRecipePanelProps {
   parsed: ParsedRecipe
-  onComplete: (newRecipeId: string) => void
+  onComplete: (newRecipeSlug: string) => void
   onEdit: (draft: CreateRecipeDto) => void
   onCancel: () => void
 }
@@ -106,7 +106,7 @@ export function AdaptRecipePanel({
     if (!draft) return
     createMutation.mutate(draft, {
       onSuccess: (recipe) => {
-        onComplete(recipe.id)
+        onComplete(recipe.slug)
       },
     })
   }

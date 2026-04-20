@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::dto::{
     AdaptRecipeDto, CreateRecipeDto, ImportRecipeDto, ImportRecipeFromUrlDto, IngredientDto,
-    UpdateRecipeDto,
+    RecipeResponse, UpdateRecipeDto,
 };
 use crate::entities::recipe;
 use crate::error::AppError;
@@ -33,12 +33,27 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<recipe::Mode
 
 pub async fn get_one(
     State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Json<Option<recipe::Model>>, AppError> {
-    RecipeService::get_by_id(&state.db, id)
-        .await
-        .map(Json)
-        .map_err(AppError::from)
+    Path(slug): Path<String>,
+) -> Result<Json<Option<RecipeResponse>>, AppError> {
+    let Some(recipe) = RecipeService::get_by_slug(&state.db, slug).await? else {
+        return Ok(Json(None));
+    };
+
+    // Resolve the parent's display name + slug server-side so the client renders
+    // "adapted from X" without a second request.
+    let (parent_name, parent_slug) = match recipe.parent_recipe_id.as_deref() {
+        Some(id) => RecipeService::get_by_id(&state.db, id.to_string())
+            .await?
+            .map(|p| (Some(p.name), Some(p.slug)))
+            .unwrap_or((None, None)),
+        None => (None, None),
+    };
+
+    Ok(Json(Some(RecipeResponse {
+        recipe,
+        parent_name,
+        parent_slug,
+    })))
 }
 
 #[derive(Deserialize)]

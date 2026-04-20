@@ -56,5 +56,34 @@ ci:
     cd server && cargo test --all-features
     dprint check
     bun run lint
-    bun test
+    bun run test
     typos --config .typos.toml
+
+# Reset the dev DB: delete the files, then start the server briefly so
+# startup migrations (and seed_if_empty) apply to a fresh database.
+# Uses PORT=3099 to avoid colliding with a running `just dev`.
+db-reset:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -f server/data/fewd.db server/data/fewd.db-shm server/data/fewd.db-wal
+    echo "DB files removed. Building server..."
+    (cd server && cargo build --bin fewd-server --quiet)
+    echo "Running migrations on fresh DB..."
+    LOG=$(mktemp)
+    (cd server && PORT=3099 RUST_LOG=info ../target/debug/fewd-server >"$LOG" 2>&1) &
+    SERVER_PID=$!
+    # Migrations complete before axum binds; wait for the "Server running" log.
+    for _ in $(seq 1 100); do
+        if grep -q "Server running" "$LOG" 2>/dev/null; then break; fi
+        sleep 0.1
+    done
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+    if ! grep -q "Server running" "$LOG"; then
+        echo "⚠️  Server did not report ready within 10s. Log:"
+        cat "$LOG"
+        rm -f "$LOG"
+        exit 1
+    fi
+    rm -f "$LOG"
+    echo "✅ Fresh DB at server/data/fewd.db with migrations applied."

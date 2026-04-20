@@ -17,6 +17,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
+                    .col(ColumnDef::new(Recipes::Slug).text().not_null())
                     .col(ColumnDef::new(Recipes::Name).string().not_null())
                     .col(ColumnDef::new(Recipes::Description).string())
                     .col(ColumnDef::new(Recipes::Source).string().not_null())
@@ -57,6 +58,17 @@ impl MigrationTrait for Migration {
                     )
                     .to_owned(),
             )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_recipes_slug")
+                    .table(Recipes::Table)
+                    .col(Recipes::Slug)
+                    .unique()
+                    .to_owned(),
+            )
             .await
     }
 
@@ -71,6 +83,7 @@ impl MigrationTrait for Migration {
 enum Recipes {
     Table,
     Id,
+    Slug,
     Name,
     Description,
     Source,
