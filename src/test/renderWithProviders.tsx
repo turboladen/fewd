@@ -3,6 +3,7 @@ import { render, type RenderOptions, type RenderResult } from '@testing-library/
 import type { ReactElement, ReactNode } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { ToastProvider } from '../components/Toast'
+import { ChromeProvider } from '../contexts/ChromeContext'
 import { createTestQueryClient } from './queryClient'
 
 interface Options extends Omit<RenderOptions, 'wrapper'> {
@@ -24,7 +25,9 @@ export function renderWithProviders(
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[initialPath ?? '/']}>
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          <ChromeProvider>{children}</ChromeProvider>
+        </ToastProvider>
       </MemoryRouter>
     </QueryClientProvider>
   )

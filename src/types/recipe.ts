@@ -178,3 +178,15 @@ export function formatAmount(amount: IngredientAmount): string {
   }
   return `${amount.min}-${amount.max}`
 }
+
+/**
+ * Splits free-form instructions text into discrete steps for cooking-mode rendering.
+ * One non-empty line per step, with any leading "1." / "2)" numbering stripped so
+ * the renderer can supply its own (large, styled) numbers.
+ */
+export function parseInstructionSteps(instructions: string): string[] {
+  return instructions
+    .split('\n')
+    .map((line) => line.replace(/^\s*\d+[.)]\s*/, '').trim())
+    .filter((line) => line.length > 0)
+}

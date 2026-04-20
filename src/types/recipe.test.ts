@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { IngredientAmount, Recipe, TimeValue } from './recipe'
-import { formatAmount, formatTime, parseRecipe } from './recipe'
+import { formatAmount, formatTime, parseInstructionSteps, parseRecipe } from './recipe'
 
 describe('formatTime', () => {
   it('formats time value', () => {
@@ -113,5 +113,37 @@ describe('parseRecipe', () => {
   it('handles null parent_recipe_id', () => {
     const parsed = parseRecipe(makeRecipe({ parent_recipe_id: null }))
     expect(parsed.parent_recipe_id).toBeNull()
+  })
+})
+
+describe('parseInstructionSteps', () => {
+  it('splits a multi-line block into one step per line', () => {
+    const steps = parseInstructionSteps('Boil water.\nAdd pasta.\nStir occasionally.')
+    expect(steps).toEqual(['Boil water.', 'Add pasta.', 'Stir occasionally.'])
+  })
+
+  it('strips leading numbers like "1." or "2)" so they can be re-rendered', () => {
+    const steps = parseInstructionSteps('1. Boil water.\n2. Add pasta.\n3) Stir.')
+    expect(steps).toEqual(['Boil water.', 'Add pasta.', 'Stir.'])
+  })
+
+  it('treats blank lines as separators, not as steps', () => {
+    const steps = parseInstructionSteps('Boil water.\n\nAdd pasta.\n\n\nStir.')
+    expect(steps).toEqual(['Boil water.', 'Add pasta.', 'Stir.'])
+  })
+
+  it('returns a single step when the input has no line breaks', () => {
+    const steps = parseInstructionSteps('Just do the thing.')
+    expect(steps).toEqual(['Just do the thing.'])
+  })
+
+  it('returns an empty array for empty or whitespace-only input', () => {
+    expect(parseInstructionSteps('')).toEqual([])
+    expect(parseInstructionSteps('   \n  \n')).toEqual([])
+  })
+
+  it('trims surrounding whitespace from each step', () => {
+    const steps = parseInstructionSteps('  Boil water.  \n  Add pasta.  ')
+    expect(steps).toEqual(['Boil water.', 'Add pasta.'])
   })
 })
