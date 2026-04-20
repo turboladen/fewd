@@ -333,7 +333,12 @@ export function RecipeDetailPage() {
           onEdit={() => setMode('edit')}
           onScale={() => setMode('scale')}
           onAdapt={() => setMode('adapt')}
-          onCook={() => setSearchParams({ mode: 'cook' })}
+          onCook={() =>
+            setSearchParams((prev) => {
+              const next = new URLSearchParams(prev)
+              next.set('mode', 'cook')
+              return next
+            })}
           onDelete={() => setConfirmingDelete(true)}
           onToggleFavorite={() => toggleFavoriteMutation.mutate(recipe.id)}
           onRatingChange={(rating) => updateMutation.mutate({ id: recipe.id, data: { rating } })}

@@ -843,7 +843,7 @@ export function RecipeDetail({
           <button onClick={onCook} className='btn-sm btn-primary'>
             Cook this
           </button>
-          <span className='text-stone-200 mx-0.5'>|</span>
+          <span className='text-stone-200 mx-0.5' aria-hidden='true'>|</span>
           <button onClick={onEdit} className='btn-xs btn-outline'>
             <IconEdit className='w-3.5 h-3.5' />
             Edit
@@ -855,7 +855,7 @@ export function RecipeDetail({
             <IconRefresh className='w-3.5 h-3.5' />
             Adapt
           </button>
-          <span className='text-stone-200 mx-0.5'>|</span>
+          <span className='text-stone-200 mx-0.5' aria-hidden='true'>|</span>
           {confirmingDelete
             ? (
               <span className='flex gap-1 items-center'>
