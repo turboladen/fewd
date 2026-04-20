@@ -120,6 +120,13 @@ describe('RecipeDetailPage', () => {
   })
 
   describe('cooking mode', () => {
+    // Cook mode auto-fetches enhanced instructions. Default to a benign
+    // empty-string success so each test can opt into specific behavior
+    // (or override with a later mockJson call).
+    beforeEach(() => {
+      mockJson('POST', '/api/recipes/r1/enhance', '')
+    })
+
     it('renders CookingView (not the standard detail view) when ?mode=cook is set', async () => {
       const pasta = makeRecipe({ id: 'r1', name: 'Pasta', instructions: 'Boil.\nAdd pasta.' })
       mockJson('GET', '/api/recipes/r1', pasta)
@@ -189,6 +196,37 @@ describe('RecipeDetailPage', () => {
       await waitFor(() =>
         expect(screen.getByRole('heading', { level: 2, name: 'Pasta' })).toBeInTheDocument()
       )
+    })
+
+    it('fetches and renders enhanced instructions when entering cook mode', async () => {
+      const pasta = makeRecipe({ id: 'r1', name: 'Pasta', instructions: 'Plain step.' })
+      mockJson('GET', '/api/recipes/r1', pasta)
+      // Enhanced version returns a punchier rewrite with markdown bold.
+      mockJson('POST', '/api/recipes/r1/enhance', 'Bring water to a **rolling boil**.')
+
+      renderDetail('/recipes/r1?mode=cook')
+
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 1, name: 'Pasta' })).toBeInTheDocument()
+      )
+      // Enhanced text wins out over the original instructions.
+      await waitFor(() => expect(screen.queryByText('Plain step.')).not.toBeInTheDocument())
+      const boldCallout = await screen.findByText('rolling boil')
+      expect(boldCallout.tagName).toBe('STRONG')
+    })
+
+    it('falls back to plain instructions if the enhance request fails', async () => {
+      const pasta = makeRecipe({ id: 'r1', name: 'Pasta', instructions: 'Plain step.' })
+      mockJson('GET', '/api/recipes/r1', pasta)
+      mockJson('POST', '/api/recipes/r1/enhance', { message: 'nope' }, { status: 500 })
+
+      renderDetail('/recipes/r1?mode=cook')
+
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 1, name: 'Pasta' })).toBeInTheDocument()
+      )
+      // The plain instructions stay visible — failure is silent.
+      expect(await screen.findByText('Plain step.')).toBeInTheDocument()
     })
 
     it('Escape exits cook mode first when a delete confirmation is pending underneath', async () => {

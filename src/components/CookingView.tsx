@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { type ReactNode, useEffect } from 'react'
 import { useChrome } from '../contexts/ChromeContext'
 import { useWakeLock } from '../hooks/useWakeLock'
 import { formatAmount, formatTime, type ParsedRecipe, parseInstructionSteps } from '../types/recipe'
@@ -7,10 +7,49 @@ import { IconClose } from './Icon'
 interface Props {
   parsed: ParsedRecipe
   onExit: () => void
+  /**
+   * AI-enhanced instruction text (from `useEnhancedInstructions`). When
+   * present and non-empty, displaces `parsed.instructions` and is rendered
+   * with `**bold**` callouts highlighted. Falls back silently when
+   * undefined or empty so a missing/failed enhance request never blanks
+   * the cook out of their recipe.
+   */
+  enhancedInstructions?: string
 }
 
-export function CookingView({ parsed, onExit }: Props) {
-  const steps = parseInstructionSteps(parsed.instructions)
+/** Renders inline `**bold**` segments as <strong> for callouts in enhanced text. */
+function renderInlineMarkdown(text: string): ReactNode[] {
+  const nodes: ReactNode[] = []
+  let remaining = text
+  let key = 0
+  while (remaining.length > 0) {
+    const start = remaining.indexOf('**')
+    if (start === -1) {
+      nodes.push(remaining)
+      break
+    }
+    const end = remaining.indexOf('**', start + 2)
+    if (end === -1) {
+      nodes.push(remaining)
+      break
+    }
+    if (start > 0) nodes.push(remaining.slice(0, start))
+    nodes.push(
+      <strong key={key++} className='text-primary-700 font-semibold'>
+        {remaining.slice(start + 2, end)}
+      </strong>,
+    )
+    remaining = remaining.slice(end + 2)
+  }
+  return nodes
+}
+
+export function CookingView({ parsed, onExit, enhancedInstructions }: Props) {
+  const sourceText = enhancedInstructions && enhancedInstructions.length > 0
+    ? enhancedInstructions
+    : parsed.instructions
+  const steps = parseInstructionSteps(sourceText)
+  const isEnhanced = sourceText === enhancedInstructions
   const { setHidden } = useChrome()
 
   useEffect(() => {
@@ -80,7 +119,7 @@ export function CookingView({ parsed, onExit }: Props) {
                       {i + 1}
                     </span>
                     <p className='text-lg md:text-xl leading-relaxed text-stone-800'>
-                      {step}
+                      {isEnhanced ? renderInlineMarkdown(step) : step}
                     </p>
                   </li>
                 ))}

@@ -14,6 +14,7 @@ import { useToast } from '../components/Toast'
 import {
   useCreateRecipe,
   useDeleteRecipe,
+  useEnhancedInstructions,
   useRecipe,
   useToggleFavorite,
   useUpdateRecipe,
@@ -40,6 +41,10 @@ export function RecipeDetailPage() {
   const [scaleError, setScaleError] = useState<string | null>(null)
 
   const isCooking = searchParams.get('mode') === 'cook'
+  const { data: enhancedInstructions } = useEnhancedInstructions(
+    recipe?.id ?? '',
+    isCooking && !!recipe,
+  )
 
   const exitCooking = useCallback(() => {
     setSearchParams((prev) => {
@@ -212,7 +217,13 @@ export function RecipeDetailPage() {
   )
 
   if (isCooking) {
-    return <CookingView parsed={parsed} onExit={exitCooking} />
+    return (
+      <CookingView
+        parsed={parsed}
+        onExit={exitCooking}
+        enhancedInstructions={enhancedInstructions ?? undefined}
+      />
+    )
   }
 
   if (mode === 'edit' || mode === 'adapt-edit') {

@@ -79,6 +79,41 @@ describe('CookingView', () => {
     expect(onExit).toHaveBeenCalledTimes(1)
   })
 
+  it('renders enhancedInstructions in place of parsed.instructions when provided', () => {
+    const parsed = parseRecipe(makeRecipe({
+      instructions: 'Original step.',
+    }))
+    render(
+      <ChromeProvider>
+        <CookingView
+          parsed={parsed}
+          onExit={vi.fn()}
+          enhancedInstructions={'Enhanced step one.\nEnhanced step two.'}
+        />
+      </ChromeProvider>,
+    )
+
+    expect(screen.queryByText('Original step.')).not.toBeInTheDocument()
+    expect(screen.getByText('Enhanced step one.')).toBeInTheDocument()
+    expect(screen.getByText('Enhanced step two.')).toBeInTheDocument()
+  })
+
+  it('renders **bold** markdown in enhanced instructions as <strong> elements', () => {
+    const parsed = parseRecipe(makeRecipe())
+    render(
+      <ChromeProvider>
+        <CookingView
+          parsed={parsed}
+          onExit={vi.fn()}
+          enhancedInstructions={'Watch the **butter** carefully.'}
+        />
+      </ChromeProvider>,
+    )
+
+    const bold = screen.getByText('butter')
+    expect(bold.tagName).toBe('STRONG')
+  })
+
   it('hides chrome on mount and restores it on unmount', () => {
     const states: boolean[] = []
     function Probe() {
