@@ -36,33 +36,47 @@ impl DrinkRecipeService {
         data: CreateDrinkRecipeDto,
     ) -> Result<drink_recipe::Model, DbErr> {
         let now = chrono::Utc::now();
-        let slug = generate_unique_slug(db, &data.name).await?;
+        let base_slug = migration::slugify(&data.name);
 
-        let recipe = drink_recipe::ActiveModel {
-            id: Set(uuid::Uuid::new_v4().to_string()),
-            slug: Set(slug),
-            name: Set(data.name),
-            description: Set(data.description),
-            source: Set(data.source),
-            source_url: Set(data.source_url),
-            servings: Set(data.servings),
-            instructions: Set(data.instructions),
-            ingredients: Set(to_json(&data.ingredients)?),
-            technique: Set(data.technique),
-            glassware: Set(data.glassware),
-            garnish: Set(data.garnish),
-            tags: Set(to_json(&data.tags)?),
-            notes: Set(data.notes),
-            icon: Set(data.icon),
-            is_favorite: Set(false),
-            is_non_alcoholic: Set(data.is_non_alcoholic.unwrap_or(false)),
-            rating: Set(None),
-            times_made: Set(0),
-            created_at: Set(now),
-            updated_at: Set(now),
-        };
+        let ingredients = to_json(&data.ingredients)?;
+        let tags = to_json(&data.tags)?;
+        let is_non_alcoholic = data.is_non_alcoholic.unwrap_or(false);
 
-        recipe.insert(db).await
+        for attempt in 1..=MAX_SLUG_ATTEMPTS {
+            let candidate_slug = migration::slug::with_suffix(&base_slug, attempt);
+            let model = drink_recipe::ActiveModel {
+                id: Set(uuid::Uuid::new_v4().to_string()),
+                slug: Set(candidate_slug),
+                name: Set(data.name.clone()),
+                description: Set(data.description.clone()),
+                source: Set(data.source.clone()),
+                source_url: Set(data.source_url.clone()),
+                servings: Set(data.servings),
+                instructions: Set(data.instructions.clone()),
+                ingredients: Set(ingredients.clone()),
+                technique: Set(data.technique.clone()),
+                glassware: Set(data.glassware.clone()),
+                garnish: Set(data.garnish.clone()),
+                tags: Set(tags.clone()),
+                notes: Set(data.notes.clone()),
+                icon: Set(data.icon.clone()),
+                is_favorite: Set(false),
+                is_non_alcoholic: Set(is_non_alcoholic),
+                rating: Set(None),
+                times_made: Set(0),
+                created_at: Set(now),
+                updated_at: Set(now),
+            };
+
+            match model.insert(db).await {
+                Ok(r) => return Ok(r),
+                Err(e) if is_slug_conflict(&e) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Err(DbErr::Custom(format!(
+            "Could not find a unique drink recipe slug after {MAX_SLUG_ATTEMPTS} attempts"
+        )))
     }
 
     pub async fn update(
@@ -154,20 +168,11 @@ impl DrinkRecipeService {
     }
 }
 
-async fn generate_unique_slug(db: &DatabaseConnection, name: &str) -> Result<String, DbErr> {
-    let base = migration::slugify(name);
-    let mut candidate = base.clone();
-    let mut suffix = 2u32;
-    loop {
-        let exists = DrinkRecipe::find()
-            .filter(drink_recipe::Column::Slug.eq(candidate.clone()))
-            .one(db)
-            .await?
-            .is_some();
-        if !exists {
-            return Ok(candidate);
-        }
-        candidate = format!("{}-{}", base, suffix);
-        suffix += 1;
-    }
+const MAX_SLUG_ATTEMPTS: u32 = 1000;
+
+fn is_slug_conflict(err: &DbErr) -> bool {
+    matches!(
+        err.sql_err(),
+        Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+    )
 }

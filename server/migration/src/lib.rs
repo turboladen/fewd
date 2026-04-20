@@ -11,7 +11,7 @@ mod m20260213_000008_add_person_drink_prefs;
 mod m20260213_000009_create_bar_items;
 mod m20260213_000010_create_drink_recipes;
 mod m20260214_000011_add_drink_recipe_source_url;
-mod slug;
+pub mod slug;
 
 pub use slug::slugify;
 

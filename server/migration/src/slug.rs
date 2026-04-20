@@ -1,4 +1,4 @@
-const MAX_SLUG_LEN: usize = 80;
+pub const MAX_SLUG_LEN: usize = 80;
 const FALLBACK_SLUG: &str = "recipe";
 
 /// Convert a human-readable name into a URL-safe slug.
@@ -85,9 +85,32 @@ fn fold(ch: char) -> Option<&'static str> {
     })
 }
 
+/// Build a collision candidate: `base` for attempt 1, `base-N` for attempt >= 2.
+/// Respects MAX_SLUG_LEN — if appending `-N` would exceed the cap, the base is
+/// truncated (preferring a hyphen boundary near the cut point) before the suffix
+/// is added. Callers should keep incrementing `attempt` until the DB accepts the
+/// slug via its UNIQUE constraint.
+pub fn with_suffix(base: &str, attempt: u32) -> String {
+    debug_assert!(attempt >= 1, "attempt is 1-indexed");
+    if attempt <= 1 {
+        return base.to_string();
+    }
+    let suffix = format!("-{}", attempt);
+    let room = MAX_SLUG_LEN.saturating_sub(suffix.len());
+    if base.len() <= room {
+        return format!("{}{}", base, suffix);
+    }
+    let trimmed = &base[..room];
+    let cut = trimmed
+        .rfind('-')
+        .filter(|&i| i >= room / 2)
+        .unwrap_or(room);
+    format!("{}{}", &base[..cut], suffix)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::slugify;
+    use super::{slugify, with_suffix, MAX_SLUG_LEN};
 
     #[test]
     fn lowercases_and_hyphenates() {
@@ -96,7 +119,10 @@ mod tests {
 
     #[test]
     fn collapses_punctuation_and_whitespace() {
-        assert_eq!(slugify("Grandma's  Sunday Roast!"), "grandma-s-sunday-roast");
+        assert_eq!(
+            slugify("Grandma's  Sunday Roast!"),
+            "grandma-s-sunday-roast"
+        );
     }
 
     #[test]
@@ -126,5 +152,41 @@ mod tests {
     #[test]
     fn expands_ampersand() {
         assert_eq!(slugify("Mac & Cheese"), "mac-and-cheese");
+    }
+
+    #[test]
+    fn with_suffix_keeps_base_at_attempt_one() {
+        assert_eq!(with_suffix("pasta", 1), "pasta");
+    }
+
+    #[test]
+    fn with_suffix_appends_for_collisions() {
+        assert_eq!(with_suffix("pasta", 2), "pasta-2");
+        assert_eq!(with_suffix("pasta", 9), "pasta-9");
+    }
+
+    #[test]
+    fn with_suffix_respects_max_len_for_long_bases() {
+        // A max-length base that'd overflow once a suffix is tacked on.
+        let max_base = "a".repeat(MAX_SLUG_LEN);
+        let s = with_suffix(&max_base, 42);
+        assert!(s.len() <= MAX_SLUG_LEN);
+        assert!(s.ends_with("-42"));
+    }
+
+    #[test]
+    fn with_suffix_prefers_hyphen_boundary_when_truncating() {
+        // Build a base at MAX_SLUG_LEN where a hyphen sits in the trim zone.
+        // Construction: 70 `a`s, a hyphen, then 9 `b`s (total = 80).
+        let mut base = "a".repeat(70);
+        base.push('-');
+        base.push_str(&"b".repeat(9));
+        assert_eq!(base.len(), MAX_SLUG_LEN);
+
+        let s = with_suffix(&base, 2);
+        assert!(s.len() <= MAX_SLUG_LEN);
+        // Should have trimmed back to the hyphen boundary, not mid-`a`-run.
+        assert!(s.starts_with(&"a".repeat(70)));
+        assert!(s.ends_with("-2"));
     }
 }

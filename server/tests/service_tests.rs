@@ -257,6 +257,29 @@ async fn recipe_slug_collision_gets_suffix() {
 }
 
 #[tokio::test]
+async fn recipe_slug_collision_stays_under_length_cap() {
+    // Base name that, after slugify, is already at the 80-char cap. Two creates
+    // with the same name force collision handling to truncate the base and
+    // re-append the suffix so the final slug stays ≤ 80 chars.
+    let db = setup_db().await;
+    let long_name = "a".repeat(200);
+    let first = RecipeService::create(&db, test_recipe_dto(&long_name))
+        .await
+        .unwrap();
+    let second = RecipeService::create(&db, test_recipe_dto(&long_name))
+        .await
+        .unwrap();
+    assert_eq!(first.slug.len(), 80);
+    assert!(
+        second.slug.len() <= 80,
+        "second slug was {}",
+        second.slug.len()
+    );
+    assert!(second.slug.ends_with("-2"));
+    assert_ne!(first.slug, second.slug);
+}
+
+#[tokio::test]
 async fn recipe_slug_survives_rename() {
     let db = setup_db().await;
     let recipe = RecipeService::create(&db, test_recipe_dto("Untitled Recipe"))
