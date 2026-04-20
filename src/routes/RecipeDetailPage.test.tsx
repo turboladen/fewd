@@ -190,6 +190,34 @@ describe('RecipeDetailPage', () => {
         expect(screen.getByRole('heading', { level: 2, name: 'Pasta' })).toBeInTheDocument()
       )
     })
+
+    it('Escape exits cook mode first when a delete confirmation is pending underneath', async () => {
+      const pasta = makeRecipe({ id: 'r1', name: 'Pasta' })
+      mockJson('GET', '/api/recipes/r1', pasta)
+
+      renderDetail()
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 2, name: 'Pasta' })).toBeInTheDocument()
+      )
+
+      // Stage delete confirmation, then enter cook mode while it's still up.
+      fireEvent.click(screen.getByRole('button', { name: /Delete/ }))
+      expect(screen.getByRole('button', { name: 'Yes' })).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /Cook this/i }))
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 1, name: 'Pasta' })).toBeInTheDocument()
+      )
+
+      // First Escape exits cook mode (priority over delete confirmation).
+      fireEvent.keyDown(window, { key: 'Escape' })
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 2, name: 'Pasta' })).toBeInTheDocument()
+      )
+      // Confirmation state survived; second Escape cancels it.
+      expect(screen.getByRole('button', { name: 'Yes' })).toBeInTheDocument()
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(screen.queryByRole('button', { name: 'Yes' })).not.toBeInTheDocument()
+    })
   })
 
   it('deleting a recipe navigates back to the list view', async () => {

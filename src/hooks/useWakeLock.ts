@@ -1,54 +1,45 @@
 import { useEffect } from 'react'
 
-interface WakeLockSentinelLike {
-  release(): Promise<void>
-  released: boolean
-}
-
-interface NavigatorWithWakeLock extends Navigator {
-  wakeLock?: {
-    request(type: 'screen'): Promise<WakeLockSentinelLike>
-  }
-}
-
 /**
- * Keeps the screen on while `active` is true, using the Wake Lock API.
+ * Keeps the screen on while `active` is true via the Wake Lock API.
  * Re-acquires after the tab returns from background. No-ops on browsers
- * that don't expose `navigator.wakeLock` (e.g. Safari desktop).
+ * that don't expose `navigator.wakeLock`. Pass `false` to release without
+ * unmounting.
  *
- * Failures are logged, never surfaced — losing wake lock is a soft
- * degradation, not an error worth interrupting the cook.
+ * Failures are logged but never surfaced — losing wake lock is a soft
+ * degradation (the screen dims), not an error worth interrupting the cook.
  */
 export function useWakeLock(active: boolean): void {
   useEffect(() => {
     if (!active) return
+    if (!('wakeLock' in navigator)) return
 
-    const nav = navigator as NavigatorWithWakeLock
-    if (!nav.wakeLock) return
-
-    let sentinel: WakeLockSentinelLike | null = null
+    let sentinel: WakeLockSentinel | null = null
     let cancelled = false
 
-    const acquire = async () => {
+    const acquire = async (reason: 'mount' | 'visibility') => {
       try {
-        const next = await nav.wakeLock!.request('screen')
+        const next = await navigator.wakeLock.request('screen')
         if (cancelled) {
           await next.release().catch(() => {})
           return
         }
         sentinel = next
       } catch (err) {
-        console.warn('[useWakeLock] failed to acquire screen wake lock:', err)
+        console.warn(
+          `[useWakeLock] failed to acquire screen wake lock (${reason}):`,
+          err,
+        )
       }
     }
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && (!sentinel || sentinel.released)) {
-        acquire()
+        acquire('visibility')
       }
     }
 
-    acquire()
+    acquire('mount')
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {

@@ -1,11 +1,19 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { ChromeProvider, useChrome } from '../contexts/ChromeContext'
 import { makeRecipe } from '../test/factories'
 import { type ParsedRecipe, parseRecipe } from '../types/recipe'
 import { CookingView } from './CookingView'
 
 function renderCookingView(parsed: ParsedRecipe, onExit = vi.fn()) {
-  return { onExit, ...render(<CookingView parsed={parsed} onExit={onExit} />) }
+  return {
+    onExit,
+    ...render(
+      <ChromeProvider>
+        <CookingView parsed={parsed} onExit={onExit} />
+      </ChromeProvider>,
+    ),
+  }
 }
 
 describe('CookingView', () => {
@@ -69,5 +77,27 @@ describe('CookingView', () => {
 
     fireEvent.click(exitButton)
     expect(onExit).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides chrome on mount and restores it on unmount', () => {
+    const states: boolean[] = []
+    function Probe() {
+      const { isHidden } = useChrome()
+      states.push(isHidden)
+      return null
+    }
+    const parsed = parseRecipe(makeRecipe())
+    function Harness({ mounted }: { mounted: boolean }) {
+      return (
+        <ChromeProvider>
+          <Probe />
+          {mounted && <CookingView parsed={parsed} onExit={vi.fn()} />}
+        </ChromeProvider>
+      )
+    }
+    const { rerender } = render(<Harness mounted={true} />)
+    expect(states.at(-1)).toBe(true)
+    rerender(<Harness mounted={false} />)
+    expect(states.at(-1)).toBe(false)
   })
 })
