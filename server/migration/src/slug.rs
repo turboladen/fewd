@@ -62,24 +62,24 @@ pub fn slugify(name: &str) -> String {
 /// (ASCII chars go through the default path; unknown non-ASCII gets discarded because
 /// `is_ascii_alphanumeric` returns false).
 fn fold(ch: char) -> Option<&'static str> {
+    // Unicode-lowercase first so we only match on lowercase forms. `to_lowercase`
+    // returns an iterator because some lowercase expansions are multi-char — for
+    // every char we match here the expansion is single, so `.next()` is safe.
+    let ch = ch.to_lowercase().next().unwrap_or(ch);
     Some(match ch {
         'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' => "a",
-        'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' | 'Ā' | 'Ă' | 'Ą' => "a",
-        'æ' | 'Æ' => "ae",
-        'ç' | 'ć' | 'č' | 'Ç' | 'Ć' | 'Č' => "c",
+        'æ' => "ae",
+        'ç' | 'ć' | 'č' => "c",
         'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ĕ' | 'ė' | 'ę' | 'ě' => "e",
-        'È' | 'É' | 'Ê' | 'Ë' | 'Ē' | 'Ĕ' | 'Ė' | 'Ę' | 'Ě' => "e",
-        'ì' | 'í' | 'î' | 'ï' | 'ī' | 'į' | 'Ì' | 'Í' | 'Î' | 'Ï' | 'Ī' | 'Į' => "i",
-        'ñ' | 'ń' | 'ň' | 'Ñ' | 'Ń' | 'Ň' => "n",
+        'ì' | 'í' | 'î' | 'ï' | 'ī' | 'į' => "i",
+        'ñ' | 'ń' | 'ň' => "n",
         'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'ō' | 'ő' => "o",
-        'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' | 'Ø' | 'Ō' | 'Ő' => "o",
-        'œ' | 'Œ' => "oe",
+        'œ' => "oe",
         'ß' => "ss",
-        'š' | 'ś' | 'Š' | 'Ś' => "s",
+        'š' | 'ś' => "s",
         'ù' | 'ú' | 'û' | 'ü' | 'ū' | 'ů' | 'ű' => "u",
-        'Ù' | 'Ú' | 'Û' | 'Ü' | 'Ū' | 'Ů' | 'Ű' => "u",
-        'ý' | 'ÿ' | 'Ý' | 'Ÿ' => "y",
-        'ž' | 'ź' | 'ż' | 'Ž' | 'Ź' | 'Ż' => "z",
+        'ý' | 'ÿ' => "y",
+        'ž' | 'ź' | 'ż' => "z",
         '&' => " and ",
         _ => return None,
     })
@@ -103,6 +103,9 @@ mod tests {
     fn strips_accents() {
         assert_eq!(slugify("Crème Brûlée"), "creme-brulee");
         assert_eq!(slugify("Jalapeño Poppers"), "jalapeno-poppers");
+        // Uppercase accents fold via Unicode lowercase before the match.
+        assert_eq!(slugify("ÉCLAIR"), "eclair");
+        assert_eq!(slugify("CAFÉ"), "cafe");
     }
 
     #[test]
