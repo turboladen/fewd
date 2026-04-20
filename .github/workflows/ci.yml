@@ -1,57 +1,24 @@
 name: CI
 
+# Verification jobs for open pull requests. The push-triggered dprint
+# auto-formatter lives in `auto-format.yml` so the two event types don't
+# produce duplicate/skipped jobs in the same workflow run.
 on:
-  push:
-    branches-ignore:
-      - main
   pull_request:
     branches: [main, develop]
 
-# Cancel in-progress runs when a newer commit lands on the same ref. This also
-# prevents the duplicate push+pull_request pair from both running to completion.
+# Cancel older in-progress runs on the same PR when a new commit lands.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  auto-format:
-    name: Auto Format
-    runs-on: macos-latest
-    if: github.event_name == 'push'
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup dprint
-        run: cargo install dprint
-
-      - name: Format code
-        run: dprint fmt
-
-      - name: Commit and push changes
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add -A
-          if ! git diff --quiet HEAD; then
-            git commit -m "Auto-format code with dprint"
-            git push
-            echo "Code was formatted and pushed. CI will re-run with formatted code."
-            exit 0
-          fi
-
   rust-checks:
     name: Rust Checks
     runs-on: macos-latest
-    # Only on PR events — the push event that initiated the PR would otherwise
-    # trigger a second, redundant run.
-    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
 
@@ -97,7 +64,6 @@ jobs:
   frontend-checks:
     name: Frontend Checks
     runs-on: macos-latest
-    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
 
@@ -126,7 +92,6 @@ jobs:
   typos-check:
     name: Typos Check
     runs-on: macos-latest
-    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
 
@@ -139,7 +104,6 @@ jobs:
   all-checks:
     name: All Checks Passed
     needs: [rust-checks, frontend-checks, typos-check]
-    if: github.event_name == 'pull_request'
     runs-on: macos-latest
     steps:
       - run: echo "All checks passed!"

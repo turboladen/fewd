@@ -1,0 +1,42 @@
+name: Auto Format
+
+# Push-triggered dprint autoformatter. Runs on every branch except main so it
+# can fix unformatted code and push a correction commit back. PR verification
+# lives in `ci.yml` and runs on `pull_request` events — the two workflows
+# stay separate so a push-to-PR-branch doesn't surface duplicate/skipped jobs.
+on:
+  push:
+    branches-ignore:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  auto-format:
+    name: Auto Format
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup dprint
+        run: cargo install dprint
+
+      - name: Format code
+        run: dprint fmt
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add -A
+          if ! git diff --quiet HEAD; then
+            git commit -m "Auto-format code with dprint"
+            git push
+            echo "Code was formatted and pushed. CI will re-run with formatted code."
+          fi
