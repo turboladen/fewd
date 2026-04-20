@@ -56,7 +56,7 @@ ci:
     cd server && cargo test --all-features
     dprint check
     bun run lint
-    bun test
+    bun run test
     typos --config .typos.toml
 
 # Reset the dev DB: delete the files, then start the server briefly so
