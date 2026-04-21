@@ -14,10 +14,10 @@ pub async fn seed_if_empty(db: &DatabaseConnection) -> Result<(), DbErr> {
     let empty_json = to_json(&Vec::<String>::new())?;
 
     let people = vec![
-        ("Steve", "1978-05-30"),
-        ("Amanda", "1980-05-31"),
-        ("Vivienne", "2014-07-10"),
-        ("Cleo", "2019-03-17"),
+        ("Alex", "1985-06-15"),
+        ("Jordan", "1987-09-22"),
+        ("Sam", "2014-03-08"),
+        ("Pat", "2019-11-14"),
     ];
 
     for (name, birthdate) in people {

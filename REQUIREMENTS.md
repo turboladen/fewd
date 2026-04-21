@@ -54,9 +54,9 @@ Represents a family member who eats meals.
 
 ```json
 {
-  "id": "person-steve",
-  "name": "Steve",
-  "birthdate": "1978-01-15",
+  "id": "person-alex",
+  "name": "Alex",
+  "birthdate": "1985-06-15",
   "dietary_goals": "2400 calories, 190g protein per day",
   "dislikes": ["mushrooms"],
   "favorites": ["tonkotsu ramen", "grilled chicken", "homemade pasta"],

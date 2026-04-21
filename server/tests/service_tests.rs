@@ -845,10 +845,10 @@ async fn seed_data_populates_empty_db() {
     assert_eq!(people.len(), 4);
 
     let names: Vec<&str> = people.iter().map(|p| p.name.as_str()).collect();
-    assert!(names.contains(&"Steve"));
-    assert!(names.contains(&"Amanda"));
-    assert!(names.contains(&"Vivienne"));
-    assert!(names.contains(&"Cleo"));
+    assert!(names.contains(&"Alex"));
+    assert!(names.contains(&"Jordan"));
+    assert!(names.contains(&"Sam"));
+    assert!(names.contains(&"Pat"));
 }
 
 #[tokio::test]
