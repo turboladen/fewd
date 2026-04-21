@@ -769,6 +769,7 @@ export function RecipeDetail({
   onEdit,
   onScale,
   onAdapt,
+  onCook,
   onDelete,
   onToggleFavorite,
   onRatingChange,
@@ -782,6 +783,7 @@ export function RecipeDetail({
   onEdit: () => void
   onScale: () => void
   onAdapt: () => void
+  onCook: () => void
   onDelete: () => void
   onToggleFavorite: () => void
   onRatingChange: (rating: number) => void
@@ -838,7 +840,11 @@ export function RecipeDetail({
           {parsed.description && <p className='text-stone-600 mt-1'>{parsed.description}</p>}
         </div>
         <div className='flex flex-wrap gap-1.5 items-center'>
-          <button onClick={onEdit} className='btn-xs btn-primary'>
+          <button onClick={onCook} className='btn-sm btn-primary'>
+            Cook this
+          </button>
+          <span className='text-stone-200 mx-0.5' aria-hidden='true'>|</span>
+          <button onClick={onEdit} className='btn-xs btn-outline'>
             <IconEdit className='w-3.5 h-3.5' />
             Edit
           </button>
@@ -849,7 +855,7 @@ export function RecipeDetail({
             <IconRefresh className='w-3.5 h-3.5' />
             Adapt
           </button>
-          <span className='text-stone-200 mx-0.5'>|</span>
+          <span className='text-stone-200 mx-0.5' aria-hidden='true'>|</span>
           {confirmingDelete
             ? (
               <span className='flex gap-1 items-center'>

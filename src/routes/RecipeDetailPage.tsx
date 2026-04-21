@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AdaptRecipePanel } from '../components/AdaptRecipePanel'
+import { CookingView } from '../components/CookingView'
 import { EmptyState } from '../components/EmptyState'
 import { IconArrowLeft } from '../components/Icon'
 import {
@@ -13,6 +14,7 @@ import { useToast } from '../components/Toast'
 import {
   useCreateRecipe,
   useDeleteRecipe,
+  useEnhancedInstructions,
   useRecipe,
   useToggleFavorite,
   useUpdateRecipe,
@@ -25,6 +27,7 @@ type Mode = 'view' | 'edit' | 'scale' | 'adapt' | 'adapt-edit'
 export function RecipeDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { toast } = useToast()
   const { data: recipe, isLoading, error } = useRecipe(id ?? '')
   const createMutation = useCreateRecipe()
@@ -37,9 +40,27 @@ export function RecipeDetailPage() {
   const [adaptDraft, setAdaptDraft] = useState<CreateRecipeDto | null>(null)
   const [scaleError, setScaleError] = useState<string | null>(null)
 
+  const isCooking = searchParams.get('mode') === 'cook'
+  const { data: enhancedInstructions } = useEnhancedInstructions(
+    recipe?.id ?? '',
+    isCooking && !!recipe,
+  )
+
+  const exitCooking = useCallback(() => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete('mode')
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
+      if (isCooking) {
+        exitCooking()
+        return
+      }
       if (mode !== 'view') {
         setMode('view')
         setAdaptDraft(null)
@@ -53,7 +74,7 @@ export function RecipeDetailPage() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [mode, confirmingDelete, navigate])
+  }, [mode, confirmingDelete, navigate, isCooking, exitCooking])
 
   if (!id) {
     return (
@@ -195,6 +216,16 @@ export function RecipeDetailPage() {
     </Link>
   )
 
+  if (isCooking) {
+    return (
+      <CookingView
+        parsed={parsed}
+        onExit={exitCooking}
+        enhancedInstructions={enhancedInstructions ?? undefined}
+      />
+    )
+  }
+
   if (mode === 'edit' || mode === 'adapt-edit') {
     const isAdaptEdit = mode === 'adapt-edit' && !!adaptDraft
     const formInitial: RecipeFormData = isAdaptEdit
@@ -302,6 +333,12 @@ export function RecipeDetailPage() {
           onEdit={() => setMode('edit')}
           onScale={() => setMode('scale')}
           onAdapt={() => setMode('adapt')}
+          onCook={() =>
+            setSearchParams((prev) => {
+              const next = new URLSearchParams(prev)
+              next.set('mode', 'cook')
+              return next
+            })}
           onDelete={() => setConfirmingDelete(true)}
           onToggleFavorite={() => toggleFavoriteMutation.mutate(recipe.id)}
           onRatingChange={(rating) => updateMutation.mutate({ id: recipe.id, data: { rating } })}

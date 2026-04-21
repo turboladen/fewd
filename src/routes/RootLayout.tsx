@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { IconGear } from '../components/Icon'
 import { SettingsPanel } from '../components/SettingsPanel'
+import { useChrome } from '../contexts/ChromeContext'
 
 const topTabs = [
   { to: '/family', label: 'Family' },
@@ -48,50 +49,53 @@ function SubNav({ tabs }: { tabs: readonly { to: string; label: string }[] }) {
 export function RootLayout() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const location = useLocation()
+  const { isHidden: isChromeHidden } = useChrome()
   const inMeals = location.pathname === '/meals' || location.pathname.startsWith('/meals/')
   const inCocktails = location.pathname === '/cocktails'
     || location.pathname.startsWith('/cocktails/')
 
   return (
     <div className='h-screen flex flex-col bg-surface'>
-      <nav className='flex-none bg-white/95 backdrop-blur-sm border-b border-stone-200/80 shadow-soft'>
-        <div className='flex pl-2'>
-          {topTabs.map(({ to, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) =>
-                `relative px-3 sm:px-6 py-3 font-medium text-sm transition-colors duration-150 ${
-                  isActive
-                    ? 'text-primary-600'
-                    : 'text-stone-500 hover:text-stone-800'
-                }`}
-            >
-              {({ isActive }) => (
-                <>
-                  {label}
-                  {isActive && (
-                    <span className='absolute bottom-0 left-2 right-2 h-0.5 bg-primary-500 rounded-full' />
-                  )}
-                </>
-              )}
-            </NavLink>
-          ))}
-          <div className='ml-auto pr-2 sm:pr-4 flex items-center'>
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className='btn-ghost text-stone-400 hover:text-stone-600'
-              title='Settings'
-              aria-label='Settings'
-            >
-              <IconGear className='w-5 h-5' />
-            </button>
+      {!isChromeHidden && (
+        <nav className='flex-none bg-white/95 backdrop-blur-sm border-b border-stone-200/80 shadow-soft'>
+          <div className='flex pl-2'>
+            {topTabs.map(({ to, label }) => (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) =>
+                  `relative px-3 sm:px-6 py-3 font-medium text-sm transition-colors duration-150 ${
+                    isActive
+                      ? 'text-primary-600'
+                      : 'text-stone-500 hover:text-stone-800'
+                  }`}
+              >
+                {({ isActive }) => (
+                  <>
+                    {label}
+                    {isActive && (
+                      <span className='absolute bottom-0 left-2 right-2 h-0.5 bg-primary-500 rounded-full' />
+                    )}
+                  </>
+                )}
+              </NavLink>
+            ))}
+            <div className='ml-auto pr-2 sm:pr-4 flex items-center'>
+              <button
+                onClick={() => setIsSettingsOpen(true)}
+                className='btn-ghost text-stone-400 hover:text-stone-600'
+                title='Settings'
+                aria-label='Settings'
+              >
+                <IconGear className='w-5 h-5' />
+              </button>
+            </div>
           </div>
-        </div>
-      </nav>
+        </nav>
+      )}
 
-      {inMeals && <SubNav tabs={mealsSubTabs} />}
-      {inCocktails && <SubNav tabs={cocktailsSubTabs} />}
+      {!isChromeHidden && inMeals && <SubNav tabs={mealsSubTabs} />}
+      {!isChromeHidden && inCocktails && <SubNav tabs={cocktailsSubTabs} />}
 
       <main className='flex-1 overflow-y-auto'>
         <div key={location.pathname} className='animate-fade-in'>

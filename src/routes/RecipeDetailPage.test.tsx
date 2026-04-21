@@ -119,6 +119,145 @@ describe('RecipeDetailPage', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['recipes'] })
   })
 
+  describe('cooking mode', () => {
+    // Cook mode auto-fetches enhanced instructions. Default to a benign
+    // empty-string success so each test can opt into specific behavior
+    // (or override with a later mockJson call).
+    beforeEach(() => {
+      mockJson('POST', '/api/recipes/r1/enhance', '')
+    })
+
+    it('renders CookingView (not the standard detail view) when ?mode=cook is set', async () => {
+      const pasta = makeRecipe({ id: 'r1', name: 'Pasta', instructions: 'Boil.\nAdd pasta.' })
+      mockJson('GET', '/api/recipes/r1', pasta)
+
+      renderDetail('/recipes/r1?mode=cook')
+
+      // CookingView uses h1 for the recipe name; RecipeDetail uses h2.
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 1, name: 'Pasta' })).toBeInTheDocument()
+      )
+      // The detail-view edit button must be absent — that's the whole point of cook mode.
+      expect(screen.queryByRole('button', { name: /^Edit$/ })).not.toBeInTheDocument()
+      // The exit affordance is visible.
+      expect(screen.getByRole('button', { name: /Exit cooking mode/i })).toBeInTheDocument()
+    })
+
+    it('"Cook this" button on the detail view enters cook mode', async () => {
+      const pasta = makeRecipe({ id: 'r1', name: 'Pasta' })
+      mockJson('GET', '/api/recipes/r1', pasta)
+
+      renderDetail()
+
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 2, name: 'Pasta' })).toBeInTheDocument()
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: /Cook this/i }))
+
+      // Now in cook mode: the heading promotes to h1, edit button is gone.
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 1, name: 'Pasta' })).toBeInTheDocument()
+      )
+      expect(screen.queryByRole('button', { name: /^Edit$/ })).not.toBeInTheDocument()
+    })
+
+    it('"Exit cooking mode" button returns to the standard detail view', async () => {
+      const pasta = makeRecipe({ id: 'r1', name: 'Pasta' })
+      mockJson('GET', '/api/recipes/r1', pasta)
+
+      renderDetail('/recipes/r1?mode=cook')
+
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 1, name: 'Pasta' })).toBeInTheDocument()
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: /Exit cooking mode/i }))
+
+      // Detail view's h2 returns; cook-mode exit button is gone.
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 2, name: 'Pasta' })).toBeInTheDocument()
+      )
+      expect(screen.queryByRole('button', { name: /Exit cooking mode/i })).not.toBeInTheDocument()
+    })
+
+    it('Escape key while in cook mode returns to the standard detail view', async () => {
+      const pasta = makeRecipe({ id: 'r1', name: 'Pasta' })
+      mockJson('GET', '/api/recipes/r1', pasta)
+
+      renderDetail('/recipes/r1?mode=cook')
+
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 1, name: 'Pasta' })).toBeInTheDocument()
+      )
+
+      fireEvent.keyDown(window, { key: 'Escape' })
+
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 2, name: 'Pasta' })).toBeInTheDocument()
+      )
+    })
+
+    it('fetches and renders enhanced instructions when entering cook mode', async () => {
+      const pasta = makeRecipe({ id: 'r1', name: 'Pasta', instructions: 'Plain step.' })
+      mockJson('GET', '/api/recipes/r1', pasta)
+      // Enhanced version returns a punchier rewrite with markdown bold.
+      mockJson('POST', '/api/recipes/r1/enhance', 'Bring water to a **rolling boil**.')
+
+      renderDetail('/recipes/r1?mode=cook')
+
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 1, name: 'Pasta' })).toBeInTheDocument()
+      )
+      // Enhanced text wins out over the original instructions.
+      await waitFor(() => expect(screen.queryByText('Plain step.')).not.toBeInTheDocument())
+      const boldCallout = await screen.findByText('rolling boil')
+      expect(boldCallout.tagName).toBe('STRONG')
+    })
+
+    it('falls back to plain instructions if the enhance request fails', async () => {
+      const pasta = makeRecipe({ id: 'r1', name: 'Pasta', instructions: 'Plain step.' })
+      mockJson('GET', '/api/recipes/r1', pasta)
+      mockJson('POST', '/api/recipes/r1/enhance', { message: 'nope' }, { status: 500 })
+
+      renderDetail('/recipes/r1?mode=cook')
+
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 1, name: 'Pasta' })).toBeInTheDocument()
+      )
+      // The plain instructions stay visible — failure is silent.
+      expect(await screen.findByText('Plain step.')).toBeInTheDocument()
+    })
+
+    it('Escape exits cook mode first when a delete confirmation is pending underneath', async () => {
+      const pasta = makeRecipe({ id: 'r1', name: 'Pasta' })
+      mockJson('GET', '/api/recipes/r1', pasta)
+
+      renderDetail()
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 2, name: 'Pasta' })).toBeInTheDocument()
+      )
+
+      // Stage delete confirmation, then enter cook mode while it's still up.
+      fireEvent.click(screen.getByRole('button', { name: /Delete/ }))
+      expect(screen.getByRole('button', { name: 'Yes' })).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /Cook this/i }))
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 1, name: 'Pasta' })).toBeInTheDocument()
+      )
+
+      // First Escape exits cook mode (priority over delete confirmation).
+      fireEvent.keyDown(window, { key: 'Escape' })
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { level: 2, name: 'Pasta' })).toBeInTheDocument()
+      )
+      // Confirmation state survived; second Escape cancels it.
+      expect(screen.getByRole('button', { name: 'Yes' })).toBeInTheDocument()
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(screen.queryByRole('button', { name: 'Yes' })).not.toBeInTheDocument()
+    })
+  })
+
   it('deleting a recipe navigates back to the list view', async () => {
     const pasta = makeRecipe({ id: 'r1', name: 'Pasta' })
     mockJson('GET', '/api/recipes/r1', pasta)

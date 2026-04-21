@@ -9,6 +9,7 @@ import { RecipeManager } from './components/RecipeManager'
 import { ShoppingList } from './components/ShoppingList'
 import { TemplateManager } from './components/TemplateManager'
 import { ToastProvider } from './components/Toast'
+import { ChromeProvider } from './contexts/ChromeContext'
 import { DrinkRecipeDetailPage } from './routes/DrinkRecipeDetailPage'
 import { RecipeDetailPage } from './routes/RecipeDetailPage'
 import { RootLayout } from './routes/RootLayout'
@@ -48,7 +49,9 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <RouterProvider router={router} />
+        <ChromeProvider>
+          <RouterProvider router={router} />
+        </ChromeProvider>
       </ToastProvider>
     </QueryClientProvider>
   )

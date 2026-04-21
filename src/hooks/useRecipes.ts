@@ -91,6 +91,22 @@ export function useEnhanceInstructions() {
   })
 }
 
+/**
+ * Cached fetch of the AI-enhanced instructions for a recipe. Used by cook
+ * mode to auto-load the enhanced text once per session per recipe; the
+ * imperative `useEnhanceInstructions` mutation above continues to drive
+ * the user-toggled "Enhanced view" affordance on the detail page.
+ */
+export function useEnhancedInstructions(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['recipes', id, 'enhanced'],
+    queryFn: () => api.post<string>('/recipes/' + id + '/enhance'),
+    enabled: enabled && !!id,
+    staleTime: Infinity,
+    retry: false,
+  })
+}
+
 export function useAdaptRecipe() {
   return useStreamingMutation<AdaptRecipeDto, CreateRecipeDto>({
     path: (data) => '/recipes/' + data.recipe_id + '/adapt',

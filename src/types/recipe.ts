@@ -178,3 +178,15 @@ export function formatAmount(amount: IngredientAmount): string {
   }
   return `${amount.min}-${amount.max}`
 }
+
+/**
+ * Splits free-form instructions text into one trimmed, non-empty step per line.
+ * Leading list markers like `1.` or `2)` are stripped so the renderer can
+ * supply its own numbering.
+ */
+export function parseInstructionSteps(instructions: string): string[] {
+  return instructions
+    .split('\n')
+    .map((line) => line.replace(/^\s*\d+[.)]\s*/, '').trim())
+    .filter((line) => line.length > 0)
+}
