@@ -63,6 +63,16 @@ ci:
     bun run test
     typos --config .typos.toml
 
+# Migration drift smoke test: builds the release binary and boots it
+# against (a) a snapshot of current prod schema, and (b) a fresh DB.
+# Catches in-place edits to already-applied migrations and release-only
+# panics that `cargo test` misses (e.g. feature-gated SchemaManager
+# helpers like has_column() that need sqlx-sqlite). Run after every
+# successful deploy to refresh the baseline; see
+# server/tests/fixtures/schema-snapshots/README.md.
+smoke-test:
+    bash scripts/migration-smoke-test.sh
+
 # Reset the dev DB: delete the files, then start the server briefly so
 # startup migrations (and seed_if_empty) apply to a fresh database.
 # Uses PORT=3099 to avoid colliding with a running `just dev`.
