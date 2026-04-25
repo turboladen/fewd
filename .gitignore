@@ -54,6 +54,9 @@ dist-ssr
 
 .claude/settings.local.json
 
+# Playwright MCP runtime artifacts
+.playwright-mcp/
+
 # Beads, Dolt database files (added by bd init)
 .beads/metadata.json
 .dolt/
