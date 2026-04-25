@@ -36,7 +36,11 @@ async fn backfill_table(
 ) -> Result<(), DbErr> {
     let db = manager.get_connection();
 
-    if !manager.has_column(table, "slug").await? {
+    // Use raw PRAGMA instead of `manager.has_column()` — the latter is gated on
+    // sea-orm-migration's `sqlx-sqlite` feature, which this crate doesn't enable
+    // at runtime, so the helper panics with "Sqlite feature is off" in
+    // production builds. PRAGMA works through any plain DB connection.
+    if !column_exists(db, table, "slug").await? {
         db.execute_unprepared(&format!("ALTER TABLE {table} ADD COLUMN slug TEXT"))
             .await?;
     }
@@ -88,6 +92,26 @@ async fn backfill_table(
     .await?;
 
     Ok(())
+}
+
+async fn column_exists(
+    db: &SchemaManagerConnection<'_>,
+    table: &str,
+    column: &str,
+) -> Result<bool, DbErr> {
+    let rows = db
+        .query_all(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            format!("PRAGMA table_info({table})"),
+        ))
+        .await?;
+    for row in rows {
+        let name: String = row.try_get("", "name")?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(test)]
