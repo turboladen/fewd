@@ -9,13 +9,16 @@ pub struct Migration;
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
-    // Backfill `slug` on existing DBs that ran the original `create_recipes` and
-    // `create_drink_recipes` migrations before the slug column was added in-place
-    // to those migration sources. SeaORM tracks already-run migrations by name,
-    // so the in-place edit never reaches existing schemas. This migration
-    // detects the missing column, adds it, populates from the row's `name`, and
-    // creates the unique index. On a fresh DB (where the column is already
-    // present from the create migration) every step is a no-op.
+    // Backfill `slug` on existing DBs that ran the original `create_recipes`
+    // and `create_drink_recipes` migrations before the slug column was added
+    // in-place to those migration sources. SeaORM tracks already-run
+    // migrations by name, so the in-place edit never reaches existing
+    // schemas. This migration detects the missing column, adds it, populates
+    // from the row's `name`, deduplicates any pre-existing duplicate slugs
+    // (e.g. from a partial hand-fix), and creates the unique index. On a
+    // fresh DB (where every row already has a unique slug from the create
+    // migration + insert-time slug generation) every UPDATE is skipped and
+    // the index creation is a no-op via `IF NOT EXISTS`.
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         backfill_table(manager, "recipes", "idx_recipes_slug").await?;
         backfill_table(manager, "drink_recipes", "idx_drink_recipes_slug").await?;
@@ -45,28 +48,38 @@ async fn backfill_table(
             .await?;
     }
 
-    let existing = db
+    // Walk every row in id order. Deterministic ordering matters because it
+    // decides which row in a duplicate group keeps the base slug and which
+    // ones get suffixes — without ORDER BY, SQLite's row-return order is
+    // implementation-defined and two DBs with identical data could hand out
+    // "pasta" / "pasta-2" to different rows on different migration runs.
+    //
+    // The same pass also resolves any pre-existing duplicate non-empty slugs
+    // (e.g. someone hand-added the column without the unique index, then
+    // inserts created collisions). For each row we pick the chosen slug from
+    // either its current value (if non-empty) or `slugify(name)`, dedupe it
+    // against `used` via `with_suffix`, and only `UPDATE` when the chosen
+    // slug differs from what's there. That keeps the migration cheap on
+    // already-correct DBs and idempotent across reruns.
+    let rows = db
         .query_all(Statement::from_string(
             DatabaseBackend::Sqlite,
-            format!("SELECT slug FROM {table} WHERE slug IS NOT NULL AND slug != ''"),
-        ))
-        .await?;
-    let mut used: HashSet<String> = HashSet::with_capacity(existing.len());
-    for row in existing {
-        used.insert(row.try_get("", "slug")?);
-    }
-
-    let to_backfill = db
-        .query_all(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            format!("SELECT id, name FROM {table} WHERE slug IS NULL OR slug = ''"),
+            format!("SELECT id, name, IFNULL(slug, '') AS slug FROM {table} ORDER BY id"),
         ))
         .await?;
 
-    for row in to_backfill {
+    let mut used: HashSet<String> = HashSet::with_capacity(rows.len());
+
+    for row in rows {
         let id: String = row.try_get("", "id")?;
         let name: String = row.try_get("", "name")?;
-        let base = slugify(&name);
+        let current: String = row.try_get("", "slug")?;
+
+        let base = if current.is_empty() {
+            slugify(&name)
+        } else {
+            current.clone()
+        };
 
         let mut attempt = 1u32;
         let chosen = loop {
@@ -78,12 +91,14 @@ async fn backfill_table(
             attempt += 1;
         };
 
-        db.execute(Statement::from_sql_and_values(
-            DatabaseBackend::Sqlite,
-            format!("UPDATE {table} SET slug = ? WHERE id = ?"),
-            [chosen.into(), id.into()],
-        ))
-        .await?;
+        if chosen != current {
+            db.execute(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                format!("UPDATE {table} SET slug = ? WHERE id = ?"),
+                [chosen.into(), id.into()],
+            ))
+            .await?;
+        }
     }
 
     db.execute_unprepared(&format!(
@@ -213,7 +228,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deduplicates_collisions_with_numeric_suffix() {
+    async fn deduplicates_collisions_deterministically_by_id() {
         let db = legacy_db().await;
         insert_recipe(&db, "recipes", "r1", "Pasta").await;
         insert_recipe(&db, "recipes", "r2", "Pasta").await;
@@ -222,13 +237,18 @@ mod tests {
         let manager = SchemaManager::new(&db);
         Migration.up(&manager).await.unwrap();
 
-        let mut found: Vec<String> = slugs(&db, "recipes")
-            .await
-            .into_iter()
-            .map(|(_, s)| s)
-            .collect();
-        found.sort();
-        assert_eq!(found, vec!["pasta", "pasta-2", "pasta-3"]);
+        // Earliest id keeps the base slug; subsequent ids get incremented
+        // suffixes. Without ORDER BY in the migration's SELECT, this mapping
+        // is implementation-defined.
+        let found = slugs(&db, "recipes").await;
+        assert_eq!(
+            found,
+            vec![
+                ("r1".into(), "pasta".into()),
+                ("r2".into(), "pasta-2".into()),
+                ("r3".into(), "pasta-3".into()),
+            ]
+        );
     }
 
     #[tokio::test]
@@ -240,14 +260,54 @@ mod tests {
         let manager = SchemaManager::new(&db);
         Migration.up(&manager).await.unwrap();
 
-        let mut found: Vec<String> = slugs(&db, "recipes")
+        let found = slugs(&db, "recipes").await;
+        // Both fall back to "recipe"; r1 keeps the base, r2 gets the suffix.
+        assert_eq!(
+            found,
+            vec![
+                ("r1".into(), "recipe".into()),
+                ("r2".into(), "recipe-2".into()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn dedupes_pre_existing_duplicate_slugs() {
+        // Simulates a hand-patched DB where the column was added but the
+        // unique index never was, then runtime inserts (or manual updates)
+        // produced duplicate non-empty slugs. Without this pass, the
+        // CREATE UNIQUE INDEX at the end of the migration would fail.
+        let db = legacy_db().await;
+        db.execute_unprepared("ALTER TABLE recipes ADD COLUMN slug TEXT")
             .await
-            .into_iter()
-            .map(|(_, s)| s)
-            .collect();
-        found.sort();
-        // Both fall back to "recipe", deduped via with_suffix.
-        assert_eq!(found, vec!["recipe", "recipe-2"]);
+            .unwrap();
+        for (id, name) in [
+            ("r1", "Pizza One"),
+            ("r2", "Pizza Two"),
+            ("r3", "Pizza Three"),
+        ] {
+            insert_recipe(&db, "recipes", id, name).await;
+            db.execute(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                "UPDATE recipes SET slug = 'pizza' WHERE id = ?",
+                [id.into()],
+            ))
+            .await
+            .unwrap();
+        }
+
+        let manager = SchemaManager::new(&db);
+        Migration.up(&manager).await.unwrap();
+
+        let found = slugs(&db, "recipes").await;
+        assert_eq!(
+            found,
+            vec![
+                ("r1".into(), "pizza".into()),
+                ("r2".into(), "pizza-2".into()),
+                ("r3".into(), "pizza-3".into()),
+            ]
+        );
     }
 
     #[tokio::test]
