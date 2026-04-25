@@ -2,6 +2,7 @@ pub mod db;
 pub mod dto;
 pub mod entities;
 pub mod error;
+pub mod mcp;
 pub mod routes;
 pub mod services;
 

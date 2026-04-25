@@ -1,11 +1,15 @@
 arm64_target := "aarch64-unknown-linux-gnu"
 
-# Development: run Axum + Vite concurrently (http://localhost:5173)
+# Development: run Axum + Vite concurrently (http://localhost:5173).
+# Cargo is invoked from the workspace root (no `cd server`) so `cargo run`
+# resolves DATABASE_PATH's `./data/fewd.db` default against the project
+# root, not `server/data/`. Avoids silently creating a parallel dev DB
+# whenever any other invocation runs from the project root.
 dev:
     bunx concurrently \
         --names "server,client" \
         --prefix-colors "blue,green" \
-        "cd server && cargo run" \
+        "cargo run --bin fewd-server" \
         "bun run dev"
 
 # Build production binary (embeds SPA into single executable)

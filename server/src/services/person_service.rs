@@ -23,6 +23,48 @@ impl PersonService {
         Person::find_by_id(id).one(db).await
     }
 
+    /// Case-insensitive lookup of an active family member by name. Used by the
+    /// MCP server's light "family-name bearer" auth. The active set is small
+    /// (a handful of rows) so we filter in-memory rather than fight SQLite's
+    /// case-sensitivity rules at the query layer.
+    ///
+    /// Returns `Ok(None)` if no row matches OR if multiple active rows
+    /// normalize to the same name. The latter shouldn't happen — there's no
+    /// uniqueness constraint enforcing it today, but the household-scale data
+    /// model makes it very unlikely. Failing closed on ambiguity (rather than
+    /// silently picking the first match) avoids "auth resolves as the wrong
+    /// person" scenarios; the accompanying `tracing::warn!` makes the
+    /// duplicate visible so the operator can clean it up.
+    pub async fn find_active_by_name(
+        db: &DatabaseConnection,
+        name: &str,
+    ) -> Result<Option<person::Model>, DbErr> {
+        let target = name.trim().to_lowercase();
+        if target.is_empty() {
+            return Ok(None);
+        }
+        let matches: Vec<person::Model> = Self::get_all(db)
+            .await?
+            .into_iter()
+            .filter(|p| p.name.trim().to_lowercase() == target)
+            .collect();
+        match matches.len() {
+            0 => Ok(None),
+            1 => Ok(matches.into_iter().next()),
+            n => {
+                let ids: Vec<&str> = matches.iter().map(|p| p.id.as_str()).collect();
+                tracing::warn!(
+                    normalized_name = %target,
+                    matched_ids = ?ids,
+                    match_count = n,
+                    "find_active_by_name: multiple active people normalize to the same name; \
+                     refusing to disambiguate. Edit one of the duplicates so they're distinguishable."
+                );
+                Ok(None)
+            }
+        }
+    }
+
     pub async fn create(
         db: &DatabaseConnection,
         data: CreatePersonDto,
