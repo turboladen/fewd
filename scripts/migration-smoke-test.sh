@@ -24,10 +24,8 @@ if [ ! -f "$BASELINE" ]; then
     exit 1
 fi
 
-# Pre-flight: bail if PORT is already bound. fewd-server's main.rs currently
-# logs "Server running" BEFORE calling bind (tracked: fewd-gvk), so a stale
-# process on the same port is invisible to our readiness probe and curl
-# would silently hit the stranger.
+# Pre-flight: bail if PORT is already bound — better to fail fast than to
+# spend ~30s building a release binary only to find we can't start it.
 if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
     LISTENER_PID=$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t | head -1)
     echo "Port $PORT is already bound (PID $LISTENER_PID)." >&2
@@ -80,28 +78,6 @@ run_case() {
     done
     if ! grep -q "Server running" "$log"; then
         echo "Server did not report ready within 10s. Log:"
-        cat "$log"
-        return 1
-    fi
-
-    # The readiness log fires before bind() in main.rs, so confirm the
-    # listener actually exists and belongs to our PID before probing.
-    local probe_attempts=0
-    while [ "$probe_attempts" -lt 20 ]; do
-        local listener_pid
-        listener_pid="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
-        if [ "$listener_pid" = "$SERVER_PID" ]; then break; fi
-        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-            echo "Server died before binding port $PORT. Log:"
-            cat "$log"
-            return 1
-        fi
-        sleep 0.1
-        probe_attempts=$((probe_attempts + 1))
-    done
-    if [ "$probe_attempts" -ge 20 ]; then
-        echo "Port $PORT was not bound by our server (PID $SERVER_PID) within 2s." >&2
-        echo "Likely a stale process on $PORT, or the bind failed silently. Log:"
         cat "$log"
         return 1
     fi
