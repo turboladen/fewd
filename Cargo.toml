@@ -1,3 +1,16 @@
 [workspace]
 members = ["server", "server/migration"]
 resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+# Async runtime — server uses "full"; migration tests use "macros, rt".
+# Members extend via `tokio = { workspace = true, features = [...] }`.
+tokio = { version = "1" }
+
+# SeaORM family — sea-orm and sea-orm-migration must stay in lockstep.
+sea-orm = { version = "1.1", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros"] }
+sea-orm-migration = { version = "1.1" }
