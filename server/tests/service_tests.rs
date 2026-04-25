@@ -192,6 +192,112 @@ async fn person_delete() {
 }
 
 #[tokio::test]
+async fn person_find_active_by_name_is_case_insensitive() {
+    let db = setup_db().await;
+    let alice = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+
+    // Exact, lower-case, upper-case, and whitespace variants all match.
+    for variant in ["Alice", "alice", "ALICE", "  Alice  "] {
+        let found = PersonService::find_active_by_name(&db, variant)
+            .await
+            .unwrap();
+        assert_eq!(
+            found.as_ref().map(|p| p.id.as_str()),
+            Some(alice.id.as_str()),
+            "expected {variant:?} to match Alice's id"
+        );
+    }
+
+    // Unknown name → None.
+    let none = PersonService::find_active_by_name(&db, "Bob")
+        .await
+        .unwrap();
+    assert!(none.is_none());
+
+    // Empty or whitespace-only → None (no accidental first-match).
+    assert!(PersonService::find_active_by_name(&db, "")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(PersonService::find_active_by_name(&db, "   ")
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn person_find_active_by_name_returns_none_on_normalized_duplicates() {
+    // The schema doesn't enforce name uniqueness; if two active rows
+    // normalize to the same name (e.g. "Alice" and "  ALICE  "), the
+    // safe behavior is to fail closed (return None) rather than silently
+    // pick one and authenticate as the wrong person.
+    let db = setup_db().await;
+    PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+    PersonService::create(
+        &db,
+        CreatePersonDto {
+            name: "  ALICE  ".to_string(),
+            birthdate: "1990-01-01".to_string(),
+            dietary_goals: None,
+            dislikes: vec![],
+            favorites: vec![],
+            notes: None,
+            drink_preferences: None,
+            drink_dislikes: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let found = PersonService::find_active_by_name(&db, "alice")
+        .await
+        .unwrap();
+    assert!(
+        found.is_none(),
+        "find_active_by_name must refuse to disambiguate when normalization collides"
+    );
+}
+
+#[tokio::test]
+async fn person_find_active_by_name_skips_inactive_rows() {
+    let db = setup_db().await;
+    let alice = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+    // Soft-delete (the delete() method removes the row; use the update path
+    // to flip is_active instead, mirroring how the UI deactivates a person).
+    PersonService::update(
+        &db,
+        alice.id.clone(),
+        fewd_lib::dto::UpdatePersonDto {
+            name: None,
+            birthdate: None,
+            dietary_goals: None,
+            dislikes: None,
+            favorites: None,
+            notes: None,
+            is_active: Some(false),
+            drink_preferences: None,
+            drink_dislikes: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let found = PersonService::find_active_by_name(&db, "Alice")
+        .await
+        .unwrap();
+    assert!(
+        found.is_none(),
+        "deactivated Alice must not resolve as an active family member"
+    );
+}
+
+#[tokio::test]
 async fn person_json_fields_roundtrip() {
     let db = setup_db().await;
     let dto = CreatePersonDto {

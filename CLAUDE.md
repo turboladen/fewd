@@ -565,6 +565,35 @@ struct PersonDto { name: String }
 interface PersonDto { name: string }
 ```
 
+## Cross-Boundary Conventions
+
+Invariants the type system does not enforce but production code assumes. Violate these quietly and you'll see "data's in the DB but the UI doesn't render it" bugs — the kind that take hours to diagnose because nothing errors.
+
+### Meal type + slot encoding
+
+`Meal.meal_type` is Title Case. The `MealPlanner` UI renders per-day cells with strict equality: `meal.meal_type === 'Dinner'`. Store `'dinner'` and the meal becomes invisible to the planner.
+
+`Meal.order_index` is a slot number, not a sort key. `DEFAULT_MEALS` in `src/components/MealPlanner.tsx` pins the mapping: Breakfast=0, Lunch=1, Dinner=2, Snack=3. A Dinner at `order_index=0` sits at "the Breakfast slot" expectation and gets rejected on type mismatch.
+
+Both invariants are enforced at the MCP boundary by `canonical_meal_type` and `default_order_index` in `server/src/mcp/schemas/meals.rs`. Any new write path (HTTP routes, future tools, direct SQL migrations) must do the same normalization or the meal will not render in the planner. See `fewd-2pf` for the follow-up work to make this compile-enforced via a `MealType` enum.
+
+### Database path
+
+`just dev` runs `cargo run --bin fewd-server` from the workspace root, so `DATABASE_PATH`'s default (`./data/fewd.db`) resolves to `project-root/data/fewd.db`. Don't introduce `cd server` in any run command — it'll create a parallel DB at `server/data/fewd.db` that silently drifts out of sync with the one the UI reads from.
+
+## MCP Server
+
+The MCP server lives at `server/src/mcp/`, mounted at `/mcp` on the existing Axum router. Transport is Streamable HTTP; Claude Desktop connects via `bunx mcp-remote` (see README).
+
+Module layout:
+
+- `mcp/mod.rs` — router factory + bearer-auth middleware (`Authorization: Bearer <family-member-name>`)
+- `mcp/handler.rs` — `FewdMcp` struct + tool methods (one per `#[tool]`) + `ServerHandler` impl
+- `mcp/lookups.rs` — shared name/id resolution helpers (`MealLookups`)
+- `mcp/schemas/` — LLM-friendly input/output types, split by domain (common, recipes, meals, people, shopping, errors)
+
+**Before extending the tool surface**, read the design principles captured in beads memory: `bd memories fewd-mcp-design-principles`. Short version: error on unknown references with actionable messages; cross-reference tools in descriptions; dual-expose important context as tool AND resource when clients vary in capability; prefer discoverable tool names; do the right thing by default server-side; iterate on output format from live session feedback; respect the domain model's expressiveness at the boundary rather than flattening it.
+
 ## Resources
 
 - [Axum Docs](https://docs.rs/axum/latest/axum/)

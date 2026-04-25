@@ -4,7 +4,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::http::{header, Method, StatusCode, Uri};
 use axum::response::IntoResponse;
 use axum::Router;
-use fewd_lib::{db, routes, AppState};
+use fewd_lib::{db, mcp, routes, AppState};
 use rust_embed::Embed;
 use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
@@ -43,10 +43,18 @@ async fn main() {
             Method::DELETE,
             Method::OPTIONS,
         ]))
-        .allow_headers(AllowHeaders::list([header::CONTENT_TYPE, header::ACCEPT]));
+        .allow_headers(AllowHeaders::list([
+            header::CONTENT_TYPE,
+            header::ACCEPT,
+            // MCP clients attach bearer tokens; browser-origin flows preflight.
+            header::AUTHORIZATION,
+            // rmcp Streamable HTTP clients echo the session id on follow-up requests.
+            "mcp-session-id".parse().unwrap(),
+        ]));
 
     let app = Router::new()
         .nest("/api", routes::api_routes())
+        .nest_service("/mcp", mcp::router(state.db.clone()))
         .fallback(serve_spa)
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024)) // 10 MB
         .layer(cors)
