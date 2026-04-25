@@ -58,7 +58,7 @@ just db-reset
 {
   sqlite3 server/data/fewd.db .schema
   sqlite3 server/data/fewd.db \
-    "SELECT 'INSERT INTO seaql_migrations VALUES(' || quote(version) || ',' || applied_at || ');' FROM seaql_migrations;"
+    "SELECT 'INSERT INTO seaql_migrations VALUES(' || quote(version) || ',' || applied_at || ');' FROM seaql_migrations ORDER BY version;"
 } > server/tests/fixtures/schema-snapshots/baseline.sql
 ```
 
@@ -66,7 +66,8 @@ just db-reset
 from scratch. The two `sqlite3` invocations dump:
 
 1. All `CREATE` statements (schema only — no data)
-2. One `INSERT` per migration so SeaORM treats them as applied
+2. One `INSERT` per migration, sorted by version so regenerated
+   snapshots produce deterministic diffs
 
 Then run `just smoke-test` to confirm the new fixture works end-to-end
 before committing.
