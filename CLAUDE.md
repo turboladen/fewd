@@ -248,6 +248,10 @@ export function MyComponent({ onSave }: Props) {
 - Test migrations can be rolled back
 - JSON fields stored as TEXT
 
+**Never edit an already-shipped migration in place.** SeaORM tracks runs by migration name in `seaql_migrations`. If you edit a migration whose name is already recorded on any environment (the dietpi deploy counts as one), that environment will skip your edit and the live schema will silently drift from what the code expects. Always add a new `m<DATE>_<NNN>_<description>.rs` for any subsequent change, even during pre-release. The dietpi box is production-equivalent for migration purposes.
+
+**Prefer raw SQL for migration logic that introspects schema.** Helpers like `SchemaManager::has_column()` are gated on sea-orm-migration's `sqlx-sqlite` feature. The migration crate's runtime build doesn't enable that feature, so the helper panics with `"Sqlite feature is off"` in release builds while passing locally (dev-deps merge the feature in for tests). Use `PRAGMA table_info(<table>)` via `db.query_all(Statement::from_string(...))` instead — works through any plain DB connection, no feature flags. See `m20260424_000012_backfill_recipe_slugs.rs` for the pattern.
+
 **Queries:**
 
 - Use SeaORM query builder (type-safe)
@@ -303,6 +307,16 @@ mod tests {
 - Implementation details
 - Third-party libraries
 - Styling
+
+### When tests are not enough
+
+`cargo test` runs in dev mode and unifies dev-dependency features into the build, which can hide runtime feature-flag mismatches. For backend changes that touch:
+
+- Database schema or migrations
+- sea-orm-migration helpers (`has_column`, `has_index`, etc.)
+- Cargo features in any workspace member
+
+…also run `cargo build --release` AND smoke-test the binary against a non-empty, pre-existing DB before declaring the change done. Until `fewd-ga2` (CI smoke test for migration drift) lands, the dietpi deploy is the fastest production-realistic verification.
 
 ### Test Commands
 
