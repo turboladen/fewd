@@ -61,6 +61,17 @@ jobs:
       - name: Run tests
         run: cd server && cargo test --all-features
 
+      # Boot the release binary against (a) a snapshot of the deployed
+      # schema and (b) an empty DB, then probe the endpoints that 500'd
+      # during fewd-nwi. Catches in-place edits to already-applied
+      # migrations and release-only panics that `cargo test` misses
+      # because dev-deps unify feature flags differently than the release
+      # build (e.g. sea-orm-migration's SchemaManager::has_column gated on
+      # sqlx-sqlite). See scripts/migration-smoke-test.sh and
+      # server/tests/fixtures/schema-snapshots/README.md.
+      - name: Migration drift smoke test
+        run: bash scripts/migration-smoke-test.sh
+
   frontend-checks:
     name: Frontend Checks
     runs-on: macos-latest
