@@ -325,7 +325,7 @@ mod tests {
 cargo test
 
 # Frontend tests
-bun test
+bun run test
 
 # Frontend tests (watch mode)
 bun run test:watch
@@ -428,7 +428,7 @@ sqlite3 <path-to-fewd.db>
 **`.github/workflows/ci.yml`** - Runs on every push and PR:
 
 - ✅ Rust: `cargo fmt --check`, `cargo clippy`, `cargo test`
-- ✅ TypeScript: `dprint check`, `bun run lint`, `bun test`
+- ✅ TypeScript: `dprint check`, `bun run lint`, `bun run test`
 - ✅ Typos: `typos --config .typos.toml`
 
 **`.github/workflows/build.yml`** - Runs on tags (releases):
@@ -444,7 +444,7 @@ sqlite3 <path-to-fewd.db>
 
 # Or manually:
 cargo fmt --check && cargo clippy -- -D warnings && cargo test
-dprint check && bun run lint && bun test
+dprint check && bun run lint && bun run test
 typos
 ```
 
