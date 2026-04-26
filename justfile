@@ -84,7 +84,10 @@ db-reset:
     (cd server && cargo build --bin fewd-server --quiet)
     echo "Running migrations on fresh DB..."
     LOG=$(mktemp)
-    (cd server && PORT=3099 RUST_LOG=info ../target/debug/fewd-server >"$LOG" 2>&1) &
+    # `exec` so the subshell *becomes* fewd-server; otherwise $! is the
+    # subshell PID and `kill` only signals the wrapper, leaving the server
+    # orphaned and still bound to PORT (fewd-jx9).
+    (cd server && exec env PORT=3099 RUST_LOG=info ../target/debug/fewd-server >"$LOG" 2>&1) &
     SERVER_PID=$!
     # Migrations complete before axum binds; wait for the "Server running" log.
     for _ in $(seq 1 100); do
