@@ -62,11 +62,14 @@ async fn main() {
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    tracing::info!("Server running on http://localhost:{}", port);
-
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("Failed to bind address");
+    let bound_port = listener
+        .local_addr()
+        .expect("listener has no local address")
+        .port();
+    tracing::info!("Server running on http://localhost:{}", bound_port);
     axum::serve(listener, app)
         .await
         .expect("Server failed to start");
