@@ -37,3 +37,9 @@ Flag a finding in one of these categories only if the change in this PR _makes t
 ## Task tracking
 
 This project uses [bd (beads)](https://github.com/turboladen/beads) for all task tracking, not GitHub Issues. If a PR review surfaces a follow-up worth tracking, suggest "this could be filed as a bead" rather than "open a GitHub Issue." Priorities are P0–P4 (numeric, not "high/medium/low").
+
+The serialized form at `.beads/issues.jsonl` is a flat-file export of a workflow tracker. A few conventions that look editable from a diff but aren't:
+
+- **Bug descriptions are historical.** They capture what was observed at filing time and aren't retroactively rewritten to past tense once a fix lands — the audit trail is what makes closed bugs useful months later. Don't suggest editing a bug's description or workaround block inside the same PR that fixes it.
+- **Closure is a separate post-merge commit on main**, by convention `chore(beads): close fewd-XXX after PR #YY merge` (see `cc57e53`, `379f601`). Setting `"status":"closed"` inside the fix PR would have `bd list --status=open` falsely report the fix is shipped while it sits in review.
+- **Timestamps are real moments**, not invented. Don't suggest synthetic `closed_at` / `started_at` values; reusing an unrelated `updated_at` field fabricates history.
