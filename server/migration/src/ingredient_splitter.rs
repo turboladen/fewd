@@ -305,7 +305,11 @@ mod tests {
         for raw in meta_prose {
             let (name, prep) = split_name_and_prep(raw);
             assert!(!name.is_empty(), "name unexpectedly empty for {:?}", raw);
-            assert!(prep.is_some(), "expected meta-prose to split, input {:?}", raw);
+            assert!(
+                prep.is_some(),
+                "expected meta-prose to split, input {:?}",
+                raw
+            );
             let recombined = match &prep {
                 Some(p) => format!("{}, {}", name, p),
                 None => name.clone(),

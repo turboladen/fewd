@@ -93,7 +93,7 @@ struct Ingredient {
 /// Returns `Ok(Some(new_json))` if any ingredient was rewritten,
 /// `Ok(None)` if the row is already fully split (no UPDATE needed — keeps
 /// the migration cheap on already-correct DBs and idempotent across re-runs),
-/// or `Err` if the row's JSON is unparseable. The caller propagates parse
+/// or `Err` if the row's JSON is unparsable. The caller propagates parse
 /// errors as `DbErr` rather than silently skipping — corrupt data should
 /// halt the migration and be fixed by hand, not be invisible.
 fn rewrite_ingredients_json(raw: &str) -> Result<Option<String>, serde_json::Error> {
