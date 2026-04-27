@@ -153,8 +153,8 @@ mod tests {
     ///   that's harmless).
     ///
     /// The remaining ~14 rows are corrupted by upstream parser bugs (em-dash
-    /// ranges, Unicode fractions, compound units mis-bucketed by
-    /// `splitn(3, ' ')`). They're intentionally NOT covered here — those
+    /// ranges, Unicode fractions, compound units that `splitn(3, ' ')`
+    /// puts in the wrong slot). They're intentionally NOT covered here — those
     /// rows look ugly today and our splitter can't meaningfully fix them.
     /// Tracked separately as fewd-4i3.
     #[test]
