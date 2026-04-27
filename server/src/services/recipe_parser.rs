@@ -1,4 +1,5 @@
 use crate::dto::{CreateRecipeDto, IngredientAmountDto, IngredientDto, TimeValueDto};
+use crate::services::ingredient_splitter::split_name_and_prep;
 
 pub struct RecipeParser;
 
@@ -189,55 +190,64 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
 
     match parts.len() {
         // Just a name like "salt"
-        1 => Some(IngredientDto {
-            name: parts[0].to_string(),
-            prep: None,
-            amount: IngredientAmountDto::Single { value: 1.0 },
-            unit: "to taste".to_string(),
+        1 => Some(build_ingredient(
+            parts[0],
+            IngredientAmountDto::Single { value: 1.0 },
+            "to taste".to_string(),
             notes,
-        }),
+        )),
         2 => {
             if let Some(amount) = try_parse_amount(parts[0]) {
                 // Amount + name like "2 eggs"
-                Some(IngredientDto {
-                    name: parts[1].to_string(),
-                    prep: None,
-                    amount,
-                    unit: "whole".to_string(),
-                    notes,
-                })
+                Some(build_ingredient(parts[1], amount, "whole".to_string(), notes))
             } else {
                 // Two-word name like "black pepper"
-                Some(IngredientDto {
-                    name: line.to_string(),
-                    prep: None,
-                    amount: IngredientAmountDto::Single { value: 1.0 },
-                    unit: "to taste".to_string(),
+                Some(build_ingredient(
+                    &line,
+                    IngredientAmountDto::Single { value: 1.0 },
+                    "to taste".to_string(),
                     notes,
-                })
+                ))
             }
         }
         // Amount + unit + name like "2 cups flour" or "6 cloves garlic, minced"
         _ => {
             if let Some(amount) = try_parse_amount(parts[0]) {
-                Some(IngredientDto {
-                    name: parts[2].to_string(),
-                    prep: None,
+                Some(build_ingredient(
+                    parts[2],
                     amount,
-                    unit: parts[1].to_string(),
+                    parts[1].to_string(),
                     notes,
-                })
+                ))
             } else {
                 // Entire line is a name (no parseable amount)
-                Some(IngredientDto {
-                    name: line.to_string(),
-                    prep: None,
-                    amount: IngredientAmountDto::Single { value: 1.0 },
-                    unit: "to taste".to_string(),
+                Some(build_ingredient(
+                    &line,
+                    IngredientAmountDto::Single { value: 1.0 },
+                    "to taste".to_string(),
                     notes,
-                })
+                ))
             }
         }
+    }
+}
+
+/// Apply the name/prep splitter to a raw name segment before constructing
+/// the DTO, so comma'd prep clauses like "garlic, minced" land in the
+/// dedicated `prep` field rather than being baked into `name`.
+fn build_ingredient(
+    raw_name: &str,
+    amount: IngredientAmountDto,
+    unit: String,
+    notes: Option<String>,
+) -> IngredientDto {
+    let (name, prep) = split_name_and_prep(raw_name);
+    IngredientDto {
+        name,
+        prep,
+        amount,
+        unit,
+        notes,
     }
 }
 
@@ -482,6 +492,18 @@ dinner, quick, mexican";
         let ing = &recipe.ingredients[0];
         assert_eq!(ing.name, "salt");
         assert_eq!(ing.unit, "to taste");
+    }
+
+    #[test]
+    fn test_ingredient_with_prep_clause() {
+        // "6 cloves garlic, minced" — splitn(3, ' ') leaves "garlic, minced"
+        // in parts[2]. The splitter pulls "minced" into the prep field.
+        let md = "# Test\n\n## Ingredients\n- 6 cloves garlic, minced\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "garlic");
+        assert_eq!(ing.prep, Some("minced".to_string()));
+        assert_eq!(ing.unit, "cloves");
     }
 
     #[test]

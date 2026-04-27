@@ -199,6 +199,8 @@ fn parse_ingredients(json: &str) -> Vec<String> {
     #[derive(serde::Deserialize)]
     struct Ingredient {
         name: String,
+        #[serde(default)]
+        prep: Option<String>,
         amount: serde_json::Value,
         unit: String,
         #[serde(default)]
@@ -235,12 +237,17 @@ fn parse_ingredients(json: &str) -> Vec<String> {
                 _ => String::new(),
             };
 
+            let label = match ing.prep.as_deref() {
+                Some(prep) if !prep.is_empty() => format!("{}, {}", ing.name, prep),
+                _ => ing.name.clone(),
+            };
+
             let mut result = if amount_str.is_empty() {
-                ing.name.clone()
+                label
             } else if ing.unit.is_empty() {
-                format!("{} {}", amount_str, ing.name)
+                format!("{} {}", amount_str, label)
             } else {
-                format!("{} {} {}", amount_str, ing.unit, ing.name)
+                format!("{} {} {}", amount_str, ing.unit, label)
             };
 
             if let Some(notes) = ing.notes {

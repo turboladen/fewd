@@ -181,9 +181,18 @@ pub(super) fn nutrition_out(n: NutritionDto) -> NutritionOut {
 }
 
 pub(super) fn ingredient_in(ing: IngredientOut) -> IngredientDto {
+    // Defensive: if a caller hands us `name = "garlic, minced", prep = None`,
+    // normalize it through the splitter so the comma'd prep ends up in the
+    // dedicated field. Already-split inputs (`prep` populated, or no comma in
+    // `name`) pass through unchanged because the splitter is idempotent.
+    let (name, prep) = if ing.prep.is_none() && ing.name.contains(',') {
+        crate::services::ingredient_splitter::split_name_and_prep(&ing.name)
+    } else {
+        (ing.name, ing.prep)
+    };
     IngredientDto {
-        name: ing.name,
-        prep: ing.prep,
+        name,
+        prep,
         amount: amount_in(ing.amount),
         unit: ing.unit,
         notes: ing.notes,

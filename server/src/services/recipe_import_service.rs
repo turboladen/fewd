@@ -183,6 +183,19 @@ impl RecipeImportService {
         dto.source = source.to_string();
         dto.parent_recipe_id = None;
 
+        // Defensive: if Claude returned a comma'd name without filling `prep`,
+        // peel the prep clause off so the shopping aggregator can collapse
+        // variants. The system prompt asks Claude for the split shape, but
+        // models occasionally backslide on edge cases.
+        for ing in dto.ingredients.iter_mut() {
+            if ing.prep.is_none() && ing.name.contains(',') {
+                let (name, prep) =
+                    crate::services::ingredient_splitter::split_name_and_prep(&ing.name);
+                ing.name = name;
+                ing.prep = prep;
+            }
+        }
+
         Ok(ImportResult {
             recipe: dto,
             input_tokens: response.input_tokens,
@@ -204,7 +217,8 @@ Return ONLY valid JSON matching this exact schema (no markdown fences, no commen
   "instructions": "string (full step-by-step instructions)",
   "ingredients": [
     {
-      "name": "string",
+      "name": "string (the purchasable thing — what you'd put on a shopping list)",
+      "prep": "string or null (preparation form: 'minced', 'thinly sliced', 'cut into wedges')",
       "amount": {"type": "single", "value": number} OR {"type": "range", "min": number, "max": number},
       "unit": "string",
       "notes": "string or null"
@@ -228,6 +242,7 @@ Return ONLY valid JSON matching this exact schema (no markdown fences, no commen
 
 Rules:
 - Extract all ingredients with accurate amounts, units, and names
+- For each ingredient, split the purchasable identity from the preparation form. Put the thing you'd buy at the grocery store in `name` ("garlic", "lemon", "chicken thighs"), and the preparation/cut/state in `prep` ("minced", "thinly sliced", "cut into wedges for serving"). If there is no prep clause, set `prep` to null. Distinct purchasable varietals stay in `name` — "boneless skinless chicken breast" and "whole chicken" are DIFFERENT names, not name+prep variants.
 - Preserve the full instructions as written
 - Include prep/cook/total time if mentioned
 - Include nutrition info if available
