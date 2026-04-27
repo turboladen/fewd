@@ -1,5 +1,6 @@
 pub use sea_orm_migration::prelude::*;
 
+pub mod ingredient_splitter;
 mod m20260118_000001_create_people;
 mod m20260118_000002_create_recipes;
 mod m20260118_000003_create_meals;
@@ -13,7 +14,6 @@ mod m20260213_000010_create_drink_recipes;
 mod m20260214_000011_add_drink_recipe_source_url;
 mod m20260424_000012_backfill_recipe_slugs;
 mod m20260427_000013_split_ingredient_name_and_prep;
-pub mod ingredient_splitter;
 pub mod slug;
 
 pub use ingredient_splitter::split_name_and_prep;

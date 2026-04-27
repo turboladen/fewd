@@ -56,12 +56,18 @@ mod tests {
     fn no_comma_returns_input_unchanged() {
         assert_eq!(split("garlic"), ("garlic".to_string(), None));
         assert_eq!(split("olive oil"), ("olive oil".to_string(), None));
-        assert_eq!(split("Salt and black pepper"), ("Salt and black pepper".to_string(), None));
+        assert_eq!(
+            split("Salt and black pepper"),
+            ("Salt and black pepper".to_string(), None)
+        );
     }
 
     #[test]
     fn simple_split() {
-        assert_eq!(split("garlic, minced"), ("garlic".to_string(), Some("minced".to_string())));
+        assert_eq!(
+            split("garlic, minced"),
+            ("garlic".to_string(), Some("minced".to_string()))
+        );
         assert_eq!(
             split("eggs, beaten"),
             ("eggs".to_string(), Some("beaten".to_string()))
@@ -88,7 +94,10 @@ mod tests {
         // The comma inside the parens is NOT the split point; the one after `)` is.
         assert_eq!(
             split("pear (or Fuji apple), grated"),
-            ("pear (or Fuji apple)".to_string(), Some("grated".to_string()))
+            (
+                "pear (or Fuji apple)".to_string(),
+                Some("grated".to_string())
+            )
         );
     }
 
@@ -97,14 +106,23 @@ mod tests {
         // Multi-comma prep: only the first comma splits; the rest are part of prep.
         assert_eq!(
             split("Parmesan, freshly grated, for serving"),
-            ("Parmesan".to_string(), Some("freshly grated, for serving".to_string()))
+            (
+                "Parmesan".to_string(),
+                Some("freshly grated, for serving".to_string())
+            )
         );
     }
 
     #[test]
     fn degenerate_empty_sides_left_alone() {
-        assert_eq!(split(", missing left"), (", missing left".to_string(), None));
-        assert_eq!(split("missing right,"), ("missing right,".to_string(), None));
+        assert_eq!(
+            split(", missing left"),
+            (", missing left".to_string(), None)
+        );
+        assert_eq!(
+            split("missing right,"),
+            ("missing right,".to_string(), None)
+        );
         assert_eq!(split(","), (",".to_string(), None));
     }
 
@@ -132,13 +150,33 @@ mod tests {
     #[test]
     fn live_data_calibration() {
         let clean_splits: &[(&str, &str, &str)] = &[
-            ("Celery stalks, finely diced", "Celery stalks", "finely diced"),
-            ("Fresh mozzarella, torn into pieces", "Fresh mozzarella", "torn into pieces"),
-            ("Fresh parsley or basil, chopped", "Fresh parsley or basil", "chopped"),
+            (
+                "Celery stalks, finely diced",
+                "Celery stalks",
+                "finely diced",
+            ),
+            (
+                "Fresh mozzarella, torn into pieces",
+                "Fresh mozzarella",
+                "torn into pieces",
+            ),
+            (
+                "Fresh parsley or basil, chopped",
+                "Fresh parsley or basil",
+                "chopped",
+            ),
             ("Garlic cloves, minced", "Garlic cloves", "minced"),
-            ("Medium carrots, finely diced", "Medium carrots", "finely diced"),
+            (
+                "Medium carrots, finely diced",
+                "Medium carrots",
+                "finely diced",
+            ),
             ("Medium onion, finely diced", "Medium onion", "finely diced"),
-            ("Nori sheets, cut into strips", "Nori sheets", "cut into strips"),
+            (
+                "Nori sheets, cut into strips",
+                "Nori sheets",
+                "cut into strips",
+            ),
             (
                 "Parmesan or Pecorino Romano, finely grated",
                 "Parmesan or Pecorino Romano",
@@ -182,12 +220,28 @@ mod tests {
                 "firm tofu",
                 "cut into 1/2-inch cubes",
             ),
-            ("fresh cilantro, finely chopped", "fresh cilantro", "finely chopped"),
+            (
+                "fresh cilantro, finely chopped",
+                "fresh cilantro",
+                "finely chopped",
+            ),
             ("fresh ginger, grated", "fresh ginger", "grated"),
-            ("fresh parsley, finely chopped", "fresh parsley", "finely chopped"),
-            ("fresh rosemary, finely chopped", "fresh rosemary", "finely chopped"),
+            (
+                "fresh parsley, finely chopped",
+                "fresh parsley",
+                "finely chopped",
+            ),
+            (
+                "fresh rosemary, finely chopped",
+                "fresh rosemary",
+                "finely chopped",
+            ),
             ("frozen edamame, thawed", "frozen edamame", "thawed"),
-            ("garlic clove, minced or grated", "garlic clove", "minced or grated"),
+            (
+                "garlic clove, minced or grated",
+                "garlic clove",
+                "minced or grated",
+            ),
             ("garlic, minced", "garlic", "minced"),
             ("garlic, thinly sliced", "garlic", "thinly sliced"),
             (
@@ -200,9 +254,17 @@ mod tests {
             ("onions, chopped", "onions", "chopped"),
             ("onions, sliced", "onions", "sliced"),
             ("pasta water, reserved", "pasta water", "reserved"),
-            ("pear (or Fuji apple), grated", "pear (or Fuji apple)", "grated"),
+            (
+                "pear (or Fuji apple), grated",
+                "pear (or Fuji apple)",
+                "grated",
+            ),
             ("peppers, sliced", "peppers", "sliced"),
-            ("ribeye steak, thinly sliced", "ribeye steak", "thinly sliced"),
+            (
+                "ribeye steak, thinly sliced",
+                "ribeye steak",
+                "thinly sliced",
+            ),
             ("thick-cut bacon, diced", "thick-cut bacon", "diced"),
             ("tomatoes, sliced", "tomatoes", "sliced"),
             (
@@ -210,7 +272,11 @@ mod tests {
                 "unsalted butter",
                 "melted and slightly cooled",
             ),
-            ("yellow onions, finely diced", "yellow onions", "finely diced"),
+            (
+                "yellow onions, finely diced",
+                "yellow onions",
+                "finely diced",
+            ),
         ];
 
         for (raw, expected_name, expected_prep) in clean_splits {
