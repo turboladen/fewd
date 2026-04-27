@@ -52,12 +52,14 @@ fn test_recipe_dto(name: &str) -> CreateRecipeDto {
         ingredients: vec![
             IngredientDto {
                 name: "flour".to_string(),
+                prep: None,
                 amount: IngredientAmountDto::Single { value: 2.0 },
                 unit: "cups".to_string(),
                 notes: None,
             },
             IngredientDto {
                 name: "eggs".to_string(),
+                prep: None,
                 amount: IngredientAmountDto::Single { value: 3.0 },
                 unit: "whole".to_string(),
                 notes: None,
@@ -718,6 +720,7 @@ async fn meal_with_adhoc_items() {
             person_id: person.id,
             adhoc_items: vec![IngredientDto {
                 name: "banana".to_string(),
+                prep: None,
                 amount: IngredientAmountDto::Single { value: 1.0 },
                 unit: "whole".to_string(),
                 notes: None,
@@ -818,6 +821,7 @@ async fn shopping_list_includes_adhoc() {
             person_id: person.id,
             adhoc_items: vec![IngredientDto {
                 name: "banana".to_string(),
+                prep: None,
                 amount: IngredientAmountDto::Single { value: 2.0 },
                 unit: "whole".to_string(),
                 notes: None,
@@ -1016,6 +1020,7 @@ async fn meal_template_update() {
             person_id: person.id.clone(),
             adhoc_items: vec![IngredientDto {
                 name: "toast".to_string(),
+                prep: None,
                 amount: IngredientAmountDto::Single { value: 2.0 },
                 unit: "slices".to_string(),
                 notes: None,
@@ -1686,6 +1691,7 @@ async fn shopping_list_adhoc_source_has_no_serving_info() {
             person_id: person.id,
             adhoc_items: vec![IngredientDto {
                 name: "apple".to_string(),
+                prep: None,
                 amount: IngredientAmountDto::Single { value: 1.0 },
                 unit: "whole".to_string(),
                 notes: None,

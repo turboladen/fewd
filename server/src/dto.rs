@@ -43,7 +43,16 @@ pub enum IngredientAmountDto {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct IngredientDto {
+    /// Purchasable identity ("garlic", "lemon"). Distinct varietals like
+    /// "boneless skinless chicken breast" vs "whole chicken" are kept as
+    /// separate names so the shopping aggregator treats them as separate
+    /// purchases.
     pub name: String,
+    /// Optional preparation form ("minced", "thinly sliced", "cut into wedges
+    /// for serving"). Belongs to the recipe context, not the shopping list —
+    /// the shopping aggregator ignores `prep` and groups by `name`.
+    #[serde(default)]
+    pub prep: Option<String>,
     pub amount: IngredientAmountDto,
     #[serde(default)]
     pub unit: String,

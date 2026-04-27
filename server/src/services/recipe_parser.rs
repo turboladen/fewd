@@ -191,6 +191,7 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
         // Just a name like "salt"
         1 => Some(IngredientDto {
             name: parts[0].to_string(),
+            prep: None,
             amount: IngredientAmountDto::Single { value: 1.0 },
             unit: "to taste".to_string(),
             notes,
@@ -200,6 +201,7 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
                 // Amount + name like "2 eggs"
                 Some(IngredientDto {
                     name: parts[1].to_string(),
+                    prep: None,
                     amount,
                     unit: "whole".to_string(),
                     notes,
@@ -208,6 +210,7 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
                 // Two-word name like "black pepper"
                 Some(IngredientDto {
                     name: line.to_string(),
+                    prep: None,
                     amount: IngredientAmountDto::Single { value: 1.0 },
                     unit: "to taste".to_string(),
                     notes,
@@ -219,6 +222,7 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
             if let Some(amount) = try_parse_amount(parts[0]) {
                 Some(IngredientDto {
                     name: parts[2].to_string(),
+                    prep: None,
                     amount,
                     unit: parts[1].to_string(),
                     notes,
@@ -227,6 +231,7 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
                 // Entire line is a name (no parseable amount)
                 Some(IngredientDto {
                     name: line.to_string(),
+                    prep: None,
                     amount: IngredientAmountDto::Single { value: 1.0 },
                     unit: "to taste".to_string(),
                     notes,

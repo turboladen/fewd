@@ -13,10 +13,29 @@ export type IngredientAmount =
   | { type: 'range'; min: number; max: number }
 
 export interface Ingredient {
+  /**
+   * Purchasable identity (e.g. "garlic"). Distinct varietals like "boneless
+   * skinless chicken breast" vs "whole chicken" stay as separate names — the
+   * shopping list aggregates by this field.
+   */
   name: string
+  /**
+   * Optional preparation form (e.g. "minced", "thinly sliced"). The shopping
+   * list ignores this; it belongs to the recipe step.
+   */
+  prep?: string
   amount: IngredientAmount
   unit: string
   notes?: string
+}
+
+/**
+ * Compose the ingredient label as `{name}, {prep}` when prep is present,
+ * otherwise just `{name}`. Use this everywhere a recipe ingredient is
+ * displayed so the rule stays consistent.
+ */
+export function formatIngredientLabel(ing: Ingredient): string {
+  return ing.prep ? `${ing.name}, ${ing.prep}` : ing.name
 }
 
 export interface Nutrition {

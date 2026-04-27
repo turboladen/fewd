@@ -162,6 +162,7 @@ mod tests {
     fn make_ingredient(name: &str, value: f64, unit: &str) -> IngredientDto {
         IngredientDto {
             name: name.to_string(),
+            prep: None,
             amount: IngredientAmountDto::Single { value },
             unit: unit.to_string(),
             notes: None,
@@ -227,6 +228,7 @@ mod tests {
     fn range_amounts() {
         let ingredients = vec![IngredientDto {
             name: "garlic".to_string(),
+            prep: None,
             amount: IngredientAmountDto::Range { min: 2.0, max: 3.0 },
             unit: "clove".to_string(),
             notes: None,

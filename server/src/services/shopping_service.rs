@@ -64,6 +64,7 @@ impl ShoppingService {
                                 let scaled_amount = scale_amount(&ing.amount, scale);
                                 let scaled_ingredient = IngredientDto {
                                     name: ing.name,
+                                    prep: ing.prep,
                                     amount: scaled_amount.clone(),
                                     unit: ing.unit.clone(),
                                     notes: ing.notes,

@@ -35,6 +35,7 @@ pub fn scale_ingredients(ingredients: &[IngredientDto], ratio: f64) -> ScaleResu
         let new_amount = scale_amount(&ing.amount, ratio);
         let scaled_ing = IngredientDto {
             name: ing.name.clone(),
+            prep: ing.prep.clone(),
             amount: new_amount.clone(),
             unit: ing.unit.clone(),
             notes: ing.notes.clone(),
@@ -93,6 +94,7 @@ mod tests {
     fn make_ingredient(name: &str, value: f64, unit: &str) -> IngredientDto {
         IngredientDto {
             name: name.to_string(),
+            prep: None,
             amount: IngredientAmountDto::Single { value },
             unit: unit.to_string(),
             notes: None,
@@ -152,6 +154,7 @@ mod tests {
     fn scales_range_amounts() {
         let ingredients = vec![IngredientDto {
             name: "garlic".to_string(),
+            prep: None,
             amount: IngredientAmountDto::Range { min: 2.0, max: 3.0 },
             unit: "clove".to_string(),
             notes: None,
@@ -170,6 +173,7 @@ mod tests {
     fn flags_range_with_fractional_discrete() {
         let ingredients = vec![IngredientDto {
             name: "garlic".to_string(),
+            prep: None,
             amount: IngredientAmountDto::Range { min: 2.0, max: 3.0 },
             unit: "clove".to_string(),
             notes: None,

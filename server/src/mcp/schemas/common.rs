@@ -69,7 +69,15 @@ pub(super) fn validate_date_yyyy_mm_dd(value: &str, field: &'static str) -> Resu
 /// the structure, and accepts both directions.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct IngredientOut {
+    /// Purchasable identity (e.g. "garlic"). Distinct varietals like
+    /// "boneless skinless chicken breast" vs "whole chicken" stay as separate
+    /// names — the shopping list aggregates by this field.
     pub name: String,
+    /// Optional preparation form (e.g. "minced", "thinly sliced", "cut into
+    /// wedges for serving"). The shopping aggregator ignores this — prep is
+    /// for the recipe step, not the grocery list.
+    #[serde(default)]
+    pub prep: Option<String>,
     /// Quantity. Either an exact amount or a min/max range.
     pub amount: IngredientAmountOut,
     /// Unit of measure (e.g. "cup", "gram", "each"). May be empty for
@@ -134,6 +142,7 @@ pub(super) fn format_date(dt: DateTime<Utc>) -> String {
 pub(super) fn ingredient_out(ing: &IngredientDto) -> IngredientOut {
     IngredientOut {
         name: ing.name.clone(),
+        prep: ing.prep.clone(),
         amount: amount_out(ing.amount.clone()),
         unit: ing.unit.clone(),
         notes: ing.notes.clone(),
@@ -174,6 +183,7 @@ pub(super) fn nutrition_out(n: NutritionDto) -> NutritionOut {
 pub(super) fn ingredient_in(ing: IngredientOut) -> IngredientDto {
     IngredientDto {
         name: ing.name,
+        prep: ing.prep,
         amount: amount_in(ing.amount),
         unit: ing.unit,
         notes: ing.notes,
