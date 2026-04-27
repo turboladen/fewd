@@ -16,7 +16,7 @@ import type {
 } from '../types/drinkRecipe'
 import { parseDrinkRecipe } from '../types/drinkRecipe'
 import { parsePerson } from '../types/person'
-import { formatAmount } from '../types/recipe'
+import { formatAmount, formatIngredientLabel } from '../types/recipe'
 import { IconArrowLeft, IconChevronDown, IconChevronRight, IconRefresh, IconWarning } from './Icon'
 import { StarRating } from './StarRating'
 import { useToast } from './Toast'
@@ -479,7 +479,7 @@ export function CocktailSuggester() {
                             <ul className='text-sm text-stone-600 space-y-0.5'>
                               {suggestion.ingredients.map((ing, j) => (
                                 <li key={j}>
-                                  {formatAmount(ing.amount)} {ing.unit} {ing.name}
+                                  {formatAmount(ing.amount)} {ing.unit} {formatIngredientLabel(ing)}
                                   {ing.notes && (
                                     <span className='text-stone-400'>({ing.notes})</span>
                                   )}
@@ -921,7 +921,7 @@ function RecipeMatchCard({
             <ul className='text-sm text-stone-600 space-y-0.5'>
               {recipe.ingredients.map((ing, j) => (
                 <li key={j}>
-                  {formatAmount(ing.amount)} {ing.unit} {ing.name}
+                  {formatAmount(ing.amount)} {ing.unit} {formatIngredientLabel(ing)}
                   {ing.notes && <span className='text-stone-400'>({ing.notes})</span>}
                 </li>
               ))}

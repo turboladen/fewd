@@ -10,7 +10,7 @@ import type {
   IngredientAmount,
   PersonAdaptOptions,
 } from '../types/recipe'
-import { formatAmount } from '../types/recipe'
+import { formatAmount, formatIngredientLabel } from '../types/recipe'
 import type { MealCharacter } from '../types/suggestion'
 import { IconArrowLeft, IconChevronDown, IconChevronRight, IconClose } from './Icon'
 import { FieldToggle, PersonSummary } from './PersonFieldToggles'
@@ -411,7 +411,7 @@ function SuggestionCard({
                   <span className='font-medium'>
                     {formatAmount(ing.amount as IngredientAmount)}
                   </span>
-                  {ing.unit && ` ${ing.unit}`} {ing.name}
+                  {ing.unit && ` ${ing.unit}`} {formatIngredientLabel(ing)}
                   {ing.notes && <span className='text-stone-400'>({ing.notes})</span>}
                 </li>
               ))}

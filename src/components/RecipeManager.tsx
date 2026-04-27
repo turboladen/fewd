@@ -19,7 +19,13 @@ import type {
   ScaleResult,
   TimeValue,
 } from '../types/recipe'
-import { formatAmount, formatServings, formatTime, parseRecipe } from '../types/recipe'
+import {
+  formatAmount,
+  formatIngredientLabel,
+  formatServings,
+  formatTime,
+  parseRecipe,
+} from '../types/recipe'
 import { EmptyState } from './EmptyState'
 import {
   IconArrowRight,
@@ -662,7 +668,7 @@ export function ScaleRecipePanel({
                   )
                   : <span className='font-medium w-16 text-right'>{formatAmount(ing.amount)}</span>}
                 <span className='text-stone-500 w-12'>{ing.unit}</span>
-                <span>{ing.name}</span>
+                <span>{formatIngredientLabel(ing)}</span>
                 {flaggedIndices.has(i) && (
                   <span className='text-amber-600 text-xs ml-auto'>fractional</span>
                 )}
@@ -944,7 +950,7 @@ export function RecipeDetail({
                   <li key={i} className='text-sm'>
                     <span className='font-medium'>{formatAmount(ing.amount)}</span>
                     {ing.unit && <span className='text-stone-500'>{` ${ing.unit}`}</span>}
-                    <span>{` ${ing.name}`}</span>
+                    <span>{` ${formatIngredientLabel(ing)}`}</span>
                     {ing.notes && <span className='text-stone-400 italic'>{` (${ing.notes})`}
                     </span>}
                   </li>
