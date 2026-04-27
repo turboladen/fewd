@@ -199,7 +199,12 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
         2 => {
             if let Some(amount) = try_parse_amount(parts[0]) {
                 // Amount + name like "2 eggs"
-                Some(build_ingredient(parts[1], amount, "whole".to_string(), notes))
+                Some(build_ingredient(
+                    parts[1],
+                    amount,
+                    "whole".to_string(),
+                    notes,
+                ))
             } else {
                 // Two-word name like "black pepper"
                 Some(build_ingredient(
