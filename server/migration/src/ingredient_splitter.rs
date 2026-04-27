@@ -143,10 +143,20 @@ mod tests {
         );
     }
 
-    /// Table-driven test using the actual production ingredient strings
-    /// pulled from the dietpi DB on 2026-04-27. 52 of the 59 comma-bearing
-    /// rows split cleanly; the rest are recipe-author meta-prose where any
-    /// split would be wrong, so they intentionally return `(raw, None)`.
+    /// Table-driven test pinning behavior against actual production
+    /// ingredient strings pulled from the dietpi DB on 2026-04-27. The audit
+    /// surfaced 59 comma-bearing rows. The fixtures embedded here cover:
+    ///
+    /// - 43 clean `<name>, <prep>` splits in `clean_splits`.
+    /// - 2 recipe-author meta-prose strings in `meta_prose` (the splitter
+    ///   still consumes their first comma — see the loop comment for why
+    ///   that's harmless).
+    ///
+    /// The remaining ~14 rows are corrupted by upstream parser bugs (em-dash
+    /// ranges, Unicode fractions, compound units mis-bucketed by
+    /// `splitn(3, ' ')`). They're intentionally NOT covered here — those
+    /// rows look ugly today and our splitter can't meaningfully fix them.
+    /// Tracked separately as fewd-4i3.
     #[test]
     fn live_data_calibration() {
         let clean_splits: &[(&str, &str, &str)] = &[
