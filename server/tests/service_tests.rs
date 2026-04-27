@@ -1953,3 +1953,98 @@ async fn shopping_keeps_distinct_purchasable_names_separate() {
         names
     );
 }
+
+/// Range amounts MUST survive same-name-different-prep aggregation without
+/// collapsing to Single. The shopping aggregator's range arithmetic at
+/// `shopping_service.rs::sum_ranges_*` operates on amount/unit only, but
+/// this test pins the contract end-to-end: two recipes that share `name`
+/// and differ on `prep`, both carrying Range amounts, aggregate to ONE row
+/// whose `total_amount` is also a Range with summed bounds.
+#[tokio::test]
+async fn shopping_aggregates_range_amounts_across_prep_variants() {
+    let db = setup_db().await;
+
+    let mut minced_recipe = test_recipe_dto("Minced Garlic Pasta");
+    minced_recipe.servings = 1;
+    minced_recipe.ingredients = vec![IngredientDto {
+        name: "garlic".to_string(),
+        prep: Some("minced".to_string()),
+        amount: IngredientAmountDto::Range { min: 2.0, max: 3.0 },
+        unit: "cloves".to_string(),
+        notes: None,
+    }];
+    let r1 = RecipeService::create(&db, minced_recipe).await.unwrap();
+
+    let mut sliced_recipe = test_recipe_dto("Sliced Garlic Stir Fry");
+    sliced_recipe.servings = 1;
+    sliced_recipe.ingredients = vec![IngredientDto {
+        name: "garlic".to_string(),
+        prep: Some("thinly sliced".to_string()),
+        amount: IngredientAmountDto::Range { min: 1.0, max: 2.0 },
+        unit: "cloves".to_string(),
+        notes: None,
+    }];
+    let r2 = RecipeService::create(&db, sliced_recipe).await.unwrap();
+
+    let alice = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+
+    // servings_count = recipe.servings = 1 keeps the scaling factor 1.0 so
+    // we can assert the raw Range bounds without arithmetic noise.
+    MealService::create(
+        &db,
+        CreateMealDto {
+            date: "2026-04-27".to_string(),
+            meal_type: "Dinner".to_string(),
+            order_index: 2,
+            servings: vec![PersonServingDto::Recipe {
+                person_id: alice.id.clone(),
+                recipe_id: r1.id,
+                servings_count: 1.0,
+                notes: None,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+
+    MealService::create(
+        &db,
+        CreateMealDto {
+            date: "2026-04-28".to_string(),
+            meal_type: "Dinner".to_string(),
+            order_index: 2,
+            servings: vec![PersonServingDto::Recipe {
+                person_id: alice.id,
+                recipe_id: r2.id,
+                servings_count: 1.0,
+                notes: None,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+
+    let list =
+        ShoppingService::get_shopping_list(&db, "2026-04-27".to_string(), "2026-04-28".to_string())
+            .await
+            .unwrap();
+
+    assert_eq!(list.len(), 1, "expected one aggregated row, got {:?}", list);
+    let garlic = &list[0];
+    assert_eq!(garlic.items.len(), 2, "expected two source entries");
+
+    match &garlic.total_amount {
+        Some(IngredientAmountDto::Range { min, max }) => {
+            // 2..3 + 1..2 = 3..5
+            assert!((min - 3.0).abs() < 0.001, "expected min=3.0, got {min}");
+            assert!((max - 5.0).abs() < 0.001, "expected max=5.0, got {max}");
+        }
+        other => panic!(
+            "Range amounts MUST NOT collapse to Single during aggregation, \
+             got {:?}",
+            other
+        ),
+    }
+}

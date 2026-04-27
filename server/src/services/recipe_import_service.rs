@@ -188,12 +188,12 @@ impl RecipeImportService {
         // variants. The system prompt asks Claude for the split shape, but
         // models occasionally backslide on edge cases.
         for ing in dto.ingredients.iter_mut() {
-            if ing.prep.is_none() && ing.name.contains(',') {
-                let (name, prep) =
-                    crate::services::ingredient_splitter::split_name_and_prep(&ing.name);
-                ing.name = name;
-                ing.prep = prep;
-            }
+            let (name, prep) = crate::services::ingredient_splitter::normalize(
+                std::mem::take(&mut ing.name),
+                ing.prep.take(),
+            );
+            ing.name = name;
+            ing.prep = prep;
         }
 
         Ok(ImportResult {

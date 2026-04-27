@@ -290,29 +290,27 @@ mod tests {
             );
         }
 
-        // Rows the splitter intentionally leaves alone — recipe-author
-        // meta-prose where a comma-split would produce nonsense. The data
-        // stays as `(raw, None)`, which yields its own aggregation group.
-        let leave_alone: &[&str] = &[
+        // Recipe-author meta-prose: strings that aren't really `name, prep`
+        // but contain top-level commas anyway. The splitter has no way to
+        // tell these apart from genuine prep clauses, so it splits them too,
+        // producing a "garbage prep" that doesn't collide with real prep
+        // clauses (the aggregator keys on `name` only). Asserting:
+        //   1. the function never panics or produces empty fields
+        //   2. recombination is lossless (so an operator inspecting the
+        //      DB can still see the original string)
+        let meta_prose: &[&str] = &[
             "All tossed with olive oil, salt, and pepper",
             "Pizza sauce or crushed tomatoes seasoned with salt, olive oil, and oregano",
         ];
-        for raw in leave_alone {
+        for raw in meta_prose {
             let (name, prep) = split_name_and_prep(raw);
-            // We DO consume the first comma even on these — that's fine, the
-            // resulting "prep" is just garbage that won't aggregate. What
-            // matters is the function never panics or produces empty fields.
             assert!(!name.is_empty(), "name unexpectedly empty for {:?}", raw);
-            // For these strings the splitter does produce *some* split because
-            // they contain top-level commas. That's acceptable: they remain in
-            // their own aggregation group regardless. We just sanity-check we
-            // don't lose the original content.
-            let recombined = if let Some(p) = &prep {
-                format!("{}, {}", name, p)
-            } else {
-                name.clone()
+            assert!(prep.is_some(), "expected meta-prose to split, input {:?}", raw);
+            let recombined = match &prep {
+                Some(p) => format!("{}, {}", name, p),
+                None => name.clone(),
             };
-            assert_eq!(&recombined, raw);
+            assert_eq!(&recombined, raw, "recombination should round-trip");
         }
     }
 }

@@ -11,10 +11,17 @@ pub struct Migration;
 /// Walks every recipe and rewrites its ingredients JSON so any ingredient
 /// whose `name` contains a comma — e.g. "garlic, minced" — has the prep
 /// clause peeled off into the new `prep` field. Existing rows where prep is
-/// already populated are left alone, as are rows where the splitter declines
-/// to split (recipe-author meta-prose like "Pizza sauce or crushed tomatoes
-/// seasoned with salt, olive oil, and oregano" — accepted as-is and tracked
-/// as their own aggregation group).
+/// already populated are left alone.
+///
+/// Recipe-author meta-prose like "Pizza sauce or crushed tomatoes seasoned
+/// with salt, olive oil, and oregano" ALSO gets split on its first
+/// top-level comma, producing a "garbage prep" clause. This is intentional
+/// — the splitter has no reliable way to tell meta-prose from genuine
+/// `name, prep` pairs, and the resulting garbage doesn't collide with real
+/// prep clauses in the shopping aggregator (the aggregator keys on `name`
+/// only, so a meta-prose row aggregates with itself or not at all). The
+/// alternative — leaving these rows untouched — would require a heuristic
+/// the live data audit didn't justify.
 ///
 /// Scoped to `recipes` only. The dietpi prod audit on 2026-04-27 confirmed
 /// `drink_recipes`, `meals.servings.adhoc_items`, and
@@ -38,7 +45,15 @@ impl MigrationTrait for Migration {
             let id: String = row.try_get("", "id")?;
             let original: String = row.try_get("", "ingredients")?;
 
-            let Some(rewritten) = rewrite_ingredients_json(&original) else {
+            let rewritten = rewrite_ingredients_json(&original).map_err(|e| {
+                DbErr::Custom(format!(
+                    "recipe {id} has unprocessable ingredients JSON: {e}. \
+                     Fix the row manually before re-running migrations \
+                     (the splitter will not silently skip corrupt data)."
+                ))
+            })?;
+
+            let Some(rewritten) = rewritten else {
                 continue;
             };
 
@@ -75,11 +90,14 @@ struct Ingredient {
     notes: Option<String>,
 }
 
-/// Returns `Some(new_json)` if any ingredient was rewritten, `None` if the
-/// row is already fully split (no UPDATE needed — keeps the migration cheap
-/// on already-correct DBs and idempotent across re-runs).
-fn rewrite_ingredients_json(raw: &str) -> Option<String> {
-    let mut ingredients: Vec<Ingredient> = serde_json::from_str(raw).ok()?;
+/// Returns `Ok(Some(new_json))` if any ingredient was rewritten,
+/// `Ok(None)` if the row is already fully split (no UPDATE needed — keeps
+/// the migration cheap on already-correct DBs and idempotent across re-runs),
+/// or `Err` if the row's JSON is unparseable. The caller propagates parse
+/// errors as `DbErr` rather than silently skipping — corrupt data should
+/// halt the migration and be fixed by hand, not be invisible.
+fn rewrite_ingredients_json(raw: &str) -> Result<Option<String>, serde_json::Error> {
+    let mut ingredients: Vec<Ingredient> = serde_json::from_str(raw)?;
 
     let mut changed = false;
     for ing in ingredients.iter_mut() {
@@ -100,9 +118,9 @@ fn rewrite_ingredients_json(raw: &str) -> Option<String> {
     }
 
     if !changed {
-        return None;
+        return Ok(None);
     }
-    serde_json::to_string(&ingredients).ok()
+    Ok(Some(serde_json::to_string(&ingredients)?))
 }
 
 #[cfg(test)]
@@ -252,6 +270,38 @@ mod tests {
         let after = ingredients(&db, "r1").await;
         assert_eq!(after[0].name, "olive oil");
         assert_eq!(after[0].prep, None);
+    }
+
+    #[tokio::test]
+    async fn corrupt_ingredients_json_halts_migration() {
+        // Loud failure is the contract — the operator needs a signal
+        // when a row can't be processed. Silent skip would let bad data
+        // sail through every subsequent boot.
+        let db = legacy_db().await;
+        insert(&db, "r1", "{ this is not json").await;
+
+        let result = Migration.up(&SchemaManager::new(&db)).await;
+        let err = result.expect_err("migration should fail on corrupt JSON");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("r1"),
+            "error should name the bad recipe id, got {msg}"
+        );
+        assert!(
+            msg.contains("ingredients JSON"),
+            "error should explain the failure, got {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_ingredients_array_is_left_alone() {
+        let db = legacy_db().await;
+        insert(&db, "r1", "[]").await;
+
+        Migration.up(&SchemaManager::new(&db)).await.unwrap();
+
+        let after = ingredients(&db, "r1").await;
+        assert!(after.is_empty());
     }
 
     #[tokio::test]
