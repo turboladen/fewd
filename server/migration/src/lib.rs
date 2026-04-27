@@ -12,8 +12,11 @@ mod m20260213_000009_create_bar_items;
 mod m20260213_000010_create_drink_recipes;
 mod m20260214_000011_add_drink_recipe_source_url;
 mod m20260424_000012_backfill_recipe_slugs;
+mod m20260427_000013_split_ingredient_name_and_prep;
+pub mod ingredient_splitter;
 pub mod slug;
 
+pub use ingredient_splitter::split_name_and_prep;
 pub use slug::slugify;
 
 pub struct Migrator;
@@ -34,6 +37,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260213_000010_create_drink_recipes::Migration),
             Box::new(m20260214_000011_add_drink_recipe_source_url::Migration),
             Box::new(m20260424_000012_backfill_recipe_slugs::Migration),
+            Box::new(m20260427_000013_split_ingredient_name_and_prep::Migration),
         ]
     }
 }
