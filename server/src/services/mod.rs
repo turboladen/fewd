@@ -4,6 +4,7 @@ pub mod claude_client;
 pub mod cocktail_suggestion_service;
 pub mod drink_recipe_import_service;
 pub mod drink_recipe_service;
+pub mod ingredient_amount;
 pub mod ingredient_splitter;
 pub mod meal_service;
 pub mod meal_template_service;

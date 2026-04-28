@@ -5,11 +5,16 @@ arm64_target := "aarch64-unknown-linux-gnu"
 # resolves DATABASE_PATH's `./data/fewd.db` default against the project
 # root, not `server/data/`. Avoids silently creating a parallel dev DB
 # whenever any other invocation runs from the project root.
+#
+# RUST_LOG defaults to `info` so server boot, migration application
+# (`sea_orm_migration::Migrator::up` logs each applied migration at info
+# level), and other tracing::info! lines are visible during dev. Set
+# `RUST_LOG` in the shell to override (e.g. `RUST_LOG=debug just dev`).
 dev:
     bunx concurrently \
         --names "server,client" \
         --prefix-colors "blue,green" \
-        "cargo run --bin fewd-server" \
+        "RUST_LOG=${RUST_LOG:-info} cargo run --bin fewd-server" \
         "bun run dev"
 
 # Build production binary (embeds SPA into single executable)
