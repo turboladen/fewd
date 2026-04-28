@@ -38,6 +38,15 @@ describe('formatIngredientLabel', () => {
   it('treats empty-string prep as absent', () => {
     expect(formatIngredientLabel(base({ prep: '' }))).toBe('garlic')
   })
+
+  it('treats whitespace-only prep as absent', () => {
+    expect(formatIngredientLabel(base({ prep: '   ' }))).toBe('garlic')
+    expect(formatIngredientLabel(base({ prep: '\t\n' }))).toBe('garlic')
+  })
+
+  it('trims surrounding whitespace before rendering', () => {
+    expect(formatIngredientLabel(base({ prep: '  minced  ' }))).toBe('garlic, minced')
+  })
 })
 
 describe('formatAmount', () => {

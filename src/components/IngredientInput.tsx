@@ -1,4 +1,5 @@
 import type { Ingredient, IngredientAmount } from '../types/recipe'
+import { normalizeIngredientPrep } from '../types/recipe'
 import { IconClose } from './Icon'
 
 export function IngredientRow({
@@ -105,7 +106,11 @@ export function IngredientRow({
       <input
         type='text'
         value={ingredient.prep ?? ''}
-        onChange={(e) => onChange({ ...ingredient, prep: e.target.value || undefined })}
+        onChange={(e) =>
+          onChange({
+            ...ingredient,
+            prep: normalizeIngredientPrep(e.target.value),
+          })}
         className='input-sm flex-1 min-w-[120px]'
         placeholder='Prep (optional)'
       />
