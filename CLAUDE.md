@@ -252,6 +252,10 @@ export function MyComponent({ onSave }: Props) {
 
 **Prefer raw SQL for migration logic that introspects schema.** Helpers like `SchemaManager::has_column()` are gated on sea-orm-migration's `sqlx-sqlite` feature. The migration crate's runtime build doesn't enable that feature, so the helper panics with `"Sqlite feature is off"` in release builds while passing locally (dev-deps merge the feature in for tests). Use `PRAGMA table_info(<table>)` via `db.query_all(Statement::from_string(...))` instead — works through any plain DB connection, no feature flags. See `m20260424_000012_backfill_recipe_slugs.rs` for the pattern.
 
+**Migrations are frozen-in-time.** Never share structs across migrations even when shapes match — m13 and m14 each define their own `Ingredient` struct despite being identical today. A future migration that mutates the shape would silently break the older one if they shared a type.
+
+**Shared helpers between runtime ingest paths and backfill migrations live in the migration crate**, with server-side modules re-exporting. Established by `migration::ingredient_splitter` (fewd-xez) and `migration::ingredient_amount` (fewd-4i3). Server depends on migration in this workspace, so canonical helpers go down (migration), not up. Avoids drift between the runtime parser and the backfill that re-parses existing rows.
+
 **Queries:**
 
 - Use SeaORM query builder (type-safe)
@@ -336,18 +340,20 @@ bun run test:watch
 ### Rust
 
 ```bash
-# Format code
-cargo fmt
+# Format code (whole workspace — server + migration crates)
+cargo fmt --all
 
 # Check formatting (CI)
-cargo fmt --check
+cargo fmt --all --check
 
 # Lint
-cargo clippy
+cargo clippy --all-targets --workspace
 
 # Lint strict (CI)
-cargo clippy -- -D warnings
+cargo clippy --all-targets --workspace -- -D warnings
 ```
+
+Use `--all` / `--workspace` flags. Bare `cargo fmt` only formats the cwd's crate, missing the migration crate; the pre-push hook (`.claude/hooks/ci-before-push.sh` runs `just ci`) checks the whole workspace, so a single-crate format will be caught — just slower than getting it right the first time.
 
 ### TypeScript/React
 
@@ -629,6 +635,12 @@ bd close <id>         # Complete work
 - Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+
+### Bead closure: post-merge, not inside the fix PR
+
+Closing a bead is a separate `chore(beads): close <id> after PR #<N> merge` commit on `main`, AFTER the fix PR is merged. Do NOT flip `status: closed` inside the fix PR — it makes `bd ready` / `bd list` inaccurate while the PR is in review. Precedent: `bc8e6f4`, `5411cc6`, `6320a91`, `734f724`. Documented at length in `.github/copilot-instructions.md`; surfaced here because Copilot reviews repeatedly suggest the wrong pattern and Claude has made the mistake too.
+
+`.beads/issues.jsonl` contains BOTH issue rows AND `bd remember` memory rows (`{"_type":"memory",...}`) — both written by `bd export`. Don't "clean up" the memory rows; `bd memories` reads them back and removing them just gets re-added on the next sync.
 
 ## Session Completion
 
