@@ -10,6 +10,21 @@ where
     Option::<f64>::deserialize(deserializer).map(|opt| opt.unwrap_or(0.0))
 }
 
+/// Coerce `Some("")` and `Some("   ")` into `None` so empty-string optional
+/// strings are treated as absent at every boundary. LLM clients sometimes emit
+/// `""` instead of `null` for unset optional fields; without this helper the
+/// downstream "is this prep set?" predicate disagrees with the renderer's
+/// "should I display a prep clause?" predicate, fragmenting shopping
+/// aggregation.
+pub fn deserialize_optional_string_empty_as_none<'de, D>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(|opt| opt.filter(|s| !s.trim().is_empty()))
+}
+
 // ─── Recipe DTOs ────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -43,7 +58,25 @@ pub enum IngredientAmountDto {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct IngredientDto {
+    /// Purchasable identity ("garlic", "lemon"). Distinct varietals like
+    /// "boneless skinless chicken breast" vs "whole chicken" are kept as
+    /// separate names so the shopping aggregator treats them as separate
+    /// purchases.
     pub name: String,
+    /// Optional preparation form ("minced", "thinly sliced", "cut into wedges
+    /// for serving"). Belongs to the recipe context, not the shopping list —
+    /// the shopping aggregator ignores `prep` and groups by `name`.
+    ///
+    /// `Some("")` is normalized to `None` on deserialize (LLMs occasionally
+    /// emit `""` instead of `null` for unset optional fields), and `None`
+    /// skips serialization to keep wire-format shape consistent with the
+    /// migration's struct.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_string_empty_as_none",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub prep: Option<String>,
     pub amount: IngredientAmountDto,
     #[serde(default)]
     pub unit: String,

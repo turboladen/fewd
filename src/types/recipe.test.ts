@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { IngredientAmount, Recipe, TimeValue } from './recipe'
-import { formatAmount, formatTime, parseInstructionSteps, parseRecipe } from './recipe'
+import type { Ingredient, IngredientAmount, Recipe, TimeValue } from './recipe'
+import {
+  formatAmount,
+  formatIngredientLabel,
+  formatTime,
+  parseInstructionSteps,
+  parseRecipe,
+} from './recipe'
 
 describe('formatTime', () => {
   it('formats time value', () => {
@@ -10,6 +16,36 @@ describe('formatTime', () => {
 
   it('returns empty string for null', () => {
     expect(formatTime(null)).toBe('')
+  })
+})
+
+describe('formatIngredientLabel', () => {
+  const base = (overrides: Partial<Ingredient>): Ingredient => ({
+    name: 'garlic',
+    amount: { type: 'single', value: 1 },
+    unit: 'clove',
+    ...overrides,
+  })
+
+  it('returns name alone when prep is missing', () => {
+    expect(formatIngredientLabel(base({}))).toBe('garlic')
+  })
+
+  it('appends prep with comma when present', () => {
+    expect(formatIngredientLabel(base({ prep: 'minced' }))).toBe('garlic, minced')
+  })
+
+  it('treats empty-string prep as absent', () => {
+    expect(formatIngredientLabel(base({ prep: '' }))).toBe('garlic')
+  })
+
+  it('treats whitespace-only prep as absent', () => {
+    expect(formatIngredientLabel(base({ prep: '   ' }))).toBe('garlic')
+    expect(formatIngredientLabel(base({ prep: '\t\n' }))).toBe('garlic')
+  })
+
+  it('trims surrounding whitespace before rendering', () => {
+    expect(formatIngredientLabel(base({ prep: '  minced  ' }))).toBe('garlic, minced')
   })
 })
 

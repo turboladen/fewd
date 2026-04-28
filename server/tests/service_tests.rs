@@ -52,12 +52,14 @@ fn test_recipe_dto(name: &str) -> CreateRecipeDto {
         ingredients: vec![
             IngredientDto {
                 name: "flour".to_string(),
+                prep: None,
                 amount: IngredientAmountDto::Single { value: 2.0 },
                 unit: "cups".to_string(),
                 notes: None,
             },
             IngredientDto {
                 name: "eggs".to_string(),
+                prep: None,
                 amount: IngredientAmountDto::Single { value: 3.0 },
                 unit: "whole".to_string(),
                 notes: None,
@@ -718,6 +720,7 @@ async fn meal_with_adhoc_items() {
             person_id: person.id,
             adhoc_items: vec![IngredientDto {
                 name: "banana".to_string(),
+                prep: None,
                 amount: IngredientAmountDto::Single { value: 1.0 },
                 unit: "whole".to_string(),
                 notes: None,
@@ -818,6 +821,7 @@ async fn shopping_list_includes_adhoc() {
             person_id: person.id,
             adhoc_items: vec![IngredientDto {
                 name: "banana".to_string(),
+                prep: None,
                 amount: IngredientAmountDto::Single { value: 2.0 },
                 unit: "whole".to_string(),
                 notes: None,
@@ -1016,6 +1020,7 @@ async fn meal_template_update() {
             person_id: person.id.clone(),
             adhoc_items: vec![IngredientDto {
                 name: "toast".to_string(),
+                prep: None,
                 amount: IngredientAmountDto::Single { value: 2.0 },
                 unit: "slices".to_string(),
                 notes: None,
@@ -1686,6 +1691,7 @@ async fn shopping_list_adhoc_source_has_no_serving_info() {
             person_id: person.id,
             adhoc_items: vec![IngredientDto {
                 name: "apple".to_string(),
+                prep: None,
                 amount: IngredientAmountDto::Single { value: 1.0 },
                 unit: "whole".to_string(),
                 notes: None,
@@ -1749,5 +1755,296 @@ async fn shopping_list_multiple_people_same_recipe() {
         assert_eq!(agg.items.len(), 1);
         assert_eq!(agg.items[0].person_servings, Some(2.5)); // 1.0 + 1.5
         assert_eq!(agg.items[0].recipe_servings, Some(4));
+    }
+}
+
+/// The load-bearing fewd-xez assertion: two recipes that share a purchasable
+/// identity in `name` ("garlic") with different `prep` clauses ("minced",
+/// "thinly sliced") MUST aggregate to a single shopping-list line keyed on
+/// the bare name. The source breakdown still carries both contributions.
+#[tokio::test]
+async fn shopping_aggregates_same_name_different_prep() {
+    let db = setup_db().await;
+
+    let mut minced_recipe = test_recipe_dto("Minced Garlic Pasta");
+    minced_recipe.servings = 4;
+    minced_recipe.ingredients = vec![IngredientDto {
+        name: "garlic".to_string(),
+        prep: Some("minced".to_string()),
+        amount: IngredientAmountDto::Single { value: 3.0 },
+        unit: "cloves".to_string(),
+        notes: None,
+    }];
+    let r1 = RecipeService::create(&db, minced_recipe).await.unwrap();
+
+    let mut sliced_recipe = test_recipe_dto("Sliced Garlic Stir Fry");
+    sliced_recipe.servings = 4;
+    sliced_recipe.ingredients = vec![IngredientDto {
+        name: "garlic".to_string(),
+        prep: Some("thinly sliced".to_string()),
+        amount: IngredientAmountDto::Single { value: 2.0 },
+        unit: "cloves".to_string(),
+        notes: None,
+    }];
+    let r2 = RecipeService::create(&db, sliced_recipe).await.unwrap();
+
+    let alice = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+
+    MealService::create(
+        &db,
+        CreateMealDto {
+            date: "2026-04-27".to_string(),
+            meal_type: "Dinner".to_string(),
+            order_index: 2,
+            servings: vec![PersonServingDto::Recipe {
+                person_id: alice.id.clone(),
+                recipe_id: r1.id,
+                servings_count: 1.0,
+                notes: None,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+
+    MealService::create(
+        &db,
+        CreateMealDto {
+            date: "2026-04-28".to_string(),
+            meal_type: "Dinner".to_string(),
+            order_index: 2,
+            servings: vec![PersonServingDto::Recipe {
+                person_id: alice.id,
+                recipe_id: r2.id,
+                servings_count: 1.0,
+                notes: None,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+
+    let list =
+        ShoppingService::get_shopping_list(&db, "2026-04-27".to_string(), "2026-04-28".to_string())
+            .await
+            .unwrap();
+
+    // The whole point of fewd-xez: ONE garlic line, not two.
+    assert_eq!(
+        list.len(),
+        1,
+        "expected single aggregated row, got {:?}",
+        list
+    );
+    let garlic = &list[0];
+
+    // Aggregated label drops the prep clause — name only.
+    assert_eq!(garlic.ingredient_name.to_lowercase(), "garlic");
+    assert!(
+        !garlic.ingredient_name.contains(','),
+        "aggregated name should not carry prep, got {:?}",
+        garlic.ingredient_name
+    );
+
+    // Source breakdown preserves both meals (existing-behavior invariant).
+    assert_eq!(garlic.items.len(), 2, "expected two source entries");
+
+    // Total amount sums per-person-scaled contributions:
+    //   recipe 1: 3 cloves at 4 servings, alice eats 1 → 0.75
+    //   recipe 2: 2 cloves at 4 servings, alice eats 1 → 0.5
+    //   total: 1.25
+    match &garlic.total_amount {
+        Some(IngredientAmountDto::Single { value }) => {
+            assert!(
+                (value - 1.25).abs() < 0.001,
+                "expected 1.25 cloves, got {value}"
+            );
+        }
+        other => panic!("expected Single total, got {:?}", other),
+    }
+    // Unit normalization: the aggregator canonicalizes plural→singular
+    // ("cloves" → "clove") so different-cased / pluralized inputs aggregate.
+    assert_eq!(garlic.total_unit.as_deref(), Some("clove"));
+}
+
+/// Strategy-A sanity guard: distinct purchasable names like
+/// `"chicken breast"` vs. `"whole chicken"` MUST stay as separate
+/// aggregation groups. We don't add a third `purchase_form` axis.
+#[tokio::test]
+async fn shopping_keeps_distinct_purchasable_names_separate() {
+    let db = setup_db().await;
+
+    let mut breast_recipe = test_recipe_dto("Stir Fry");
+    breast_recipe.servings = 4;
+    breast_recipe.ingredients = vec![IngredientDto {
+        name: "chicken breast".to_string(),
+        prep: None,
+        amount: IngredientAmountDto::Single { value: 1.0 },
+        unit: "lb".to_string(),
+        notes: None,
+    }];
+    let r1 = RecipeService::create(&db, breast_recipe).await.unwrap();
+
+    let mut whole_recipe = test_recipe_dto("Sunday Roast");
+    whole_recipe.servings = 4;
+    whole_recipe.ingredients = vec![IngredientDto {
+        name: "whole chicken".to_string(),
+        prep: None,
+        amount: IngredientAmountDto::Single { value: 1.0 },
+        unit: "whole".to_string(),
+        notes: None,
+    }];
+    let r2 = RecipeService::create(&db, whole_recipe).await.unwrap();
+
+    let alice = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+
+    MealService::create(
+        &db,
+        CreateMealDto {
+            date: "2026-04-27".to_string(),
+            meal_type: "Dinner".to_string(),
+            order_index: 2,
+            servings: vec![PersonServingDto::Recipe {
+                person_id: alice.id.clone(),
+                recipe_id: r1.id,
+                servings_count: 1.0,
+                notes: None,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+
+    MealService::create(
+        &db,
+        CreateMealDto {
+            date: "2026-04-28".to_string(),
+            meal_type: "Dinner".to_string(),
+            order_index: 2,
+            servings: vec![PersonServingDto::Recipe {
+                person_id: alice.id,
+                recipe_id: r2.id,
+                servings_count: 1.0,
+                notes: None,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+
+    let list =
+        ShoppingService::get_shopping_list(&db, "2026-04-27".to_string(), "2026-04-28".to_string())
+            .await
+            .unwrap();
+
+    let names: Vec<String> = list.iter().map(|i| i.ingredient_name.clone()).collect();
+    assert!(
+        names.iter().any(|n| n == "chicken breast"),
+        "expected separate 'chicken breast' line, got {:?}",
+        names
+    );
+    assert!(
+        names.iter().any(|n| n == "whole chicken"),
+        "expected separate 'whole chicken' line, got {:?}",
+        names
+    );
+}
+
+/// Range amounts MUST survive same-name-different-prep aggregation without
+/// collapsing to Single. The shopping aggregator's range arithmetic at
+/// `shopping_service.rs::sum_ranges_*` operates on amount/unit only, but
+/// this test pins the contract end-to-end: two recipes that share `name`
+/// and differ on `prep`, both carrying Range amounts, aggregate to ONE row
+/// whose `total_amount` is also a Range with summed bounds.
+#[tokio::test]
+async fn shopping_aggregates_range_amounts_across_prep_variants() {
+    let db = setup_db().await;
+
+    let mut minced_recipe = test_recipe_dto("Minced Garlic Pasta");
+    minced_recipe.servings = 1;
+    minced_recipe.ingredients = vec![IngredientDto {
+        name: "garlic".to_string(),
+        prep: Some("minced".to_string()),
+        amount: IngredientAmountDto::Range { min: 2.0, max: 3.0 },
+        unit: "cloves".to_string(),
+        notes: None,
+    }];
+    let r1 = RecipeService::create(&db, minced_recipe).await.unwrap();
+
+    let mut sliced_recipe = test_recipe_dto("Sliced Garlic Stir Fry");
+    sliced_recipe.servings = 1;
+    sliced_recipe.ingredients = vec![IngredientDto {
+        name: "garlic".to_string(),
+        prep: Some("thinly sliced".to_string()),
+        amount: IngredientAmountDto::Range { min: 1.0, max: 2.0 },
+        unit: "cloves".to_string(),
+        notes: None,
+    }];
+    let r2 = RecipeService::create(&db, sliced_recipe).await.unwrap();
+
+    let alice = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+
+    // servings_count = recipe.servings = 1 keeps the scaling factor 1.0 so
+    // we can assert the raw Range bounds without arithmetic noise.
+    MealService::create(
+        &db,
+        CreateMealDto {
+            date: "2026-04-27".to_string(),
+            meal_type: "Dinner".to_string(),
+            order_index: 2,
+            servings: vec![PersonServingDto::Recipe {
+                person_id: alice.id.clone(),
+                recipe_id: r1.id,
+                servings_count: 1.0,
+                notes: None,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+
+    MealService::create(
+        &db,
+        CreateMealDto {
+            date: "2026-04-28".to_string(),
+            meal_type: "Dinner".to_string(),
+            order_index: 2,
+            servings: vec![PersonServingDto::Recipe {
+                person_id: alice.id,
+                recipe_id: r2.id,
+                servings_count: 1.0,
+                notes: None,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+
+    let list =
+        ShoppingService::get_shopping_list(&db, "2026-04-27".to_string(), "2026-04-28".to_string())
+            .await
+            .unwrap();
+
+    assert_eq!(list.len(), 1, "expected one aggregated row, got {:?}", list);
+    let garlic = &list[0];
+    assert_eq!(garlic.items.len(), 2, "expected two source entries");
+
+    match &garlic.total_amount {
+        Some(IngredientAmountDto::Range { min, max }) => {
+            // 2..3 + 1..2 = 3..5
+            assert!((min - 3.0).abs() < 0.001, "expected min=3.0, got {min}");
+            assert!((max - 5.0).abs() < 0.001, "expected max=5.0, got {max}");
+        }
+        other => panic!(
+            "Range amounts MUST NOT collapse to Single during aggregation, \
+             got {:?}",
+            other
+        ),
     }
 }

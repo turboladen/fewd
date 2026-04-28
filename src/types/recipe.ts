@@ -13,10 +13,42 @@ export type IngredientAmount =
   | { type: 'range'; min: number; max: number }
 
 export interface Ingredient {
+  /**
+   * Purchasable identity (e.g. "garlic"). Distinct varietals like "boneless
+   * skinless chicken breast" vs "whole chicken" stay as separate names — the
+   * shopping list aggregates by this field.
+   */
   name: string
+  /**
+   * Optional preparation form (e.g. "minced", "thinly sliced"). The shopping
+   * list ignores this; it belongs to the recipe step.
+   */
+  prep?: string
   amount: IngredientAmount
   unit: string
   notes?: string
+}
+
+/**
+ * Trim a prep value and coerce empty / whitespace-only strings to undefined.
+ * Mirrors the backend's `deserialize_optional_string_empty_as_none` rule so
+ * the frontend's notion of "absent prep" matches what the server stores and
+ * what the shopping aggregator keys on.
+ */
+export function normalizeIngredientPrep(prep?: string): string | undefined {
+  if (prep === undefined) return undefined
+  const trimmed = prep.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
+/**
+ * Compose the ingredient label as `{name}, {prep}` when prep is present,
+ * otherwise just `{name}`. Use this everywhere a recipe ingredient is
+ * displayed so the rule stays consistent.
+ */
+export function formatIngredientLabel(ing: Ingredient): string {
+  const prep = normalizeIngredientPrep(ing.prep)
+  return prep ? `${ing.name}, ${prep}` : ing.name
 }
 
 export interface Nutrition {

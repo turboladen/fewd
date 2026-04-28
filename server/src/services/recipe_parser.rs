@@ -1,4 +1,5 @@
 use crate::dto::{CreateRecipeDto, IngredientAmountDto, IngredientDto, TimeValueDto};
+use crate::services::ingredient_splitter::split_name_and_prep;
 
 pub struct RecipeParser;
 
@@ -189,68 +190,95 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
 
     match parts.len() {
         // Just a name like "salt"
-        1 => Some(IngredientDto {
-            name: parts[0].to_string(),
-            amount: IngredientAmountDto::Single { value: 1.0 },
-            unit: "to taste".to_string(),
+        1 => Some(build_ingredient(
+            parts[0],
+            IngredientAmountDto::Single { value: 1.0 },
+            "to taste".to_string(),
             notes,
-        }),
+        )),
         2 => {
             if let Some(amount) = try_parse_amount(parts[0]) {
                 // Amount + name like "2 eggs"
-                Some(IngredientDto {
-                    name: parts[1].to_string(),
+                Some(build_ingredient(
+                    parts[1],
                     amount,
-                    unit: "whole".to_string(),
+                    "whole".to_string(),
                     notes,
-                })
+                ))
             } else {
                 // Two-word name like "black pepper"
-                Some(IngredientDto {
-                    name: line.to_string(),
-                    amount: IngredientAmountDto::Single { value: 1.0 },
-                    unit: "to taste".to_string(),
+                Some(build_ingredient(
+                    &line,
+                    IngredientAmountDto::Single { value: 1.0 },
+                    "to taste".to_string(),
                     notes,
-                })
+                ))
             }
         }
         // Amount + unit + name like "2 cups flour" or "6 cloves garlic, minced"
         _ => {
             if let Some(amount) = try_parse_amount(parts[0]) {
-                Some(IngredientDto {
-                    name: parts[2].to_string(),
+                Some(build_ingredient(
+                    parts[2],
                     amount,
-                    unit: parts[1].to_string(),
+                    parts[1].to_string(),
                     notes,
-                })
+                ))
             } else {
                 // Entire line is a name (no parseable amount)
-                Some(IngredientDto {
-                    name: line.to_string(),
-                    amount: IngredientAmountDto::Single { value: 1.0 },
-                    unit: "to taste".to_string(),
+                Some(build_ingredient(
+                    &line,
+                    IngredientAmountDto::Single { value: 1.0 },
+                    "to taste".to_string(),
                     notes,
-                })
+                ))
             }
         }
     }
 }
 
+/// Apply the name/prep splitter to a raw name segment before constructing
+/// the DTO, so comma'd prep clauses like "garlic, minced" land in the
+/// dedicated `prep` field rather than being baked into `name`.
+fn build_ingredient(
+    raw_name: &str,
+    amount: IngredientAmountDto,
+    unit: String,
+    notes: Option<String>,
+) -> IngredientDto {
+    let (name, prep) = split_name_and_prep(raw_name);
+    IngredientDto {
+        name,
+        prep,
+        amount,
+        unit,
+        notes,
+    }
+}
+
 /// Extract parenthetical notes from end of string.
 /// "orange juice (fresh is best)" → ("orange juice", Some("fresh is best"))
+///
+/// Only treats `(...)` as notes when the closing `)` is at the very end
+/// (after trimming). A mid-string parenthetical like
+/// `"pear (or Fuji apple), grated"` keeps its suffix intact so the splitter
+/// downstream can find the top-level comma — without this constraint,
+/// `extract_notes` would silently drop the `, grated`.
 fn extract_notes(s: &str) -> (String, Option<String>) {
-    if let Some(open) = s.rfind('(') {
-        if let Some(close) = s.rfind(')') {
-            if close > open {
-                let notes = s[open + 1..close].trim().to_string();
-                let name = s[..open].trim().to_string();
-                if !notes.is_empty() && !name.is_empty() {
-                    return (name, Some(notes));
-                }
-            }
-        }
+    let trimmed = s.trim_end();
+    if !trimmed.ends_with(')') {
+        return (s.to_string(), None);
     }
-    (s.to_string(), None)
+    let close = trimmed.len() - 1;
+    let Some(open) = trimmed[..close].rfind('(') else {
+        return (s.to_string(), None);
+    };
+    let notes = trimmed[open + 1..close].trim().to_string();
+    let name = trimmed[..open].trim().to_string();
+    if notes.is_empty() || name.is_empty() {
+        return (s.to_string(), None);
+    }
+    (name, Some(notes))
 }
 
 /// Try to parse an amount string, returning None if it's not a number/fraction/range.
@@ -480,6 +508,18 @@ dinner, quick, mexican";
     }
 
     #[test]
+    fn test_ingredient_with_prep_clause() {
+        // "6 cloves garlic, minced" — splitn(3, ' ') leaves "garlic, minced"
+        // in parts[2]. The splitter pulls "minced" into the prep field.
+        let md = "# Test\n\n## Ingredients\n- 6 cloves garlic, minced\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "garlic");
+        assert_eq!(ing.prep, Some("minced".to_string()));
+        assert_eq!(ing.unit, "cloves");
+    }
+
+    #[test]
     fn test_ingredient_with_notes() {
         let md = "# Test\n\n## Ingredients\n- 1 cup orange juice (fresh is best)\n\n## Instructions\nPour";
         let recipe = parse(md);
@@ -527,6 +567,31 @@ dinner, quick, mexican";
         let (name, notes) = extract_notes("plain text");
         assert_eq!(name, "plain text");
         assert_eq!(notes, None);
+    }
+
+    #[test]
+    fn test_extract_notes_preserves_mid_string_parens_with_suffix() {
+        // The `)` is NOT at the end — there's a `, grated` suffix after it.
+        // `extract_notes` must leave the string alone so the suffix flows
+        // through to the splitter, which can then peel `grated` off as prep.
+        let (name, notes) = extract_notes("pear (or Fuji apple), grated");
+        assert_eq!(name, "pear (or Fuji apple), grated");
+        assert_eq!(notes, None);
+    }
+
+    #[test]
+    fn test_ingredient_with_paren_alternative_and_prep() {
+        // End-to-end: a markdown line where the parenthetical is NOT trailing
+        // notes but a varietal alternative, followed by a prep clause. The
+        // parser should preserve the parens in `name` and put `grated` in
+        // `prep`. Pre-fix this dropped `, grated` and produced name="pear",
+        // notes=Some("or Fuji apple"), with prep silently lost.
+        let md = "# Test\n\n## Ingredients\n- 1 Asian pear (or Fuji apple), grated\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "pear (or Fuji apple)");
+        assert_eq!(ing.prep, Some("grated".to_string()));
+        assert_eq!(ing.notes, None);
     }
 
     #[test]
