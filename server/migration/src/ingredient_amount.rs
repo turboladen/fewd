@@ -104,6 +104,64 @@ fn parse_simple_amount(s: &str) -> Option<f64> {
     None
 }
 
+/// Returns `true` if `token` looks like a recipe unit — weight, volume, or
+/// a recognized discrete cooking unit. Used by the parser's 3-part branch
+/// to decide whether `parts[1]` is a unit (`"6 cloves garlic"`) or part of
+/// a compound name (`"1 zucchini, sliced"`).
+///
+/// Normalization: strip a single trailing `,`, trim, lowercase, then strip
+/// a single trailing `s` for plurals. Irregular plurals (`leaves`) are
+/// special-cased before the generic strip.
+pub fn is_known_unit(token: &str) -> bool {
+    let stripped = token
+        .strip_suffix(',')
+        .unwrap_or(token)
+        .trim()
+        .to_lowercase();
+    if stripped.is_empty() {
+        return false;
+    }
+
+    // Multi-word special case (must come before plural stripping).
+    if matches!(
+        stripped.as_str(),
+        "fl oz" | "fl. oz" | "fl. oz." | "fluid ounce" | "fluid ounces"
+    ) {
+        return true;
+    }
+
+    // Irregular plurals — keep the explicit map small. Add entries here
+    // before the generic `s`-strip when the singular form differs by more
+    // than one trailing letter.
+    let singular = match stripped.as_str() {
+        "leaves" => "leaf",
+        other => {
+            if other.ends_with('s') && other.len() > 2 {
+                &other[..other.len() - 1]
+            } else {
+                other
+            }
+        }
+    };
+
+    matches!(
+        singular,
+        // Weight
+        "g" | "gram" | "kg" | "kilogram" | "mg" | "milligram" | "oz" | "ounce" | "lb" | "pound"
+        // Volume
+        | "ml" | "milliliter" | "millilitre"
+        | "l" | "liter" | "litre"
+        | "cup" | "tbsp" | "tablespoon" | "tb" | "tbs"
+        | "tsp" | "teaspoon" | "ts"
+        | "pint" | "pt" | "quart" | "qt" | "gallon" | "gal"
+        // Discrete cooking units
+        | "whole" | "piece" | "clove" | "slice" | "can" | "sheet" | "head" | "bunch"
+        | "sprig" | "bag" | "bottle" | "package" | "pkg" | "block" | "stalk" | "strip"
+        | "pinch" | "dash" | "splash" | "drop" | "leaf" | "ball" | "sleeve" | "jar"
+        | "container" | "stick" | "ear" | "shake"
+    )
+}
+
 /// Lookup table for Unicode vulgar fractions in the U+2150..U+215E block
 /// plus the legacy Latin-1 code points (¼ ½ ¾).
 fn unicode_fraction_value(c: char) -> Option<f64> {
@@ -217,6 +275,108 @@ mod tests {
         // Range with nested range or invalid side rejects.
         assert_eq!(try_parse_amount("1-1-2"), None);
         assert_eq!(try_parse_amount("a-b"), None);
+    }
+
+    #[test]
+    fn is_known_unit_accepts_weight_volume_discrete() {
+        // Weight
+        for unit in [
+            "g", "gram", "grams", "kg", "lb", "lbs", "oz", "ounce", "ounces",
+        ] {
+            assert!(is_known_unit(unit), "expected {unit:?} to be a known unit");
+        }
+        // Volume
+        for unit in [
+            "ml",
+            "l",
+            "cup",
+            "cups",
+            "tbsp",
+            "tablespoon",
+            "tablespoons",
+            "tsp",
+            "teaspoon",
+            "fl oz",
+            "pint",
+            "quart",
+            "gallon",
+        ] {
+            assert!(is_known_unit(unit), "expected {unit:?} to be a known unit");
+        }
+        // Discrete cooking units
+        for unit in [
+            "whole",
+            "piece",
+            "pieces",
+            "clove",
+            "cloves",
+            "slice",
+            "slices",
+            "can",
+            "cans",
+            "sheet",
+            "head",
+            "bunch",
+            "sprig",
+            "bag",
+            "bottle",
+            "package",
+            "pkg",
+            "block",
+            "stalk",
+            "stalks",
+            "strip",
+            "strips",
+            "pinch",
+            "dash",
+            "splash",
+            "drop",
+            "leaf",
+            "leaves",
+            "ball",
+            "balls",
+            "sleeve",
+            "jar",
+            "container",
+            "stick",
+            "sticks",
+            "ear",
+            "shake",
+        ] {
+            assert!(is_known_unit(unit), "expected {unit:?} to be a known unit");
+        }
+    }
+
+    #[test]
+    fn is_known_unit_strips_trailing_comma() {
+        // Compound-non-unit bug surface: `splitn(3, ' ')` puts e.g.
+        // `"cloves,"` at parts[1]. The predicate must accept that.
+        assert!(is_known_unit("cloves,"));
+        assert!(is_known_unit("stalks,"));
+    }
+
+    #[test]
+    fn is_known_unit_rejects_non_units() {
+        // Real prod misparses — these tokens were stored as units but
+        // aren't units.
+        assert!(!is_known_unit("zucchini"));
+        assert!(!is_known_unit("zucchini,"));
+        assert!(!is_known_unit("scallions"));
+        assert!(!is_known_unit("scallions,"));
+        assert!(!is_known_unit("cucumber"));
+        assert!(!is_known_unit("celery"));
+        assert!(!is_known_unit("garlic"));
+        assert!(!is_known_unit("bay"));
+        // Size modifiers aren't units (treat them as part of the name).
+        assert!(!is_known_unit("medium"));
+        assert!(!is_known_unit("large"));
+        assert!(!is_known_unit("small"));
+        // Color modifiers aren't units.
+        assert!(!is_known_unit("red"));
+        assert!(!is_known_unit("green"));
+        // Empty / garbage.
+        assert!(!is_known_unit(""));
+        assert!(!is_known_unit(","));
     }
 
     #[test]
