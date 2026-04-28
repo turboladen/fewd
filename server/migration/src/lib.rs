@@ -1,5 +1,6 @@
 pub use sea_orm_migration::prelude::*;
 
+pub mod ingredient_amount;
 pub mod ingredient_splitter;
 mod m20260118_000001_create_people;
 mod m20260118_000002_create_recipes;
@@ -16,6 +17,7 @@ mod m20260424_000012_backfill_recipe_slugs;
 mod m20260427_000013_split_ingredient_name_and_prep;
 pub mod slug;
 
+pub use ingredient_amount::{try_parse_amount, try_parse_amount_json, AmountKind};
 pub use ingredient_splitter::split_name_and_prep;
 pub use slug::slugify;
 

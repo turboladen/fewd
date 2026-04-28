@@ -1,4 +1,5 @@
 use crate::dto::{CreateRecipeDto, IngredientAmountDto, IngredientDto, TimeValueDto};
+use crate::services::ingredient_amount::try_parse_amount_dto;
 use crate::services::ingredient_splitter::split_name_and_prep;
 
 pub struct RecipeParser;
@@ -281,28 +282,12 @@ fn extract_notes(s: &str) -> (String, Option<String>) {
     (name, Some(notes))
 }
 
-/// Try to parse an amount string, returning None if it's not a number/fraction/range.
+/// Try to parse an amount string, returning None if it's not a recognized
+/// number / fraction / range. Delegates to the shared
+/// [`crate::services::ingredient_amount::try_parse_amount_dto`] so the
+/// runtime parser and the backfill migration agree on what's parseable.
 fn try_parse_amount(s: &str) -> Option<IngredientAmountDto> {
-    // Range like "1-2"
-    if let Some((min_s, max_s)) = s.split_once('-') {
-        if let (Ok(min), Ok(max)) = (min_s.parse::<f64>(), max_s.parse::<f64>()) {
-            return Some(IngredientAmountDto::Range { min, max });
-        }
-    }
-
-    // Fraction like "1/2"
-    if let Some((num_s, den_s)) = s.split_once('/') {
-        if let (Ok(num), Ok(den)) = (num_s.parse::<f64>(), den_s.parse::<f64>()) {
-            if den != 0.0 {
-                return Some(IngredientAmountDto::Single { value: num / den });
-            }
-        }
-    }
-
-    // Regular number
-    s.parse::<f64>()
-        .ok()
-        .map(|value| IngredientAmountDto::Single { value })
+    try_parse_amount_dto(s)
 }
 
 fn parse_tags(lines: &[&str]) -> Vec<String> {
@@ -606,5 +591,23 @@ dinner, quick, mexican";
             matches!(try_parse_amount("2-3"), Some(IngredientAmountDto::Range { min, max }) if (min - 2.0).abs() < 0.001 && (max - 3.0).abs() < 0.001)
         );
         assert!(try_parse_amount("flour").is_none());
+        // En-dash and em-dash ranges (real recipe inputs use Unicode dashes).
+        assert!(
+            matches!(try_parse_amount("12–15"), Some(IngredientAmountDto::Range { min, max }) if (min - 12.0).abs() < 0.001 && (max - 15.0).abs() < 0.001)
+        );
+        assert!(
+            matches!(try_parse_amount("3—4"), Some(IngredientAmountDto::Range { min, max }) if (min - 3.0).abs() < 0.001 && (max - 4.0).abs() < 0.001)
+        );
+        // Standalone Unicode vulgar fractions.
+        assert!(
+            matches!(try_parse_amount("¼"), Some(IngredientAmountDto::Single { value }) if (value - 0.25).abs() < 0.001)
+        );
+        // Mixed Unicode fraction.
+        assert!(
+            matches!(try_parse_amount("1½"), Some(IngredientAmountDto::Single { value }) if (value - 1.5).abs() < 0.001)
+        );
+        // Label-shaped strings rejected (`80/20 ground beef` should not
+        // produce 4.0 — the label falls through to "no parseable amount").
+        assert!(try_parse_amount("80/20").is_none());
     }
 }
