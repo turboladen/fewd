@@ -718,6 +718,66 @@ dinner, quick, mexican";
         assert_eq!(ing.notes, None);
     }
 
+    /// Live-data calibration: parse the original markdown lines that
+    /// produced the misbucketed prod rows surfaced by the dietpi audit on
+    /// 2026-04-27. Asserts the post-fewd-4i3 parser produces clean
+    /// IngredientDto shapes — closing the loop with the m14 backfill,
+    /// which produces the same shapes from the post-m13 corrupted state.
+    #[test]
+    fn live_data_calibration() {
+        fn line(md_line: &str) -> IngredientDto {
+            let md = format!(
+                "# Test\n\n## Ingredients\n- {}\n\n## Instructions\nMix",
+                md_line
+            );
+            parse(&md).ingredients.into_iter().next().unwrap()
+        }
+
+        // Compound non-unit at parts[1] (Pattern A's source).
+        let zucchini = line("1 zucchini, sliced into half-moons");
+        assert_eq!(zucchini.name, "zucchini");
+        assert_eq!(zucchini.prep.as_deref(), Some("sliced into half-moons"));
+        assert_eq!(zucchini.unit, "whole");
+
+        let scallions = line("1 scallions, thinly sliced");
+        assert_eq!(scallions.name, "scallions");
+        assert_eq!(scallions.prep.as_deref(), Some("thinly sliced"));
+
+        // Em-dash range: parts[1] is a unit.
+        let ribs = line("3–4 lbs bone-in beef short ribs");
+        assert_eq!(ribs.name, "bone-in beef short ribs");
+        assert_eq!(ribs.unit, "lbs");
+        assert!(matches!(
+            ribs.amount,
+            IngredientAmountDto::Range { min, max } if (min - 3.0).abs() < 0.001 && (max - 4.0).abs() < 0.001
+        ));
+
+        // Em-dash range: parts[1] is NOT a unit (compound name path).
+        let sage = line("12–15 fresh sage leaves");
+        assert_eq!(sage.name, "fresh sage leaves");
+        assert_eq!(sage.unit, "whole");
+
+        // Unicode vulgar fraction.
+        let salt = line("¼ teaspoon salt");
+        assert_eq!(salt.name, "salt");
+        assert_eq!(salt.unit, "teaspoon");
+
+        // Mixed Unicode fraction.
+        let milk = line("1½ cups milk");
+        assert_eq!(milk.name, "milk");
+        assert_eq!(milk.unit, "cups");
+
+        // Compound name w/o prep (size modifier at parts[1]).
+        let onions = line("4 medium red onions");
+        assert_eq!(onions.name, "medium red onions");
+        assert_eq!(onions.unit, "whole");
+
+        // 80/20 falls through to "no parseable amount" (whole line is name).
+        let beef = line("80/20 ground beef");
+        assert_eq!(beef.name, "80/20 ground beef");
+        assert_eq!(beef.unit, "to taste");
+    }
+
     #[test]
     fn test_try_parse_amount() {
         assert!(
