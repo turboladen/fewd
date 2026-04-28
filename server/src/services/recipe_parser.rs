@@ -1,5 +1,5 @@
 use crate::dto::{CreateRecipeDto, IngredientAmountDto, IngredientDto, TimeValueDto};
-use crate::services::ingredient_amount::try_parse_amount_dto;
+use crate::services::ingredient_amount::{is_known_unit, try_parse_amount_dto};
 use crate::services::ingredient_splitter::split_name_and_prep;
 
 pub struct RecipeParser;
@@ -216,17 +216,47 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
                 ))
             }
         }
-        // Amount + unit + name like "2 cups flour" or "6 cloves garlic, minced"
+        // 3 parts: dispatch on whether parts[1] is a known unit.
+        //
+        //   - "2 cups flour" → parts[1]="cups" IS a unit → name="flour",
+        //     unit="cups". Standard case.
+        //   - "6 cloves garlic, minced" → parts[1]="cloves" IS a unit →
+        //     name="garlic, minced" → splitter peels prep.
+        //   - "1 zucchini, sliced into half-moons" → parts[1]="zucchini,"
+        //     is NOT a unit (compound name with prep clause). Treat the
+        //     whole `parts[1] + parts[2]` as the raw name (preserving the
+        //     comma so the splitter peels prep), set unit="whole".
+        //   - "4 medium red onions" → parts[1]="medium" is NOT a unit
+        //     (size modifier). Same compound-name treatment.
+        //
+        // The is_known_unit dispatch was added for fewd-4i3; before that
+        // the parser unconditionally treated parts[1] as the unit, which
+        // produced `name="sliced into half-moons", unit="zucchini,"` and
+        // similar misparses in prod data.
         _ => {
             if let Some(amount) = try_parse_amount(parts[0]) {
-                Some(build_ingredient(
-                    parts[2],
-                    amount,
-                    parts[1].to_string(),
-                    notes,
-                ))
+                let token = parts[1];
+                let token_stripped = token.strip_suffix(',').unwrap_or(token);
+                if is_known_unit(token_stripped) {
+                    Some(build_ingredient(
+                        parts[2],
+                        amount,
+                        token_stripped.to_string(),
+                        notes,
+                    ))
+                } else {
+                    // Preserve the original token (with any trailing comma)
+                    // so the splitter can peel prep.
+                    let raw_name = format!("{} {}", token, parts[2]);
+                    Some(build_ingredient(
+                        &raw_name,
+                        amount,
+                        "whole".to_string(),
+                        notes,
+                    ))
+                }
             } else {
-                // Entire line is a name (no parseable amount)
+                // Entire line is a name (no parseable amount).
                 Some(build_ingredient(
                     &line,
                     IngredientAmountDto::Single { value: 1.0 },
@@ -565,17 +595,126 @@ dinner, quick, mexican";
     }
 
     #[test]
+    fn test_compound_non_unit_with_prep() {
+        // The fewd-4i3 hero case: parts[1]="zucchini," is not a unit, so
+        // the parser merges it into the name and lets the splitter peel
+        // the prep clause.
+        let md = "# Test\n\n## Ingredients\n- 1 zucchini, sliced into half-moons\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "zucchini");
+        assert_eq!(ing.prep, Some("sliced into half-moons".to_string()));
+        assert_eq!(ing.unit, "whole");
+    }
+
+    #[test]
+    fn test_compound_non_unit_no_prep() {
+        // "4 medium red onions" — parts[1]="medium" is not a unit.
+        let md = "# Test\n\n## Ingredients\n- 4 medium red onions\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "medium red onions");
+        assert_eq!(ing.prep, None);
+        assert_eq!(ing.unit, "whole");
+    }
+
+    #[test]
+    fn test_bay_leaves() {
+        // "2 bay leaves" — parts[1]="bay" not a unit. Compound name.
+        let md = "# Test\n\n## Ingredients\n- 2 bay leaves\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "bay leaves");
+        assert_eq!(ing.unit, "whole");
+    }
+
+    #[test]
+    fn test_em_dash_range_with_compound_name() {
+        // "12–15 fresh sage leaves" — em-dash range, parts[1]="fresh" not a unit.
+        let md = "# Test\n\n## Ingredients\n- 12–15 fresh sage leaves\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "fresh sage leaves");
+        assert!(matches!(
+            ing.amount,
+            IngredientAmountDto::Range { min, max } if (min - 12.0).abs() < 0.001 && (max - 15.0).abs() < 0.001
+        ));
+        assert_eq!(ing.unit, "whole");
+    }
+
+    #[test]
+    fn test_em_dash_range_with_unit() {
+        // "3–4 lbs bone-in beef short ribs" — parts[1]="lbs" IS a unit.
+        let md =
+            "# Test\n\n## Ingredients\n- 3–4 lbs bone-in beef short ribs\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "bone-in beef short ribs");
+        assert_eq!(ing.unit, "lbs");
+        assert!(matches!(
+            ing.amount,
+            IngredientAmountDto::Range { min, max } if (min - 3.0).abs() < 0.001 && (max - 4.0).abs() < 0.001
+        ));
+    }
+
+    #[test]
+    fn test_unicode_fraction() {
+        let md = "# Test\n\n## Ingredients\n- ¼ teaspoon salt\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "salt");
+        assert_eq!(ing.unit, "teaspoon");
+        assert!(
+            matches!(ing.amount, IngredientAmountDto::Single { value } if (value - 0.25).abs() < 0.001)
+        );
+    }
+
+    #[test]
+    fn test_mixed_unicode_fraction() {
+        let md = "# Test\n\n## Ingredients\n- 1½ cups milk\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "milk");
+        assert_eq!(ing.unit, "cups");
+        assert!(
+            matches!(ing.amount, IngredientAmountDto::Single { value } if (value - 1.5).abs() < 0.001)
+        );
+    }
+
+    #[test]
+    fn test_label_fraction_falls_through() {
+        // "80/20 ground beef" — `80/20` is a label, not a fraction. The
+        // tightened ASCII fraction bounds reject it, so the entire line
+        // becomes the name (no parseable amount).
+        let md = "# Test\n\n## Ingredients\n- 80/20 ground beef\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "80/20 ground beef");
+        assert_eq!(ing.unit, "to taste");
+        assert!(
+            matches!(ing.amount, IngredientAmountDto::Single { value } if (value - 1.0).abs() < 0.001)
+        );
+    }
+
+    #[test]
     fn test_ingredient_with_paren_alternative_and_prep() {
         // End-to-end: a markdown line where the parenthetical is NOT trailing
         // notes but a varietal alternative, followed by a prep clause. The
         // parser should preserve the parens in `name` and put `grated` in
-        // `prep`. Pre-fix this dropped `, grated` and produced name="pear",
-        // notes=Some("or Fuji apple"), with prep silently lost.
+        // `prep`.
+        //
+        // Pre-fewd-xez this dropped `, grated` and produced name="pear",
+        // notes=Some("or Fuji apple"). Pre-fewd-4i3 the 3-part branch put
+        // "Asian" in `unit`, leaving name="pear (or Fuji apple)" — wrong
+        // because "Asian" is a varietal modifier, not a unit. After
+        // fewd-4i3's is_known_unit dispatch, the full varietal stays in
+        // `name`: "Asian pear (or Fuji apple)".
         let md = "# Test\n\n## Ingredients\n- 1 Asian pear (or Fuji apple), grated\n\n## Instructions\nMix";
         let recipe = parse(md);
         let ing = &recipe.ingredients[0];
-        assert_eq!(ing.name, "pear (or Fuji apple)");
+        assert_eq!(ing.name, "Asian pear (or Fuji apple)");
         assert_eq!(ing.prep, Some("grated".to_string()));
+        assert_eq!(ing.unit, "whole");
         assert_eq!(ing.notes, None);
     }
 
