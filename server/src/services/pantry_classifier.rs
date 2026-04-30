@@ -19,10 +19,12 @@
 //!    to avoid the substring traps: an entry of `"pepper"` would otherwise
 //!    misclassify "bell pepper", and `"salt"` would misclassify "salt cod".
 //!
-//! False positives in this classifier cost less than false negatives,
+//! False negatives cost less than false positives in this classifier,
 //! because consumers present the staples as *"verify these"*, not *"don't
-//! buy these"*. A staple slipped into `items_to_buy` is annoying noise; a
-//! shopping item miscategorized as a staple is a missed grocery item.
+//! buy these"*. With "is staple" as the positive class: a real staple
+//! slipped into `items_to_buy` (false negative) is just noise on the
+//! shopping list; a real shopping item miscategorized as a staple
+//! (false positive) hides in the verify section and may not get bought.
 
 use crate::dto::IngredientAmountDto;
 use crate::services::unit_converter::normalize_unit;

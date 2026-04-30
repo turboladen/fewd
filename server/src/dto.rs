@@ -275,9 +275,11 @@ pub struct AggregatedIngredientDto {
     pub items: Vec<IngredientSourceDto>,
 }
 
-/// Shopping list partitioned by pantry-staple classification. Consumers
-/// (LLM via MCP, the UI) render `items_to_buy` as the primary list and
-/// `pantry_staples_to_verify` as a "double-check you have these" section.
+/// Shopping list partitioned by pantry-staple classification. The shape
+/// anticipates two render targets — `items_to_buy` as the primary list,
+/// `pantry_staples_to_verify` as a "double-check you have these" section
+/// — but neither the MCP tool nor the UI consumes this type yet; today
+/// only `ShoppingService::get_shopping_list_split` produces it.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ShoppingListSplitDto {
     pub items_to_buy: Vec<AggregatedIngredientDto>,
