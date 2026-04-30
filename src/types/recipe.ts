@@ -212,13 +212,45 @@ export function formatAmount(amount: IngredientAmount): string {
 }
 
 /**
- * Splits free-form instructions text into one trimmed, non-empty step per line.
- * Leading list markers like `1.` or `2)` are stripped so the renderer can
- * supply its own numbering.
+ * Splits free-form instructions into trimmed, non-empty steps. Leading list
+ * markers like `1.` or `2)` are stripped so the renderer can supply its own
+ * numbering.
+ *
+ * Three strategies are tried in order so AI-enhanced prose (hard-wrapped at
+ * ~80 chars within paragraphs) and user-typed lists both render correctly:
+ *
+ *   1. If the input contains a blank line, paragraphs (separated by `\n\n+`)
+ *      are the steps; soft-wrapped lines within a paragraph are joined with
+ *      a space.
+ *   2. Else, if 2+ lines start with a numbered marker (`1.`, `2)`, …), split
+ *      on those markers so a wrapped item like
+ *      `1. Heat oil.\n   Add onions.\n2. Add garlic.` becomes 2 steps.
+ *   3. Else, fall back to one step per non-empty line — preserves how
+ *      user-typed multi-line instructions have always rendered.
  */
 export function parseInstructionSteps(instructions: string): string[] {
-  return instructions
+  const trimmed = instructions.replace(/\r\n?/g, '\n').trim()
+  if (trimmed.length === 0) return []
+
+  const stripMarker = (chunk: string) => chunk.replace(/^\s*\d+[.)]\s*/, '').trim()
+  const joinSoftWrap = (chunk: string) => chunk.replace(/\s*\n\s*/g, ' ').trim()
+  const finalize = (chunks: string[]) =>
+    chunks
+      .map(joinSoftWrap)
+      .map(stripMarker)
+      .filter((s) => s.length > 0)
+
+  if (/\n[ \t]*\n/.test(trimmed)) {
+    return finalize(trimmed.split(/\n[ \t]*\n+/))
+  }
+
+  const markerCount = (trimmed.match(/(?:^|\n)[ \t]*\d+[.)][ \t]+/g) ?? []).length
+  if (markerCount >= 2) {
+    return finalize(trimmed.split(/\n(?=[ \t]*\d+[.)][ \t]+)/))
+  }
+
+  return trimmed
     .split('\n')
-    .map((line) => line.replace(/^\s*\d+[.)]\s*/, '').trim())
-    .filter((line) => line.length > 0)
+    .map(stripMarker)
+    .filter((s) => s.length > 0)
 }

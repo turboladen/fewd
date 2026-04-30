@@ -98,6 +98,32 @@ describe('CookingView', () => {
     expect(screen.getByText('Enhanced step two.')).toBeInTheDocument()
   })
 
+  it('renders soft-wrapped enhanced paragraphs as one step per paragraph, not per line', () => {
+    const parsed = parseRecipe(makeRecipe())
+    const enhanced = [
+      'Heat 4 tbsp olive oil in a large pot. Add onion,',
+      'carrot, and celery. Cook until soft.',
+      '',
+      'Add garlic and cook 1 minute more.',
+    ].join('\n')
+
+    render(
+      <ChromeProvider>
+        <CookingView
+          parsed={parsed}
+          onExit={vi.fn()}
+          enhancedInstructions={enhanced}
+        />
+      </ChromeProvider>,
+    )
+
+    const steps = screen.getAllByRole('listitem').filter((li) => li.closest('ol'))
+    expect(steps).toHaveLength(2)
+    expect(steps[0].textContent).toContain('Heat 4 tbsp olive oil')
+    expect(steps[0].textContent).toContain('Cook until soft.')
+    expect(steps[1].textContent).toContain('Add garlic and cook 1 minute more.')
+  })
+
   it('renders **bold** markdown in enhanced instructions as <strong> elements', () => {
     const parsed = parseRecipe(makeRecipe())
     render(
