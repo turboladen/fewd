@@ -229,7 +229,7 @@ export function formatAmount(amount: IngredientAmount): string {
  *      user-typed multi-line instructions have always rendered.
  */
 export function parseInstructionSteps(instructions: string): string[] {
-  const trimmed = instructions.trim()
+  const trimmed = instructions.replace(/\r\n?/g, '\n').trim()
   if (trimmed.length === 0) return []
 
   const stripMarker = (chunk: string) => chunk.replace(/^\s*\d+[.)]\s*/, '').trim()

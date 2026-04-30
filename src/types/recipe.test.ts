@@ -230,4 +230,13 @@ describe('parseInstructionSteps', () => {
       'Add onions and cook until translucent.',
     ])
   })
+
+  it('normalizes CRLF line endings before splitting', () => {
+    const input = 'Heat oil in a pan\r\nover medium heat.\r\n\r\nAdd onions.'
+    const steps = parseInstructionSteps(input)
+    expect(steps).toEqual([
+      'Heat oil in a pan over medium heat.',
+      'Add onions.',
+    ])
+  })
 })
