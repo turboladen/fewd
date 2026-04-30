@@ -30,15 +30,16 @@ use crate::services::unit_converter::normalize_unit;
 /// Returns `true` if the aggregated shopping-list line represents a
 /// pantry staple the user likely already has.
 ///
-/// `total_amount` is currently unused but reserved for a future revision
-/// where amount-aware rules may demote large quantities of generally-staple
-/// names (e.g. "1 cup butter is a primary ingredient, not a staple").
-/// Callers should pass the aggregated total even though it doesn't affect
-/// classification today, so adding the rule won't churn call sites.
+/// `total_amount` is unused today but plumbed through so a future
+/// amount-aware rule (e.g. "1 cup butter is a primary ingredient, not a
+/// staple") can land without churning call sites. `None` means the
+/// upstream aggregator couldn't compute a total — it's a real signal,
+/// not a missing value, and a future amount-aware rule should fall
+/// through to the name-only decision when it sees `None`.
 pub fn is_pantry_staple(
     name: &str,
     unit: Option<&str>,
-    _total_amount: &IngredientAmountDto,
+    _total_amount: Option<&IngredientAmountDto>,
 ) -> bool {
     if let Some(u) = unit {
         if is_small_measurement_unit(u) {
@@ -166,39 +167,32 @@ mod tests {
 
     #[test]
     fn tsp_is_staple_regardless_of_name() {
-        // The small-unit rule fires regardless of whether the name appears
-        // in STAPLE_NAMES — a teaspoon-measured ingredient is by definition
-        // a seasoning, so we use a name we know is NOT in the allowlist to
-        // prove the rule isn't sneaking in via the name fallback.
-        assert!(is_pantry_staple("chicken broth", Some("tsp"), &single(1.0)));
+        // Picks a name we know is NOT in STAPLE_NAMES so a passing test
+        // proves Rule 1 fired, not the name fallback.
+        let amt = single(1.0);
+        assert!(is_pantry_staple("chicken broth", Some("tsp"), Some(&amt)));
     }
 
     #[test]
     fn tbsp_is_staple_case_insensitive() {
-        // `unit_converter::normalize_unit` lowercases input — verify the
-        // classifier inherits that behavior so "Tbsp", "TBSP", "tbsp" all
-        // hit the small-unit rule.
-        assert!(is_pantry_staple("anything", Some("Tbsp"), &single(2.0)));
-        assert!(is_pantry_staple("anything", Some("TBSP"), &single(2.0)));
+        let amt = single(2.0);
+        assert!(is_pantry_staple("anything", Some("Tbsp"), Some(&amt)));
+        assert!(is_pantry_staple("anything", Some("TBSP"), Some(&amt)));
     }
 
     #[test]
     fn teaspoon_long_form_is_staple() {
-        // `normalize_unit` aliases "teaspoon" → "tsp". Confirms recipes that
-        // spell out the unit aren't misclassified.
-        assert!(is_pantry_staple("anything", Some("teaspoon"), &single(1.0)));
-        assert!(is_pantry_staple(
-            "anything",
-            Some("tablespoon"),
-            &single(1.0)
-        ));
+        let amt = single(1.0);
+        assert!(is_pantry_staple("anything", Some("teaspoon"), Some(&amt)));
+        assert!(is_pantry_staple("anything", Some("tablespoon"), Some(&amt)));
     }
 
     #[test]
     fn pinch_dash_splash_drop_shake_are_staples() {
+        let amt = single(1.0);
         for unit in ["pinch", "dash", "splash", "drop", "shake"] {
             assert!(
-                is_pantry_staple("anything", Some(unit), &single(1.0)),
+                is_pantry_staple("anything", Some(unit), Some(&amt)),
                 "{unit} should classify as a staple",
             );
         }
@@ -208,10 +202,10 @@ mod tests {
 
     #[test]
     fn non_staple_names_are_not_classified() {
-        // Real grocery items that should pass through to items_to_buy.
+        let amt = single(2.0);
         for name in ["chicken breast", "carrot", "tomato", "ground beef"] {
             assert!(
-                !is_pantry_staple(name, Some("lb"), &single(2.0)),
+                !is_pantry_staple(name, Some("lb"), Some(&amt)),
                 "{name} should NOT classify as a staple",
             );
         }
@@ -219,9 +213,9 @@ mod tests {
 
     #[test]
     fn allowlisted_names_are_staples_in_non_small_units() {
-        // Each tier of the populated allowlist should match in a unit that
-        // does NOT trigger Rule 1 — proves the name rule itself is wired in,
-        // separate from the small-unit fallback.
+        // Each case uses a unit that does NOT trigger Rule 1, isolating
+        // the name-allowlist path from the small-unit fallback.
+        let amt = single(1.0);
         let cases = [
             ("kosher salt", "lb"),
             ("olive oil", "cup"),
@@ -236,7 +230,7 @@ mod tests {
         ];
         for (name, unit) in cases {
             assert!(
-                is_pantry_staple(name, Some(unit), &single(1.0)),
+                is_pantry_staple(name, Some(unit), Some(&amt)),
                 "{name} ({unit}) should classify as a staple via the allowlist",
             );
         }
@@ -244,9 +238,10 @@ mod tests {
 
     #[test]
     fn substring_traps_must_not_match_allowlist() {
-        // Exact-match (not substring) is the whole point of the allowlist.
-        // These compound-name shopping items each share a substring with
-        // an allowlist entry but ARE NOT staples.
+        // Each entry shares a substring with an allowlisted name but is a
+        // distinct grocery item. Exact-match (not contains-match) on the
+        // allowlist is what protects these from misclassification.
+        let amt = single(1.0);
         let traps = [
             ("bell pepper", "whole"),    // shares "pepper"
             ("salt cod", "lb"),          // shares "salt"
@@ -261,7 +256,7 @@ mod tests {
         ];
         for (name, unit) in traps {
             assert!(
-                !is_pantry_staple(name, Some(unit), &single(1.0)),
+                !is_pantry_staple(name, Some(unit), Some(&amt)),
                 "{name} ({unit}) must NOT match the allowlist by substring",
             );
         }
@@ -269,26 +264,33 @@ mod tests {
 
     #[test]
     fn allowlist_match_is_case_and_whitespace_insensitive() {
-        // Real-world ingredient names from recipe imports come in all
-        // shapes; normalize_name should make these all hit the same entry.
+        let amt = single(0.5);
         for variant in ["Olive Oil", "OLIVE OIL", "  olive   oil  ", "olive\toil"] {
             assert!(
-                is_pantry_staple(variant, Some("cup"), &single(0.5)),
+                is_pantry_staple(variant, Some("cup"), Some(&amt)),
                 "variant {variant:?} should normalize to an allowlist hit",
             );
         }
     }
 
-    // ── Edge: missing unit ──────────────────────────────────────────
+    // ── Edge: missing fields ────────────────────────────────────────
 
     #[test]
     fn missing_unit_falls_through_to_name_rule() {
         // When the aggregator can't agree on a unit across sources,
-        // total_unit is None — the classifier should still give a name-only
-        // answer rather than panic or default-true.
-        assert!(!is_pantry_staple("chicken breast", None, &single(2.0)));
-        // Allowlist hit also still works without a unit.
-        assert!(is_pantry_staple("kosher salt", None, &single(1.0)));
+        // total_unit is None — classifier should give a name-only answer.
+        let amt = single(2.0);
+        assert!(!is_pantry_staple("chicken breast", None, Some(&amt)));
+        assert!(is_pantry_staple("kosher salt", None, Some(&amt)));
+    }
+
+    #[test]
+    fn missing_total_amount_does_not_panic() {
+        // total_amount=None means the aggregator returned no usable total
+        // (incompatible units across sources). Classifier still answers.
+        assert!(!is_pantry_staple("chicken breast", Some("lb"), None));
+        assert!(is_pantry_staple("kosher salt", Some("lb"), None));
+        assert!(is_pantry_staple("anything", Some("tsp"), None));
     }
 
     // ── normalize_name + helpers ────────────────────────────────────

@@ -152,17 +152,11 @@ impl ShoppingService {
         end_date: String,
     ) -> Result<ShoppingListSplitDto, DbErr> {
         let flat = Self::get_shopping_list(db, start_date, end_date).await?;
-        // Sentinel value passed when the aggregator couldn't compute a
-        // total (incompatible source units). The classifier ignores
-        // total_amount today, so the value is structural placeholder only;
-        // when an amount-aware rule lands, the call site will swap to a
-        // proper `Option`-aware path or supply a per-source aggregate.
-        let placeholder = IngredientAmountDto::Single { value: 0.0 };
         let (staples, to_buy): (Vec<_>, Vec<_>) = flat.into_iter().partition(|item| {
             pantry_classifier::is_pantry_staple(
                 &item.ingredient_name,
                 item.total_unit.as_deref(),
-                item.total_amount.as_ref().unwrap_or(&placeholder),
+                item.total_amount.as_ref(),
             )
         });
         Ok(ShoppingListSplitDto {

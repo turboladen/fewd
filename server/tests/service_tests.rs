@@ -2049,7 +2049,7 @@ async fn shopping_aggregates_range_amounts_across_prep_variants() {
     }
 }
 
-// --- ShoppingService Pantry-Staple Split Tests (fewd-wm6) ---
+// --- ShoppingService Pantry-Staple Split Tests ---
 
 /// Empty range: both partitions are empty arrays, not Option/None.
 #[tokio::test]
@@ -2220,8 +2220,8 @@ async fn shopping_split_all_staples() {
     assert_eq!(split.pantry_staples_to_verify.len(), 3);
 }
 
-/// Invariant from the issue notes: per-source breakdown survives partition.
-/// A two-source aggregate must keep both sources after going through split.
+/// Invariant: per-source breakdown survives partition. A two-source
+/// aggregate must keep both sources after going through split.
 #[tokio::test]
 async fn shopping_split_preserves_source_breakdown() {
     let db = setup_db().await;
@@ -2279,8 +2279,8 @@ async fn shopping_split_preserves_source_breakdown() {
     );
 }
 
-/// Invariant from the issue notes: Range { min, max } amounts pass through
-/// the partition without collapsing to Single.
+/// Invariant: Range { min, max } amounts pass through the partition
+/// without collapsing to Single.
 #[tokio::test]
 async fn shopping_split_preserves_range_amounts() {
     let db = setup_db().await;
@@ -2379,4 +2379,62 @@ fn assert_partition_contains(
         expected_staples.len(),
         "pantry_staples size mismatch: {staple_names:?}"
     );
+    // Conservation invariant: every input row lands in exactly one bucket.
+    assert_eq!(
+        split.items_to_buy.len() + split.pantry_staples_to_verify.len(),
+        expected_to_buy.len() + expected_staples.len(),
+        "partition dropped or duplicated rows: to_buy={to_buy_names:?}, staples={staple_names:?}",
+    );
+}
+
+/// Adhoc-served meals (one-off ingredients without a recipe) flow through
+/// a different branch of the aggregator than recipe-served meals; this
+/// pins that the partition still works for that path.
+#[tokio::test]
+async fn shopping_split_partitions_adhoc_items() {
+    let db = setup_db().await;
+    let alice = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+
+    MealService::create(
+        &db,
+        CreateMealDto {
+            date: "2026-05-03".to_string(),
+            meal_type: "Breakfast".to_string(),
+            order_index: 0,
+            servings: vec![PersonServingDto::Adhoc {
+                person_id: alice.id,
+                adhoc_items: vec![
+                    IngredientDto {
+                        name: "banana".to_string(),
+                        prep: None,
+                        amount: IngredientAmountDto::Single { value: 2.0 },
+                        unit: "whole".to_string(),
+                        notes: None,
+                    },
+                    IngredientDto {
+                        name: "olive oil".to_string(),
+                        prep: None,
+                        amount: IngredientAmountDto::Single { value: 1.0 },
+                        unit: "tbsp".to_string(),
+                        notes: None,
+                    },
+                ],
+                notes: None,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+
+    let split = ShoppingService::get_shopping_list_split(
+        &db,
+        "2026-05-01".to_string(),
+        "2026-05-07".to_string(),
+    )
+    .await
+    .unwrap();
+
+    assert_partition_contains(&split, &["banana"], &["olive oil"]);
 }
