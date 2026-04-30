@@ -4,9 +4,10 @@ use sea_orm::*;
 
 use crate::dto::PersonServingDto;
 use crate::dto::{AggregatedIngredientDto, IngredientSourceDto, SourceType};
-use crate::dto::{IngredientAmountDto, IngredientDto};
+use crate::dto::{IngredientAmountDto, IngredientDto, ShoppingListSplitDto};
 use crate::entities::recipe::Entity as Recipe;
 use crate::services::meal_service::MealService;
+use crate::services::pantry_classifier;
 use crate::services::unit_converter;
 
 pub struct ShoppingService;
@@ -135,6 +136,33 @@ impl ShoppingService {
         });
 
         Ok(result)
+    }
+
+    /// Same date range as [`Self::get_shopping_list`], but partitions the
+    /// flat list into `items_to_buy` and `pantry_staples_to_verify` using
+    /// the pantry-staple classifier.
+    ///
+    /// Both partitions preserve the upstream alphabetical ordering, the
+    /// `Range { min, max }` aggregation math, and the per-source breakdown
+    /// in `AggregatedIngredientDto.items` — no shape changes versus the
+    /// flat method, just the partition.
+    pub async fn get_shopping_list_split(
+        db: &DatabaseConnection,
+        start_date: String,
+        end_date: String,
+    ) -> Result<ShoppingListSplitDto, DbErr> {
+        let flat = Self::get_shopping_list(db, start_date, end_date).await?;
+        let (staples, to_buy): (Vec<_>, Vec<_>) = flat.into_iter().partition(|item| {
+            pantry_classifier::is_pantry_staple(
+                &item.ingredient_name,
+                item.total_unit.as_deref(),
+                item.total_amount.as_ref(),
+            )
+        });
+        Ok(ShoppingListSplitDto {
+            items_to_buy: to_buy,
+            pantry_staples_to_verify: staples,
+        })
     }
 }
 
