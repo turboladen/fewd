@@ -275,6 +275,15 @@ pub struct AggregatedIngredientDto {
     pub items: Vec<IngredientSourceDto>,
 }
 
+/// Shopping list partitioned by pantry-staple classification. Consumers
+/// (LLM via MCP, the UI) render `items_to_buy` as the primary list and
+/// `pantry_staples_to_verify` as a "double-check you have these" section.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ShoppingListSplitDto {
+    pub items_to_buy: Vec<AggregatedIngredientDto>,
+    pub pantry_staples_to_verify: Vec<AggregatedIngredientDto>,
+}
+
 // ─── Suggestion DTOs ────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Serialize)]
