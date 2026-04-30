@@ -182,4 +182,52 @@ describe('parseInstructionSteps', () => {
     const steps = parseInstructionSteps('  Boil water.  \n  Add pasta.  ')
     expect(steps).toEqual(['Boil water.', 'Add pasta.'])
   })
+
+  it('joins soft-wrapped lines within a paragraph into a single step', () => {
+    const enhanced = [
+      'Heat 4 tbsp olive oil in a large heavy pot or Dutch oven over medium heat. Add onion,',
+      'carrot, and celery. Cook, stirring occasionally, until very soft and starting',
+      "to turn golden — about 15 minutes. Don't rush this.",
+      '',
+      'Add garlic and cook 1 minute more.',
+      '',
+      'Increase heat to medium-high. Add ground beef and pork in chunks. Break up',
+      'and brown thoroughly. Season generously with salt and pepper.',
+    ].join('\n')
+    const steps = parseInstructionSteps(enhanced)
+
+    expect(steps).toHaveLength(3)
+    expect(steps[0]).toContain('Heat 4 tbsp olive oil')
+    expect(steps[0]).toContain('until very soft')
+    expect(steps[0]).toContain("Don't rush this.")
+    expect(steps[0]).not.toContain('\n')
+    expect(steps[1]).toBe('Add garlic and cook 1 minute more.')
+    expect(steps[2]).toContain('Increase heat to medium-high.')
+    expect(steps[2]).toContain('Season generously with salt and pepper.')
+  })
+
+  it('keeps a numbered item with continuation lines as one step', () => {
+    const steps = parseInstructionSteps('1. Heat oil.\n   Add onions.\n2. Add garlic.')
+    expect(steps).toEqual(['Heat oil. Add onions.', 'Add garlic.'])
+  })
+
+  it('handles numbered lists where each item spans paragraph breaks', () => {
+    const input = '1. Heat oil and cook\nthe vegetables.\n\n2. Add garlic.\n\n3. Brown the meat.'
+    const steps = parseInstructionSteps(input)
+    expect(steps).toEqual([
+      'Heat oil and cook the vegetables.',
+      'Add garlic.',
+      'Brown the meat.',
+    ])
+  })
+
+  it('joins soft-wraps in unnumbered prose paragraphs', () => {
+    const input =
+      'Heat oil in a large pan\nover medium heat.\n\nAdd onions and cook\nuntil translucent.'
+    const steps = parseInstructionSteps(input)
+    expect(steps).toEqual([
+      'Heat oil in a large pan over medium heat.',
+      'Add onions and cook until translucent.',
+    ])
+  })
 })
