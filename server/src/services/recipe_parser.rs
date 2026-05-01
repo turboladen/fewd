@@ -190,17 +190,18 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
 
     // Peel mid-string size-info parens like "(28 oz each)" out of the line
     // before tokenization so the noun trailing the parenthetical doesn't get
-    // sliced off by `splitn(3, ' ')`. peel_size_paren is a no-op when the
-    // suffix after `)` starts with a comma (preserving the fewd-xez
-    // alternative-noun precedent) or when no unit token sits inside the
-    // parens. See fewd-i47.
+    // sliced off by `splitn(3, ' ')`. See fewd-i47.
     //
-    // Note precedence: when both extract_notes and peel_size_paren produce
-    // notes (rare in practice — they target disjoint paren positions),
-    // peel_size_paren wins because the size info `(28 oz each)` is the more
-    // structurally meaningful field.
+    // When both extract_notes (trailing parens) and peel_size_paren
+    // (mid-string size parens) produce notes, merge with "; " — same
+    // pattern m20260429_000015 uses for the backfill — so a line like
+    // `2 cans (28 oz each) tomatoes (drained)` keeps both descriptors.
     let (line, peeled_notes) = peel_size_paren(&line);
-    let notes = peeled_notes.or(notes);
+    let notes = match (notes, peeled_notes) {
+        (Some(trailing), Some(peeled)) => Some(format!("{trailing}; {peeled}")),
+        (Some(n), None) | (None, Some(n)) => Some(n),
+        (None, None) => None,
+    };
 
     let parts: Vec<&str> = line.splitn(3, ' ').collect();
 
@@ -731,6 +732,20 @@ dinner, quick, mexican";
         assert_eq!(ing.prep, Some("grated".to_string()));
         assert_eq!(ing.unit, "whole");
         assert_eq!(ing.notes, None);
+    }
+
+    #[test]
+    fn test_ingredient_merges_size_parens_with_trailing_notes() {
+        // Regression for the precedence bug flagged in fewd-i47 review: when
+        // both extract_notes (trailing `(drained)`) and peel_size_paren
+        // (mid-string `(28 oz each)`) fire, both notes must survive. Pre-fix
+        // `peeled_notes.or(notes)` silently dropped the trailing notes.
+        let md = "# Test\n\n## Ingredients\n- 2 cans (28 oz each) crushed tomatoes (drained)\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "crushed tomatoes");
+        assert_eq!(ing.unit, "cans");
+        assert_eq!(ing.notes.as_deref(), Some("drained; 28 oz each"));
     }
 
     #[test]

@@ -192,6 +192,17 @@ mod tests {
     }
 
     #[test]
+    fn fused_unit_token_without_separator_is_left_alone() {
+        // The doc on `contains_unit_token` says fused tokens like "28oz"
+        // (no separator) won't match. Pin that boundary in a test so a
+        // future tokenizer rewrite doesn't silently change it.
+        assert_eq!(
+            peel("2 cans (28oz each) crushed tomatoes"),
+            ("2 cans (28oz each) crushed tomatoes".to_string(), None)
+        );
+    }
+
+    #[test]
     fn idempotent_on_already_peeled_string() {
         let (peeled, _) = peel("2 cans (28 oz each) crushed San Marzano tomatoes");
         let (peeled2, notes2) = peel(&peeled);
