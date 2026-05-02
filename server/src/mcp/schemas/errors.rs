@@ -46,7 +46,14 @@ pub enum InputError {
     NonPositiveServingsCount(f64),
     UnknownMealType(String),
     EmptyName(&'static str),
-    InvalidDate { field: &'static str, value: String },
+    InvalidDate {
+        field: &'static str,
+        value: String,
+    },
+    ReversedDateRange {
+        start_date: String,
+        end_date: String,
+    },
 }
 
 impl std::fmt::Display for InputError {
@@ -68,6 +75,13 @@ impl std::fmt::Display for InputError {
             Self::InvalidDate { field, value } => write!(
                 f,
                 "{field} must be in YYYY-MM-DD format (got '{value}')."
+            ),
+            Self::ReversedDateRange {
+                start_date,
+                end_date,
+            } => write!(
+                f,
+                "end_date ('{end_date}') must be on or after start_date ('{start_date}'). Swap them or pick a forward range."
             ),
         }
     }

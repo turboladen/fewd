@@ -35,28 +35,38 @@ pub struct DateRangeParams {
 }
 
 impl DateRangeParams {
-    /// Validate both dates parse as YYYY-MM-DD before the service layer
-    /// sees them. The service layer would reject malformed dates as a
-    /// `DbErr::Custom` which gets wrapped as an MCP `internal_error` —
-    /// turning a user-input mistake into something the LLM can't cleanly
-    /// retry. Catching it here lets us surface a tool-level error instead.
+    /// Validate both dates parse as YYYY-MM-DD AND that `start_date` is
+    /// on or before `end_date`. The service layer's SQL filter is
+    /// `date >= start AND date <= end`, so a reversed range matches no
+    /// rows and silently returns `[]` — indistinguishable from "nothing
+    /// scheduled". Surfacing both checks here turns the silent empty
+    /// into a tool-level error the LLM can recover from.
     pub fn validate(&self) -> Result<(), InputError> {
-        validate_date_yyyy_mm_dd(&self.start_date, "start_date")?;
-        validate_date_yyyy_mm_dd(&self.end_date, "end_date")?;
+        let start = validate_date_yyyy_mm_dd(&self.start_date, "start_date")?;
+        let end = validate_date_yyyy_mm_dd(&self.end_date, "end_date")?;
+        if start > end {
+            return Err(InputError::ReversedDateRange {
+                start_date: self.start_date.clone(),
+                end_date: self.end_date.clone(),
+            });
+        }
         Ok(())
     }
 }
 
-/// Confirm a date string parses as YYYY-MM-DD. Used by tool handlers to
-/// surface bad date formats as a tool-level error rather than letting them
-/// reach the service layer (which converts them to opaque DB errors).
-pub(super) fn validate_date_yyyy_mm_dd(value: &str, field: &'static str) -> Result<(), InputError> {
-    NaiveDate::parse_from_str(value, "%Y-%m-%d")
-        .map(|_| ())
-        .map_err(|_| InputError::InvalidDate {
-            field,
-            value: value.to_string(),
-        })
+/// Confirm a date string parses as YYYY-MM-DD. Returns the parsed
+/// `NaiveDate` so callers can do further range checks without re-parsing.
+/// Used by tool handlers to surface bad date formats as a tool-level
+/// error rather than letting them reach the service layer (which
+/// converts them to opaque DB errors).
+pub(super) fn validate_date_yyyy_mm_dd(
+    value: &str,
+    field: &'static str,
+) -> Result<NaiveDate, InputError> {
+    NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| InputError::InvalidDate {
+        field,
+        value: value.to_string(),
+    })
 }
 
 // ─── Bidirectional value types (input + output) ──────────────────

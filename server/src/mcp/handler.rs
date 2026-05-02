@@ -697,6 +697,14 @@ mod tests {
                 .to_string(),
                 vec!["start_date", "YYYY-MM-DD", "garbage"],
             ),
+            (
+                InputError::ReversedDateRange {
+                    start_date: "2026-04-30".into(),
+                    end_date: "2026-04-26".into(),
+                }
+                .to_string(),
+                vec!["start_date", "end_date", "2026-04-30", "2026-04-26"],
+            ),
         ];
 
         for (msg, expected_fragments) in &cases {
@@ -903,6 +911,26 @@ mod tests {
         .expect("CreateRecipeInput JSON shape");
         let result = mcp.create_recipe(Parameters(input)).await;
         assert_tool_user_error(result, &["servings must be >= 1", "0"]);
+    }
+
+    #[tokio::test]
+    async fn list_meals_reversed_date_range_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        // Both dates parse cleanly but start > end. The service-layer
+        // SQL filter is `date >= start AND date <= end`, which silently
+        // returns [] for reversed input — indistinguishable from "no
+        // meals scheduled". Tool-level error is the only signal the LLM
+        // gets that the range is backwards.
+        let result = mcp
+            .list_meals(Parameters(DateRangeParams {
+                start_date: "2026-04-30".into(),
+                end_date: "2026-04-26".into(),
+            }))
+            .await;
+        assert_tool_user_error(
+            result,
+            &["start_date", "end_date", "2026-04-30", "2026-04-26"],
+        );
     }
 
     #[tokio::test]
