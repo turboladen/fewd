@@ -22,8 +22,8 @@ use super::lookups::MealLookups;
 use super::schemas::{
     create_meal_input_to_dto, create_recipe_input_to_dto, meal_to_brief, person_to_prefs,
     recipe_to_brief, recipe_to_full, render_family_overview, shopping_item_from_dto,
-    CreateMealInput, CreateRecipeInput, DateRangeParams, EmptyParams, GetRecipeParams,
-    SearchRecipesParams,
+    CreateMealError, CreateMealInput, CreateRecipeInput, DateRangeParams, EmptyParams,
+    GetRecipeParams, SearchRecipesParams,
 };
 use super::AuthenticatedPerson;
 
@@ -84,12 +84,6 @@ impl FewdMcp {
         &self,
         Parameters(params): Parameters<SearchRecipesParams>,
     ) -> Result<CallToolResult, McpError> {
-        // LLM-recoverable validation failures are returned as tool-level
-        // errors (CallToolResult { is_error: true, content: [...] }) rather
-        // than JSON-RPC protocol errors. Most MCP clients (Claude Desktop,
-        // Claude.ai) display the latter as a generic "Tool execution failed"
-        // and swallow the message; tool-level errors carry the actionable
-        // text through to the LLM so it can retry with a corrected call.
         if let Err(msg) = params.validate_has_filter() {
             return Ok(tool_user_error(msg));
         }
@@ -164,16 +158,13 @@ impl FewdMcp {
         let normalized = params.slug.trim().to_lowercase();
         let recipe = RecipeService::get_by_slug(&self.db, normalized.clone())
             .await
-            .map_err(db_error)?
-            .ok_or_else(|| {
-                McpError::invalid_params(
-                    format!(
-                        "no recipe with slug '{}'. Call list_curated_recipes for the shortlist or search_recipes with a filter to find valid slugs.",
-                        params.slug
-                    ),
-                    None,
-                )
-            })?;
+            .map_err(db_error)?;
+        let Some(recipe) = recipe else {
+            return Ok(tool_user_error(format!(
+                "no recipe with slug '{}'. Call list_curated_recipes for the shortlist or search_recipes with a filter to find valid slugs.",
+                params.slug
+            )));
+        };
 
         let parent_slug = match recipe.parent_recipe_id.as_deref() {
             None => None,
@@ -238,9 +229,9 @@ impl FewdMcp {
         &self,
         Parameters(params): Parameters<DateRangeParams>,
     ) -> Result<CallToolResult, McpError> {
-        params
-            .validate()
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        if let Err(e) = params.validate() {
+            return Ok(tool_user_error(e.to_string()));
+        }
 
         let meals = MealService::get_all_for_date_range(
             &self.db,
@@ -267,9 +258,9 @@ impl FewdMcp {
         &self,
         Parameters(params): Parameters<DateRangeParams>,
     ) -> Result<CallToolResult, McpError> {
-        params
-            .validate()
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        if let Err(e) = params.validate() {
+            return Ok(tool_user_error(e.to_string()));
+        }
 
         let list = ShoppingService::get_shopping_list(&self.db, params.start_date, params.end_date)
             .await
@@ -298,15 +289,12 @@ impl FewdMcp {
                 let normalized = slug.trim().to_lowercase();
                 let parent = RecipeService::get_by_slug(&self.db, normalized)
                     .await
-                    .map_err(db_error)?
-                    .ok_or_else(|| {
-                        McpError::invalid_params(
-                            format!(
-                                "parent_recipe_slug '{slug}' does not exist. Omit it or use a valid slug from search_recipes."
-                            ),
-                            None,
-                        )
-                    })?;
+                    .map_err(db_error)?;
+                let Some(parent) = parent else {
+                    return Ok(tool_user_error(format!(
+                        "parent_recipe_slug '{slug}' does not exist. Omit it or use a valid slug from search_recipes."
+                    )));
+                };
                 Some((parent.id, parent.slug))
             }
         };
@@ -315,8 +303,10 @@ impl FewdMcp {
             None => (None, None),
         };
 
-        let dto = create_recipe_input_to_dto(input, parent_recipe_id)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let dto = match create_recipe_input_to_dto(input, parent_recipe_id) {
+            Ok(dto) => dto,
+            Err(e) => return Ok(tool_user_error(e.to_string())),
+        };
         let created = RecipeService::create(&self.db, dto)
             .await
             .map_err(db_error)?;
@@ -333,8 +323,15 @@ impl FewdMcp {
         Parameters(input): Parameters<CreateMealInput>,
     ) -> Result<CallToolResult, McpError> {
         let lookups = MealLookups::load(&self.db).await.map_err(db_error)?;
-        let dto = create_meal_input_to_dto(input, &lookups)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        // Match each variant so a future `CreateMealError` variant that
+        // is NOT LLM-recoverable (e.g. an internal-failure variant) fails
+        // to compile until it's categorized rather than being silently
+        // routed through `tool_user_error`.
+        let dto = match create_meal_input_to_dto(input, &lookups) {
+            Ok(dto) => dto,
+            Err(CreateMealError::Input(e)) => return Ok(tool_user_error(e.to_string())),
+            Err(CreateMealError::Resolve(e)) => return Ok(tool_user_error(e.to_string())),
+        };
 
         let created = MealService::create(&self.db, dto).await.map_err(db_error)?;
         let brief = meal_to_brief(&created, &lookups).map_err(internal_error)?;
@@ -659,5 +656,306 @@ mod tests {
             serialized.contains("\"isError\":true"),
             "isError flag must serialize for the wire: {serialized}"
         );
+    }
+
+    // ─── LLM-facing error message contracts ─────────────────────────
+    //
+    // `tool_user_error(e.to_string())` makes the Display strings of
+    // `InputError`, `ResolveError`, and `CreateMealError` the user-facing
+    // messages reaching the LLM. These tests pin the contract: every
+    // variant must echo the offending value AND point at a discovery
+    // tool (or describe the expected format) so the LLM can retry.
+    // Without this guard a future variant could ship with a vague
+    // Display impl and silently degrade the LLM-recovery path.
+
+    #[test]
+    fn input_error_displays_actionable_messages_for_each_variant() {
+        use super::super::schemas::errors::InputError;
+
+        let cases = [
+            (
+                InputError::NonPositiveServings(0).to_string(),
+                vec!["servings must be >= 1", "0"],
+            ),
+            (
+                InputError::NonPositiveServingsCount(-0.5).to_string(),
+                vec!["servings_count must be > 0", "-0.5"],
+            ),
+            (
+                InputError::UnknownMealType("brunch".into()).to_string(),
+                vec!["Breakfast", "Lunch", "Dinner", "Snack", "brunch"],
+            ),
+            (
+                InputError::EmptyName("name").to_string(),
+                vec!["name", "empty"],
+            ),
+            (
+                InputError::InvalidDate {
+                    field: "start_date",
+                    value: "garbage".into(),
+                }
+                .to_string(),
+                vec!["start_date", "YYYY-MM-DD", "garbage"],
+            ),
+            (
+                InputError::ReversedDateRange {
+                    start_date: "2026-04-30".into(),
+                    end_date: "2026-04-26".into(),
+                }
+                .to_string(),
+                vec!["start_date", "end_date", "2026-04-30", "2026-04-26"],
+            ),
+        ];
+
+        for (msg, expected_fragments) in &cases {
+            for frag in expected_fragments {
+                assert!(
+                    msg.contains(frag),
+                    "InputError message {msg:?} must mention {frag:?} so the LLM can fix the call"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_error_displays_point_at_discovery_tool() {
+        use super::super::schemas::errors::ResolveError;
+
+        let person_msg = ResolveError::UnknownPerson("Bob".into()).to_string();
+        assert!(
+            person_msg.contains("Bob"),
+            "must echo unknown name: {person_msg}"
+        );
+        assert!(
+            person_msg.contains("list_people"),
+            "must point at discovery tool: {person_msg}"
+        );
+
+        let recipe_msg = ResolveError::UnknownRecipe("ghost-pasta".into()).to_string();
+        assert!(
+            recipe_msg.contains("ghost-pasta"),
+            "must echo unknown slug: {recipe_msg}"
+        );
+        assert!(
+            recipe_msg.contains("list_curated_recipes") || recipe_msg.contains("search_recipes"),
+            "must point at a recipe-discovery tool: {recipe_msg}"
+        );
+    }
+
+    #[test]
+    fn create_meal_error_forwards_inner_message() {
+        use super::super::schemas::errors::{CreateMealError, InputError, ResolveError};
+
+        let from_input: CreateMealError = InputError::UnknownMealType("brunch".into()).into();
+        assert_eq!(
+            from_input.to_string(),
+            InputError::UnknownMealType("brunch".into()).to_string(),
+            "CreateMealError::Input must forward InputError's Display verbatim"
+        );
+
+        let from_resolve: CreateMealError = ResolveError::UnknownPerson("Bob".into()).into();
+        assert_eq!(
+            from_resolve.to_string(),
+            ResolveError::UnknownPerson("Bob".into()).to_string(),
+            "CreateMealError::Resolve must forward ResolveError's Display verbatim"
+        );
+    }
+
+    #[test]
+    fn tool_user_error_preserves_input_error_display_message() {
+        use super::super::schemas::errors::InputError;
+
+        // End-to-end: an InputError::Display string survives the wrap into
+        // CallToolResult and shows up on the wire as the LLM-visible content.
+        let err = InputError::InvalidDate {
+            field: "start_date",
+            value: "garbage".into(),
+        };
+        let result = tool_user_error(err.to_string());
+        let serialized = serde_json::to_string(&result).expect("CallToolResult serializes");
+        assert!(serialized.contains("\"isError\":true"));
+        assert!(
+            serialized.contains("YYYY-MM-DD"),
+            "format hint must reach the wire: {serialized}"
+        );
+        assert!(
+            serialized.contains("garbage"),
+            "offending value must reach the wire: {serialized}"
+        );
+    }
+
+    // ─── Call-site wiring contracts ─────────────────────────────────
+    //
+    // The Display contracts above guarantee the *messages* are good, but
+    // they don't catch a revert of the call-site wiring (where a tool
+    // returns `Err(McpError::invalid_params(...))` instead of
+    // `Ok(tool_user_error(...))`). These tests invoke each tool against
+    // an empty in-memory DB and assert the result is a tool-level error,
+    // not a JSON-RPC protocol error. A revert silently regresses the
+    // Claude Desktop UX and these tests are the only thing that fails.
+
+    async fn setup_test_mcp() -> FewdMcp {
+        let db = sea_orm::Database::connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite connects");
+        <migration::Migrator as migration::MigratorTrait>::up(&db, None)
+            .await
+            .expect("migrations run on empty DB");
+        FewdMcp::new(db)
+    }
+
+    fn assert_tool_user_error(
+        result: Result<CallToolResult, McpError>,
+        expected_fragments: &[&str],
+    ) {
+        let call_result = result.expect("tool call must return Ok(CallToolResult), not Err(McpError) — JSON-RPC protocol errors get displayed as a generic 'Tool execution failed' by most MCP clients");
+        assert_eq!(
+            call_result.is_error,
+            Some(true),
+            "must be a tool-level error (is_error: true), not a successful result"
+        );
+        let serialized = serde_json::to_string(&call_result).expect("serializes");
+        for frag in expected_fragments {
+            assert!(
+                serialized.contains(frag),
+                "tool-level error must contain {frag:?}: {serialized}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn get_recipe_unknown_slug_returns_tool_level_error_not_protocol_error() {
+        use super::super::schemas::GetRecipeParams;
+
+        let mcp = setup_test_mcp().await;
+        let result = mcp
+            .get_recipe(Parameters(GetRecipeParams {
+                slug: "ghost-pasta".into(),
+            }))
+            .await;
+        assert_tool_user_error(result, &["ghost-pasta", "list_curated_recipes"]);
+    }
+
+    #[tokio::test]
+    async fn list_meals_invalid_date_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        let result = mcp
+            .list_meals(Parameters(DateRangeParams {
+                start_date: "garbage".into(),
+                end_date: "2026-01-01".into(),
+            }))
+            .await;
+        assert_tool_user_error(result, &["start_date", "YYYY-MM-DD", "garbage"]);
+    }
+
+    #[tokio::test]
+    async fn get_shopping_list_invalid_date_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        let result = mcp
+            .get_shopping_list(Parameters(DateRangeParams {
+                start_date: "2026-01-01".into(),
+                end_date: "garbage".into(),
+            }))
+            .await;
+        assert_tool_user_error(result, &["end_date", "YYYY-MM-DD", "garbage"]);
+    }
+
+    #[tokio::test]
+    async fn create_meal_unknown_meal_type_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        let result = mcp
+            .create_meal(Parameters(CreateMealInput {
+                date: "2026-01-01".into(),
+                meal_type: "brunch".into(),
+                order_index: None,
+                servings: vec![],
+            }))
+            .await;
+        assert_tool_user_error(result, &["brunch", "Breakfast", "Lunch", "Dinner", "Snack"]);
+    }
+
+    #[tokio::test]
+    async fn create_recipe_unknown_parent_slug_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        // Empty DB → parent_recipe_slug lookup returns None. Other fields
+        // pass validation so the tool reaches the parent-resolution branch.
+        let input: CreateRecipeInput = serde_json::from_str(
+            r#"{
+                "name": "Test Recipe",
+                "source": "manual",
+                "parent_recipe_slug": "ghost-recipe",
+                "servings": 4,
+                "instructions": "Cook.",
+                "ingredients": []
+            }"#,
+        )
+        .expect("CreateRecipeInput JSON shape");
+        let result = mcp.create_recipe(Parameters(input)).await;
+        assert_tool_user_error(result, &["ghost-recipe", "search_recipes"]);
+    }
+
+    #[tokio::test]
+    async fn create_recipe_invalid_input_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        // No parent slug → input validation runs and rejects servings=0
+        // before any DB query.
+        let input: CreateRecipeInput = serde_json::from_str(
+            r#"{
+                "name": "Test Recipe",
+                "source": "manual",
+                "servings": 0,
+                "instructions": "Cook.",
+                "ingredients": []
+            }"#,
+        )
+        .expect("CreateRecipeInput JSON shape");
+        let result = mcp.create_recipe(Parameters(input)).await;
+        assert_tool_user_error(result, &["servings must be >= 1", "0"]);
+    }
+
+    #[tokio::test]
+    async fn list_meals_reversed_date_range_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        // Both dates parse cleanly but start > end. The service-layer
+        // SQL filter is `date >= start AND date <= end`, which silently
+        // returns [] for reversed input — indistinguishable from "no
+        // meals scheduled". Tool-level error is the only signal the LLM
+        // gets that the range is backwards.
+        let result = mcp
+            .list_meals(Parameters(DateRangeParams {
+                start_date: "2026-04-30".into(),
+                end_date: "2026-04-26".into(),
+            }))
+            .await;
+        assert_tool_user_error(
+            result,
+            &["start_date", "end_date", "2026-04-30", "2026-04-26"],
+        );
+    }
+
+    #[tokio::test]
+    async fn create_meal_unknown_person_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        // Date + meal_type + servings_count all valid → reaches
+        // serving_input_to_dto → resolve_person("Bob") → empty DB has no
+        // people → CreateMealError::Resolve(UnknownPerson). Exercises the
+        // Resolve arm of the exhaustive match in create_meal.
+        // ServingInput lives in a private submodule, so build the input
+        // via JSON to avoid widening the schemas public surface.
+        let input: CreateMealInput = serde_json::from_str(
+            r#"{
+                "date": "2026-01-01",
+                "meal_type": "Dinner",
+                "servings": [{
+                    "kind": "recipe",
+                    "person_name": "Bob",
+                    "recipe_slug": "doesnt-matter",
+                    "servings_count": 1.0
+                }]
+            }"#,
+        )
+        .expect("CreateMealInput JSON shape");
+        let result = mcp.create_meal(Parameters(input)).await;
+        assert_tool_user_error(result, &["Bob", "list_people"]);
     }
 }

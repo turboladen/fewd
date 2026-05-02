@@ -12,19 +12,26 @@
 //! - [`people`] — family-member payload + the `fewd://family/overview`
 //!   Markdown renderer.
 //! - [`shopping`] — shopping-list output.
-//! - [`errors`] — `InputError`, `ResolveError`, `CreateMealError`.
+//! - [`errors`] — `InputError`, `ResolveError`, `CreateMealError`. Only
+//!   `CreateMealError` is re-exported below (handler.rs's exhaustive
+//!   match on it needs the type at runtime). `InputError` and
+//!   `ResolveError` stay scoped to the submodule and the handler test
+//!   module reaches them via the explicit path; that keeps clippy quiet
+//!   about unused re-exports without hiding the types from tests.
 //!
-//! All public items are re-exported at this level so handler.rs can keep a
-//! single `use super::schemas::{…}` import.
+//! All public items used by `handler.rs`'s production code are re-exported
+//! at this level so the runtime path can keep a single
+//! `use super::schemas::{…}` import.
 
 mod common;
-mod errors;
+pub(super) mod errors;
 mod meals;
 mod people;
 mod recipes;
 mod shopping;
 
 pub use common::{DateRangeParams, EmptyParams, GetRecipeParams};
+pub use errors::CreateMealError;
 pub use meals::{create_meal_input_to_dto, meal_to_brief, CreateMealInput};
 pub use people::{person_to_prefs, render_family_overview};
 pub use recipes::{
