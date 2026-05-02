@@ -19,12 +19,11 @@ use crate::services::recipe_service::{RecipeService, SearchFilters};
 use crate::services::shopping_service::ShoppingService;
 
 use super::lookups::MealLookups;
-use super::schemas::errors::CreateMealError;
 use super::schemas::{
     create_meal_input_to_dto, create_recipe_input_to_dto, meal_to_brief, person_to_prefs,
     recipe_to_brief, recipe_to_full, render_family_overview, shopping_item_from_dto,
-    CreateMealInput, CreateRecipeInput, DateRangeParams, EmptyParams, GetRecipeParams,
-    SearchRecipesParams,
+    CreateMealError, CreateMealInput, CreateRecipeInput, DateRangeParams, EmptyParams,
+    GetRecipeParams, SearchRecipesParams,
 };
 use super::AuthenticatedPerson;
 
@@ -865,5 +864,70 @@ mod tests {
             }))
             .await;
         assert_tool_user_error(result, &["brunch", "Breakfast", "Lunch", "Dinner", "Snack"]);
+    }
+
+    #[tokio::test]
+    async fn create_recipe_unknown_parent_slug_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        // Empty DB → parent_recipe_slug lookup returns None. Other fields
+        // pass validation so the tool reaches the parent-resolution branch.
+        let input: CreateRecipeInput = serde_json::from_str(
+            r#"{
+                "name": "Test Recipe",
+                "source": "manual",
+                "parent_recipe_slug": "ghost-recipe",
+                "servings": 4,
+                "instructions": "Cook.",
+                "ingredients": []
+            }"#,
+        )
+        .expect("CreateRecipeInput JSON shape");
+        let result = mcp.create_recipe(Parameters(input)).await;
+        assert_tool_user_error(result, &["ghost-recipe", "search_recipes"]);
+    }
+
+    #[tokio::test]
+    async fn create_recipe_invalid_input_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        // No parent slug → input validation runs and rejects servings=0
+        // before any DB query.
+        let input: CreateRecipeInput = serde_json::from_str(
+            r#"{
+                "name": "Test Recipe",
+                "source": "manual",
+                "servings": 0,
+                "instructions": "Cook.",
+                "ingredients": []
+            }"#,
+        )
+        .expect("CreateRecipeInput JSON shape");
+        let result = mcp.create_recipe(Parameters(input)).await;
+        assert_tool_user_error(result, &["servings must be >= 1", "0"]);
+    }
+
+    #[tokio::test]
+    async fn create_meal_unknown_person_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        // Date + meal_type + servings_count all valid → reaches
+        // serving_input_to_dto → resolve_person("Bob") → empty DB has no
+        // people → CreateMealError::Resolve(UnknownPerson). Exercises the
+        // Resolve arm of the exhaustive match in create_meal.
+        // ServingInput lives in a private submodule, so build the input
+        // via JSON to avoid widening the schemas public surface.
+        let input: CreateMealInput = serde_json::from_str(
+            r#"{
+                "date": "2026-01-01",
+                "meal_type": "Dinner",
+                "servings": [{
+                    "kind": "recipe",
+                    "person_name": "Bob",
+                    "recipe_slug": "doesnt-matter",
+                    "servings_count": 1.0
+                }]
+            }"#,
+        )
+        .expect("CreateMealInput JSON shape");
+        let result = mcp.create_meal(Parameters(input)).await;
+        assert_tool_user_error(result, &["Bob", "list_people"]);
     }
 }
