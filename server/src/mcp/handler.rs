@@ -19,6 +19,7 @@ use crate::services::recipe_service::{RecipeService, SearchFilters};
 use crate::services::shopping_service::ShoppingService;
 
 use super::lookups::MealLookups;
+use super::schemas::errors::CreateMealError;
 use super::schemas::{
     create_meal_input_to_dto, create_recipe_input_to_dto, meal_to_brief, person_to_prefs,
     recipe_to_brief, recipe_to_full, render_family_overview, shopping_item_from_dto,
@@ -84,12 +85,6 @@ impl FewdMcp {
         &self,
         Parameters(params): Parameters<SearchRecipesParams>,
     ) -> Result<CallToolResult, McpError> {
-        // LLM-recoverable validation failures are returned as tool-level
-        // errors (CallToolResult { is_error: true, content: [...] }) rather
-        // than JSON-RPC protocol errors. Most MCP clients (Claude Desktop,
-        // Claude.ai) display the latter as a generic "Tool execution failed"
-        // and swallow the message; tool-level errors carry the actionable
-        // text through to the LLM so it can retry with a corrected call.
         if let Err(msg) = params.validate_has_filter() {
             return Ok(tool_user_error(msg));
         }
@@ -329,9 +324,14 @@ impl FewdMcp {
         Parameters(input): Parameters<CreateMealInput>,
     ) -> Result<CallToolResult, McpError> {
         let lookups = MealLookups::load(&self.db).await.map_err(db_error)?;
+        // Match each variant so a future `CreateMealError` variant that
+        // is NOT LLM-recoverable (e.g. an internal-failure variant) fails
+        // to compile until it's categorized rather than being silently
+        // routed through `tool_user_error`.
         let dto = match create_meal_input_to_dto(input, &lookups) {
             Ok(dto) => dto,
-            Err(e) => return Ok(tool_user_error(e.to_string())),
+            Err(CreateMealError::Input(e)) => return Ok(tool_user_error(e.to_string())),
+            Err(CreateMealError::Resolve(e)) => return Ok(tool_user_error(e.to_string())),
         };
 
         let created = MealService::create(&self.db, dto).await.map_err(db_error)?;
@@ -661,15 +661,13 @@ mod tests {
 
     // ─── LLM-facing error message contracts ─────────────────────────
     //
-    // The fewd-m95 sweep replaced `McpError::invalid_params(e.to_string(), …)`
-    // with `tool_user_error(e.to_string())` in every write/read tool that
-    // validates LLM-supplied input. The Display strings of `InputError`,
-    // `ResolveError`, and `CreateMealError` are now the user-facing
-    // messages. These tests pin the contract: every variant must echo the
-    // offending value AND point at a discovery tool (or describe the
-    // expected format) so the LLM can retry. Without this guard, a future
-    // variant could ship with a vague Display impl and silently degrade
-    // the LLM-recovery path.
+    // `tool_user_error(e.to_string())` makes the Display strings of
+    // `InputError`, `ResolveError`, and `CreateMealError` the user-facing
+    // messages reaching the LLM. These tests pin the contract: every
+    // variant must echo the offending value AND point at a discovery
+    // tool (or describe the expected format) so the LLM can retry.
+    // Without this guard a future variant could ship with a vague
+    // Display impl and silently degrade the LLM-recovery path.
 
     #[test]
     fn input_error_displays_actionable_messages_for_each_variant() {
@@ -741,7 +739,6 @@ mod tests {
     fn create_meal_error_forwards_inner_message() {
         use super::super::schemas::errors::{CreateMealError, InputError, ResolveError};
 
-        // Input variant routes through InputError's Display unchanged.
         let from_input: CreateMealError = InputError::UnknownMealType("brunch".into()).into();
         assert_eq!(
             from_input.to_string(),
@@ -749,7 +746,6 @@ mod tests {
             "CreateMealError::Input must forward InputError's Display verbatim"
         );
 
-        // Resolve variant routes through ResolveError's Display unchanged.
         let from_resolve: CreateMealError = ResolveError::UnknownPerson("Bob".into()).into();
         assert_eq!(
             from_resolve.to_string(),
@@ -779,5 +775,95 @@ mod tests {
             serialized.contains("garbage"),
             "offending value must reach the wire: {serialized}"
         );
+    }
+
+    // ─── Call-site wiring contracts ─────────────────────────────────
+    //
+    // The Display contracts above guarantee the *messages* are good, but
+    // they don't catch a revert of the call-site wiring (where a tool
+    // returns `Err(McpError::invalid_params(...))` instead of
+    // `Ok(tool_user_error(...))`). These tests invoke each tool against
+    // an empty in-memory DB and assert the result is a tool-level error,
+    // not a JSON-RPC protocol error. A revert silently regresses the
+    // Claude Desktop UX and these tests are the only thing that fails.
+
+    async fn setup_test_mcp() -> FewdMcp {
+        let db = sea_orm::Database::connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite connects");
+        <migration::Migrator as migration::MigratorTrait>::up(&db, None)
+            .await
+            .expect("migrations run on empty DB");
+        FewdMcp::new(db)
+    }
+
+    fn assert_tool_user_error(
+        result: Result<CallToolResult, McpError>,
+        expected_fragments: &[&str],
+    ) {
+        let call_result = result.expect("tool call must return Ok(CallToolResult), not Err(McpError) — JSON-RPC protocol errors get displayed as a generic 'Tool execution failed' by most MCP clients");
+        assert_eq!(
+            call_result.is_error,
+            Some(true),
+            "must be a tool-level error (is_error: true), not a successful result"
+        );
+        let serialized = serde_json::to_string(&call_result).expect("serializes");
+        for frag in expected_fragments {
+            assert!(
+                serialized.contains(frag),
+                "tool-level error must contain {frag:?}: {serialized}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn get_recipe_unknown_slug_returns_tool_level_error_not_protocol_error() {
+        use super::super::schemas::GetRecipeParams;
+
+        let mcp = setup_test_mcp().await;
+        let result = mcp
+            .get_recipe(Parameters(GetRecipeParams {
+                slug: "ghost-pasta".into(),
+            }))
+            .await;
+        assert_tool_user_error(result, &["ghost-pasta", "list_curated_recipes"]);
+    }
+
+    #[tokio::test]
+    async fn list_meals_invalid_date_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        let result = mcp
+            .list_meals(Parameters(DateRangeParams {
+                start_date: "garbage".into(),
+                end_date: "2026-01-01".into(),
+            }))
+            .await;
+        assert_tool_user_error(result, &["start_date", "YYYY-MM-DD", "garbage"]);
+    }
+
+    #[tokio::test]
+    async fn get_shopping_list_invalid_date_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        let result = mcp
+            .get_shopping_list(Parameters(DateRangeParams {
+                start_date: "2026-01-01".into(),
+                end_date: "garbage".into(),
+            }))
+            .await;
+        assert_tool_user_error(result, &["end_date", "YYYY-MM-DD", "garbage"]);
+    }
+
+    #[tokio::test]
+    async fn create_meal_unknown_meal_type_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        let result = mcp
+            .create_meal(Parameters(CreateMealInput {
+                date: "2026-01-01".into(),
+                meal_type: "brunch".into(),
+                order_index: None,
+                servings: vec![],
+            }))
+            .await;
+        assert_tool_user_error(result, &["brunch", "Breakfast", "Lunch", "Dinner", "Snack"]);
     }
 }

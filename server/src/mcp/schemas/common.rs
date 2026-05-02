@@ -39,7 +39,7 @@ impl DateRangeParams {
     /// sees them. The service layer would reject malformed dates as a
     /// `DbErr::Custom` which gets wrapped as an MCP `internal_error` —
     /// turning a user-input mistake into something the LLM can't cleanly
-    /// retry. Catching it here lets us surface `invalid_params` instead.
+    /// retry. Catching it here lets us surface a tool-level error instead.
     pub fn validate(&self) -> Result<(), InputError> {
         validate_date_yyyy_mm_dd(&self.start_date, "start_date")?;
         validate_date_yyyy_mm_dd(&self.end_date, "end_date")?;
@@ -48,7 +48,7 @@ impl DateRangeParams {
 }
 
 /// Confirm a date string parses as YYYY-MM-DD. Used by tool handlers to
-/// surface bad date formats as `invalid_params` rather than letting them
+/// surface bad date formats as a tool-level error rather than letting them
 /// reach the service layer (which converts them to opaque DB errors).
 pub(super) fn validate_date_yyyy_mm_dd(value: &str, field: &'static str) -> Result<(), InputError> {
     NaiveDate::parse_from_str(value, "%Y-%m-%d")

@@ -1,6 +1,9 @@
 //! Error types that flow back through the MCP boundary. Tool handlers wrap
-//! these into `McpError::invalid_params` (or similar) with the Display string
-//! as the user-facing message.
+//! these via `tool_user_error(e.to_string())` so the Display string surfaces
+//! as a tool-level `CallToolResult { is_error: true, … }`. JSON-RPC protocol
+//! errors get rendered as a generic "Tool execution failed" by most MCP
+//! clients, with the message dropped — tool-level errors carry the
+//! actionable text through to the LLM.
 
 /// Canonical values for `Meal.meal_type` as stored in the DB — Title Case
 /// to match the convention used by the rest of the app (the web UI does
@@ -11,8 +14,9 @@
 pub const VALID_MEAL_TYPES: &[&str] = &["Breakfast", "Lunch", "Dinner", "Snack"];
 
 /// Error returned when a `create_meal` input references a person name or
-/// recipe slug that doesn't exist. The tool handler converts this into an
-/// `invalid_params` MCP error so the LLM retries with a corrected value.
+/// recipe slug that doesn't exist. The tool handler routes this through
+/// `tool_user_error` so the Display string reaches the LLM as actionable
+/// retry guidance pointing at the relevant discovery tool.
 #[derive(Debug)]
 pub enum ResolveError {
     UnknownPerson(String),
