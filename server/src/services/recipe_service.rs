@@ -227,10 +227,15 @@ impl RecipeService {
     /// signal), then most-recently-made, then top-rated. Deduped by id. Capped
     /// at `max(CURATED_CAP, favorite_count)` so a family with 50 favorites
     /// gets all 50, while a family with 5 favorites gets a 30-row blend.
+    /// Within the favorites bucket, ordered by slug ascending — slugs are
+    /// always lowercase by construction so the ordering is deterministic
+    /// regardless of the original recipe-name capitalization (`Name` ASC
+    /// would put "garlicky potatoes" after "Thai Green Curry" because
+    /// SQLite's BINARY collation puts uppercase before lowercase).
     pub async fn get_curated(db: &DatabaseConnection) -> Result<Vec<recipe::Model>, DbErr> {
         let favorites = Recipe::find()
             .filter(recipe::Column::IsFavorite.eq(true))
-            .order_by_asc(recipe::Column::Name)
+            .order_by_asc(recipe::Column::Slug)
             .all(db)
             .await?;
         let recent = Recipe::find()
@@ -269,6 +274,13 @@ impl RecipeService {
     /// Filtered search for the MCP `search_recipes` tool. All clauses compose
     /// at the DB layer (including JSON-field filters via SQLite's `json_each`
     /// / `json_extract`).
+    ///
+    /// Results are ordered by `slug` ascending — slugs are always lowercase
+    /// by construction so the ordering is deterministic regardless of the
+    /// original recipe-name capitalization. Sorting by `Name` would use
+    /// SQLite's BINARY collation which puts uppercase ASCII before lowercase
+    /// (so "garlicky potatoes" would sort after "Thai Green Curry"); slug
+    /// avoids the case-folding issue without needing COLLATE NOCASE.
     ///
     /// Rejects the all-default filter set with `DbErr::Custom` so a future
     /// caller that forgets to validate via `SearchRecipesParams::
@@ -343,7 +355,7 @@ impl RecipeService {
             ));
         }
 
-        q.order_by_asc(recipe::Column::Name).all(db).await
+        q.order_by_asc(recipe::Column::Slug).all(db).await
     }
 
     pub async fn toggle_favorite(

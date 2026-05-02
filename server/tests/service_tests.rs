@@ -3030,6 +3030,41 @@ mod recipe_discovery {
     }
 
     #[tokio::test]
+    async fn search_filtered_orders_by_slug_not_name_to_avoid_binary_collation_quirk() {
+        // Regression: SQLite's default BINARY collation puts uppercase ASCII
+        // before lowercase, so `ORDER BY name ASC` would interleave like
+        // ["Apple", "Cherry", "banana"] instead of the intuitive
+        // ["Apple", "banana", "Cherry"]. We sort by slug (always lowercase
+        // by construction via slugify) to dodge the case-folding issue
+        // entirely. This test would fail if someone "helpfully" reverted
+        // search_filtered to order_by_asc(Name).
+        let db = setup_db().await;
+        // Mixed-case names; tag them all with "fruit" so we can pull them
+        // back via search_filtered with a single tag filter.
+        for n in ["Apple", "banana", "Cherry"] {
+            RecipeService::create(&db, recipe_with(n, vec![], vec!["fruit"], None))
+                .await
+                .unwrap();
+        }
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                tags: vec!["fruit".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        // Slug-sorted: "apple" < "banana" < "cherry".
+        assert_eq!(
+            out.iter().map(|r| r.slug.as_str()).collect::<Vec<_>>(),
+            vec!["apple", "banana", "cherry"]
+        );
+        // And the names round-trip in that slug-sorted order.
+        assert_eq!(names(&out), vec!["Apple", "banana", "Cherry"]);
+    }
+
+    #[tokio::test]
     async fn search_filtered_excludes_match_title_case_ingredient_names() {
         // Same gap on the ingredient side: stored ingredients are likely
         // capitalized as users type them ("Olive Oil", "Garlic"). The
