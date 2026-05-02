@@ -16,10 +16,13 @@ mod m20260214_000011_add_drink_recipe_source_url;
 mod m20260424_000012_backfill_recipe_slugs;
 mod m20260427_000013_split_ingredient_name_and_prep;
 mod m20260428_000014_reparse_misbucketed_ingredients;
+mod m20260429_000015_peel_size_parens_from_ingredient_name;
+pub mod paren_notes;
 pub mod slug;
 
 pub use ingredient_amount::{is_known_unit, try_parse_amount, try_parse_amount_json, AmountKind};
 pub use ingredient_splitter::split_name_and_prep;
+pub use paren_notes::peel_size_paren;
 pub use slug::slugify;
 
 pub struct Migrator;
@@ -42,6 +45,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260424_000012_backfill_recipe_slugs::Migration),
             Box::new(m20260427_000013_split_ingredient_name_and_prep::Migration),
             Box::new(m20260428_000014_reparse_misbucketed_ingredients::Migration),
+            Box::new(m20260429_000015_peel_size_parens_from_ingredient_name::Migration),
         ]
     }
 }

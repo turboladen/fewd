@@ -1,6 +1,7 @@
 use crate::dto::{CreateRecipeDto, IngredientAmountDto, IngredientDto, TimeValueDto};
 use crate::services::ingredient_amount::{is_known_unit, try_parse_amount_dto};
 use crate::services::ingredient_splitter::split_name_and_prep;
+use crate::services::paren_notes::peel_size_paren;
 
 pub struct RecipeParser;
 
@@ -186,6 +187,21 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
 
     // Extract parenthetical notes: "orange juice (fresh is best)" → name + notes
     let (line, notes) = extract_notes(line);
+
+    // Peel mid-string size-info parens like "(28 oz each)" out of the line
+    // before tokenization so the noun trailing the parenthetical doesn't get
+    // sliced off by `splitn(3, ' ')`. See fewd-i47.
+    //
+    // When both extract_notes (trailing parens) and peel_size_paren
+    // (mid-string size parens) produce notes, merge with "; " — same
+    // pattern m20260429_000015 uses for the backfill — so a line like
+    // `2 cans (28 oz each) tomatoes (drained)` keeps both descriptors.
+    let (line, peeled_notes) = peel_size_paren(&line);
+    let notes = match (notes, peeled_notes) {
+        (Some(trailing), Some(peeled)) => Some(format!("{trailing}; {peeled}")),
+        (Some(n), None) | (None, Some(n)) => Some(n),
+        (None, None) => None,
+    };
 
     let parts: Vec<&str> = line.splitn(3, ' ').collect();
 
@@ -718,6 +734,45 @@ dinner, quick, mexican";
         assert_eq!(ing.notes, None);
     }
 
+    #[test]
+    fn test_ingredient_merges_size_parens_with_trailing_notes() {
+        // Regression for the precedence bug flagged in fewd-i47 review: when
+        // both extract_notes (trailing `(drained)`) and peel_size_paren
+        // (mid-string `(28 oz each)`) fire, both notes must survive. Pre-fix
+        // `peeled_notes.or(notes)` silently dropped the trailing notes.
+        let md = "# Test\n\n## Ingredients\n- 2 cans (28 oz each) crushed tomatoes (drained)\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "crushed tomatoes");
+        assert_eq!(ing.unit, "cans");
+        assert_eq!(ing.notes.as_deref(), Some("drained; 28 oz each"));
+    }
+
+    #[test]
+    fn test_ingredient_with_mid_string_size_parens() {
+        // The fewd-i47 hero case: parens carry per-can size info, the noun
+        // ("crushed San Marzano tomatoes") trails after `)` with no comma.
+        // Pre-fix: extract_notes left the line untouched, splitn(3, ' ')
+        // sliced off "cans" as the unit, and the entire `(28 oz each)
+        // crushed San Marzano tomatoes` substring landed in `name` —
+        // dropping the noun in the rendered UI.
+        //
+        // Post-fix: peel_size_paren rewrites the line to `2 cans crushed
+        // San Marzano tomatoes` with notes="28 oz each" before
+        // tokenization, so the standard known-unit dispatch produces the
+        // expected DTO.
+        let md = "# Test\n\n## Ingredients\n- 2 cans (28 oz each) crushed San Marzano tomatoes\n\n## Instructions\nMix";
+        let recipe = parse(md);
+        let ing = &recipe.ingredients[0];
+        assert_eq!(ing.name, "crushed San Marzano tomatoes");
+        assert_eq!(ing.unit, "cans");
+        assert_eq!(ing.notes.as_deref(), Some("28 oz each"));
+        assert_eq!(ing.prep, None);
+        assert!(
+            matches!(ing.amount, IngredientAmountDto::Single { value } if (value - 2.0).abs() < 0.001)
+        );
+    }
+
     /// Live-data calibration: parse the original markdown lines that
     /// produced the misbucketed prod rows surfaced by the dietpi audit on
     /// 2026-04-27. Asserts the post-fewd-4i3 parser produces clean
@@ -776,6 +831,13 @@ dinner, quick, mexican";
         let beef = line("80/20 ground beef");
         assert_eq!(beef.name, "80/20 ground beef");
         assert_eq!(beef.unit, "to taste");
+
+        // fewd-i47: mid-string size parens, noun trails. Pre-fix this row
+        // dropped the noun in the UI; post-fix it parses cleanly.
+        let tomatoes = line("2 cans (28 oz each) crushed San Marzano tomatoes");
+        assert_eq!(tomatoes.name, "crushed San Marzano tomatoes");
+        assert_eq!(tomatoes.unit, "cans");
+        assert_eq!(tomatoes.notes.as_deref(), Some("28 oz each"));
     }
 
     #[test]
