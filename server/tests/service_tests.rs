@@ -1,6 +1,6 @@
 use fewd_lib::dto::{
     CreateMealDto, CreateMealTemplateDto, CreatePersonDto, CreateRecipeDto, IngredientAmountDto,
-    IngredientDto, PersonServingDto, ShoppingListSplitDto, UpdateRecipeDto,
+    IngredientDto, PersonServingDto, ShoppingListSplitDto, TimeValueDto, UpdateRecipeDto,
 };
 use fewd_lib::services::meal_service::MealService;
 use fewd_lib::services::meal_template_service::MealTemplateService;
@@ -9,7 +9,7 @@ use fewd_lib::services::prompt_builder::PromptBuilder;
 use fewd_lib::services::recipe_adapter::{PersonAdaptOptions, RecipeAdapter};
 use fewd_lib::services::recipe_enhancer;
 use fewd_lib::services::recipe_scaler;
-use fewd_lib::services::recipe_service::RecipeService;
+use fewd_lib::services::recipe_service::{RecipeService, SearchFilters};
 use fewd_lib::services::seed_data;
 use fewd_lib::services::settings_service::SettingsService;
 use fewd_lib::services::shopping_service::ShoppingService;
@@ -2437,4 +2437,743 @@ async fn shopping_split_partitions_adhoc_items() {
     .unwrap();
 
     assert_partition_contains(&split, &["banana"], &["olive oil"]);
+}
+
+// --- get_curated / search_filtered tests (fewd-0kk) ---
+
+mod recipe_discovery {
+    use super::*;
+    use chrono::{DateTime, Duration, Utc};
+    use fewd_lib::entities::recipe;
+    use sea_orm::{ActiveModelTrait, ActiveValue};
+
+    /// Build a recipe DTO with a specific ingredient list and tags so the
+    /// filter tests can assert exclusion / inclusion behavior precisely.
+    fn recipe_with(
+        name: &str,
+        ingredients: Vec<&str>,
+        tags: Vec<&str>,
+        total_minutes: Option<i32>,
+    ) -> CreateRecipeDto {
+        CreateRecipeDto {
+            name: name.to_string(),
+            description: None,
+            source: "test".to_string(),
+            source_url: None,
+            parent_recipe_id: None,
+            prep_time: None,
+            cook_time: None,
+            total_time: total_minutes.map(|m| TimeValueDto {
+                value: m,
+                unit: "minutes".to_string(),
+            }),
+            servings: 4,
+            portion_size: None,
+            instructions: String::new(),
+            ingredients: ingredients
+                .into_iter()
+                .map(|n| IngredientDto {
+                    name: n.to_string(),
+                    prep: None,
+                    amount: IngredientAmountDto::Single { value: 1.0 },
+                    unit: "each".to_string(),
+                    notes: None,
+                })
+                .collect(),
+            nutrition_per_serving: None,
+            tags: tags.into_iter().map(str::to_string).collect(),
+            notes: None,
+            icon: None,
+        }
+    }
+
+    /// Patch fields the create DTO doesn't expose (`is_favorite`,
+    /// `last_made`, `rating`) so the curated/search tests can construct the
+    /// scenarios they need without faking dates through the meal pipeline.
+    async fn patch(
+        db: &DatabaseConnection,
+        id: &str,
+        is_favorite: Option<bool>,
+        last_made: Option<DateTime<Utc>>,
+        rating: Option<f64>,
+    ) {
+        let existing = recipe::Entity::find_by_id(id.to_string())
+            .one(db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut active: recipe::ActiveModel = existing.into();
+        if let Some(b) = is_favorite {
+            active.is_favorite = ActiveValue::Set(b);
+        }
+        if let Some(dt) = last_made {
+            active.last_made = ActiveValue::Set(Some(dt));
+        }
+        if let Some(r) = rating {
+            active.rating = ActiveValue::Set(Some(r));
+        }
+        active.update(db).await.unwrap();
+    }
+
+    fn names(recipes: &[recipe::Model]) -> Vec<&str> {
+        recipes.iter().map(|r| r.name.as_str()).collect()
+    }
+
+    // ── get_curated ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn curated_blends_favorites_then_recent_then_top_rated_and_dedupes() {
+        let db = setup_db().await;
+
+        let fav = RecipeService::create(&db, recipe_with("Fav Dish", vec![], vec![], None))
+            .await
+            .unwrap();
+        let recent = RecipeService::create(&db, recipe_with("Recent Dish", vec![], vec![], None))
+            .await
+            .unwrap();
+        let top_rated = RecipeService::create(&db, recipe_with("Top Rated", vec![], vec![], None))
+            .await
+            .unwrap();
+        // Belongs to two buckets — must appear once and in the favorites slot.
+        let fav_and_top =
+            RecipeService::create(&db, recipe_with("Fav And Top", vec![], vec![], None))
+                .await
+                .unwrap();
+        // Not in any bucket — must NOT appear.
+        let _orphan = RecipeService::create(&db, recipe_with("Orphan", vec![], vec![], None))
+            .await
+            .unwrap();
+
+        let now = Utc::now();
+        patch(&db, &fav.id, Some(true), None, None).await;
+        patch(&db, &recent.id, None, Some(now), None).await;
+        patch(&db, &top_rated.id, None, None, Some(5.0)).await;
+        patch(&db, &fav_and_top.id, Some(true), None, Some(4.0)).await;
+
+        let curated = RecipeService::get_curated(&db).await.unwrap();
+        let result_names = names(&curated);
+
+        assert!(
+            result_names.contains(&"Fav Dish"),
+            "favorites must be included: {result_names:?}"
+        );
+        assert!(
+            result_names.contains(&"Fav And Top"),
+            "shared bucket recipe must appear: {result_names:?}"
+        );
+        assert!(
+            result_names.contains(&"Recent Dish"),
+            "recent must be included: {result_names:?}"
+        );
+        assert!(
+            result_names.contains(&"Top Rated"),
+            "top-rated must be included: {result_names:?}"
+        );
+        assert!(
+            !result_names.contains(&"Orphan"),
+            "non-bucket recipe must not appear: {result_names:?}"
+        );
+
+        // Dedup invariant: every id appears at most once even though
+        // fav_and_top qualifies for two buckets.
+        let unique: std::collections::HashSet<_> = curated.iter().map(|r| r.id.clone()).collect();
+        assert_eq!(unique.len(), curated.len(), "duplicates leaked through");
+
+        // Ordering: every favorite must precede every non-favorite.
+        let last_fav = curated
+            .iter()
+            .rposition(|r| r.is_favorite)
+            .expect("at least one favorite");
+        let first_non_fav = curated.iter().position(|r| !r.is_favorite);
+        if let Some(idx) = first_non_fav {
+            assert!(
+                last_fav < idx,
+                "favorites must come before non-favorites: {result_names:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn curated_caps_at_30_when_buckets_overflow() {
+        let db = setup_db().await;
+        // 0 favorites, 40 recent, 0 top-rated → expect 30.
+        let now = Utc::now();
+        for i in 0..40 {
+            let r =
+                RecipeService::create(&db, recipe_with(&format!("R{i:02}"), vec![], vec![], None))
+                    .await
+                    .unwrap();
+            // Stagger dates so ORDER BY last_made DESC is deterministic.
+            let when = now - Duration::hours(i as i64);
+            patch(&db, &r.id, None, Some(when), None).await;
+        }
+
+        let curated = RecipeService::get_curated(&db).await.unwrap();
+        assert_eq!(curated.len(), 30, "soft cap of 30 must apply");
+    }
+
+    #[tokio::test]
+    async fn curated_does_not_truncate_favorites_above_cap() {
+        let db = setup_db().await;
+        // 50 favorites — all must be returned (the user's explicit signal
+        // takes precedence over the 30 cap).
+        for i in 0..50 {
+            let r = RecipeService::create(
+                &db,
+                recipe_with(&format!("Fav{i:02}"), vec![], vec![], None),
+            )
+            .await
+            .unwrap();
+            patch(&db, &r.id, Some(true), None, None).await;
+        }
+
+        let curated = RecipeService::get_curated(&db).await.unwrap();
+        assert_eq!(
+            curated.len(),
+            50,
+            "favorites must not be truncated even when above cap"
+        );
+        assert!(
+            curated.iter().all(|r| r.is_favorite),
+            "every returned recipe should be a favorite"
+        );
+    }
+
+    #[tokio::test]
+    async fn curated_returns_empty_for_empty_catalog() {
+        let db = setup_db().await;
+        let curated = RecipeService::get_curated(&db).await.unwrap();
+        assert!(curated.is_empty());
+    }
+
+    // ── search_filtered ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn search_filtered_query_substring_on_name() {
+        let db = setup_db().await;
+        for n in ["Chicken Tacos", "Beef Stew", "Chicken Soup"] {
+            RecipeService::create(&db, recipe_with(n, vec![], vec![], None))
+                .await
+                .unwrap();
+        }
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                query: Some("Chicken".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out), vec!["Chicken Soup", "Chicken Tacos"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_tags_require_all_tags_case_insensitive() {
+        let db = setup_db().await;
+        RecipeService::create(
+            &db,
+            recipe_with("Easy Dinner", vec![], vec!["dinner", "easy"], None),
+        )
+        .await
+        .unwrap();
+        RecipeService::create(
+            &db,
+            recipe_with("Hard Dinner", vec![], vec!["dinner", "hard"], None),
+        )
+        .await
+        .unwrap();
+        RecipeService::create(
+            &db,
+            recipe_with("Easy Lunch", vec![], vec!["lunch", "easy"], None),
+        )
+        .await
+        .unwrap();
+
+        // AND semantics: requiring both "dinner" AND "easy" matches only one.
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                tags: vec!["dinner".to_string(), "easy".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out), vec!["Easy Dinner"]);
+
+        // Case-insensitive: stored "dinner" matches filter "DINNER" because
+        // the service-layer caller lowercases. (Filters are pre-lowercased
+        // by the handler; the service's LOWER(je.value) handles stored case.)
+        let out_upper = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                tags: vec!["dinner".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out_upper), vec!["Easy Dinner", "Hard Dinner"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_max_total_time_minutes_assumes_minutes_unit() {
+        let db = setup_db().await;
+        RecipeService::create(&db, recipe_with("Quick", vec![], vec![], Some(15)))
+            .await
+            .unwrap();
+        RecipeService::create(&db, recipe_with("Medium", vec![], vec![], Some(30)))
+            .await
+            .unwrap();
+        RecipeService::create(&db, recipe_with("Long", vec![], vec![], Some(90)))
+            .await
+            .unwrap();
+        RecipeService::create(&db, recipe_with("Untimed", vec![], vec![], None))
+            .await
+            .unwrap();
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                max_total_time_minutes: Some(30),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        // Untimed (NULL total_time) is excluded since json_extract returns
+        // NULL and `NULL <= 30` is unknown / false.
+        assert_eq!(names(&out), vec!["Medium", "Quick"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_min_rating_excludes_unrated() {
+        let db = setup_db().await;
+        let four = RecipeService::create(&db, recipe_with("Four Star", vec![], vec![], None))
+            .await
+            .unwrap();
+        let five = RecipeService::create(&db, recipe_with("Five Star", vec![], vec![], None))
+            .await
+            .unwrap();
+        let _unrated = RecipeService::create(&db, recipe_with("Unrated", vec![], vec![], None))
+            .await
+            .unwrap();
+        patch(&db, &four.id, None, None, Some(4.0)).await;
+        patch(&db, &five.id, None, None, Some(5.0)).await;
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                min_rating: Some(4.5),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out), vec!["Five Star"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_is_favorite_filters_both_directions() {
+        let db = setup_db().await;
+        let fav = RecipeService::create(&db, recipe_with("Fav", vec![], vec![], None))
+            .await
+            .unwrap();
+        RecipeService::create(&db, recipe_with("Plain", vec![], vec![], None))
+            .await
+            .unwrap();
+        patch(&db, &fav.id, Some(true), None, None).await;
+
+        let only_fav = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                is_favorite: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&only_fav), vec!["Fav"]);
+
+        let only_non_fav = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                is_favorite: Some(false),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&only_non_fav), vec!["Plain"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_unmade_since_days_includes_never_made() {
+        let db = setup_db().await;
+        let stale = RecipeService::create(&db, recipe_with("Stale", vec![], vec![], None))
+            .await
+            .unwrap();
+        let fresh = RecipeService::create(&db, recipe_with("Fresh", vec![], vec![], None))
+            .await
+            .unwrap();
+        let _never = RecipeService::create(&db, recipe_with("Never", vec![], vec![], None))
+            .await
+            .unwrap();
+
+        let now = Utc::now();
+        patch(&db, &stale.id, None, Some(now - Duration::days(60)), None).await;
+        patch(&db, &fresh.id, None, Some(now - Duration::days(2)), None).await;
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                unmade_since_days: Some(30),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out), vec!["Never", "Stale"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_excludes_for_persons_substring_matches_name_field() {
+        let db = setup_db().await;
+        // Only the `name` field is matched — `prep`, `unit`, and `notes`
+        // must not trigger exclusion.
+        RecipeService::create(&db, recipe_with("Olive Salad", vec!["olive"], vec![], None))
+            .await
+            .unwrap();
+        // 'olive oil' is excluded by 'olive' — bead-documented false positive.
+        RecipeService::create(
+            &db,
+            recipe_with("Pasta Aglio", vec!["olive oil", "garlic"], vec![], None),
+        )
+        .await
+        .unwrap();
+        RecipeService::create(
+            &db,
+            recipe_with("Beef Stew", vec!["beef", "carrot"], vec![], None),
+        )
+        .await
+        .unwrap();
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                excluded_ingredient_substrings: vec!["olive".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out), vec!["Beef Stew"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_excludes_only_match_ingredient_name_not_other_fields() {
+        let db = setup_db().await;
+        // "olives" appears only in `notes` / `unit` — NOT in any name. Filter
+        // for "olives" should leave this recipe in the result set.
+        let dto = CreateRecipeDto {
+            name: "Decoy".to_string(),
+            description: None,
+            source: "test".to_string(),
+            source_url: None,
+            parent_recipe_id: None,
+            prep_time: None,
+            cook_time: None,
+            total_time: None,
+            servings: 4,
+            portion_size: None,
+            instructions: String::new(),
+            ingredients: vec![IngredientDto {
+                name: "tomato".to_string(),
+                prep: Some("chopped, no olives please".to_string()),
+                amount: IngredientAmountDto::Single { value: 2.0 },
+                unit: "olives".to_string(), // bizarre but legal
+                notes: Some("olives optional".to_string()),
+            }],
+            nutrition_per_serving: None,
+            tags: vec![],
+            notes: None,
+            icon: None,
+        };
+        RecipeService::create(&db, dto).await.unwrap();
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                excluded_ingredient_substrings: vec!["olives".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            names(&out),
+            vec!["Decoy"],
+            "excludes_for_persons must match the name field only — prep/unit/notes don't trigger"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_filtered_combined_filters_compose_as_and() {
+        let db = setup_db().await;
+        let want = RecipeService::create(
+            &db,
+            recipe_with(
+                "Quick Veggie",
+                vec!["carrot", "celery"],
+                vec!["dinner", "easy"],
+                Some(20),
+            ),
+        )
+        .await
+        .unwrap();
+        // Same tags but contains the disliked ingredient.
+        RecipeService::create(
+            &db,
+            recipe_with(
+                "Quick Olive",
+                vec!["olive", "celery"],
+                vec!["dinner", "easy"],
+                Some(20),
+            ),
+        )
+        .await
+        .unwrap();
+        // Same tags but exceeds the time limit.
+        RecipeService::create(
+            &db,
+            recipe_with(
+                "Slow Veggie",
+                vec!["carrot"],
+                vec!["dinner", "easy"],
+                Some(120),
+            ),
+        )
+        .await
+        .unwrap();
+        patch(&db, &want.id, Some(true), None, Some(5.0)).await;
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                tags: vec!["dinner".to_string(), "easy".to_string()],
+                max_total_time_minutes: Some(30),
+                is_favorite: Some(true),
+                min_rating: Some(4.0),
+                excluded_ingredient_substrings: vec!["olive".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out), vec!["Quick Veggie"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_rejects_all_default_filters_as_caller_bug() {
+        // Defense-in-depth: the handler should already have rejected via
+        // SearchRecipesParams::validate_has_filter, but the service refuses
+        // too so a future caller that forgets the validation gets a loud
+        // error instead of an unbounded payload (which is exactly what
+        // list_curated_recipes exists to replace).
+        let db = setup_db().await;
+        for n in ["A", "B", "C"] {
+            RecipeService::create(&db, recipe_with(n, vec![], vec![], None))
+                .await
+                .unwrap();
+        }
+        let err = RecipeService::search_filtered(&db, SearchFilters::default())
+            .await
+            .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("validate_has_filter"),
+            "error must point at the validator: {msg}"
+        );
+    }
+
+    // ── case-insensitivity round-trip (filter side already lowercased,
+    //    stored side may be Title-case as humans naturally type) ──────
+
+    #[tokio::test]
+    async fn search_filtered_tags_match_title_case_stored_data() {
+        // Stored tags are Title-case ("Dinner", "EASY") but the handler
+        // pre-lowercases the filter input. The SQL's LOWER(je.value) makes
+        // this work end-to-end; without it, the recipe would be invisible
+        // to a "dinner" filter. Earlier tests stored already-lowercased
+        // data and would still pass if LOWER() were dropped — this one
+        // wouldn't.
+        let db = setup_db().await;
+        RecipeService::create(
+            &db,
+            recipe_with("Pot Roast", vec![], vec!["Dinner", "EASY"], None),
+        )
+        .await
+        .unwrap();
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                tags: vec!["dinner".to_string(), "easy".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out), vec!["Pot Roast"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_excludes_treats_percent_and_underscore_as_literal_chars() {
+        // Regression: with the old `LIKE '%' || ? || '%'` filter, a dislike
+        // string containing `%` or `_` would act as a SQL wildcard — `_`
+        // would match any single character, `%` any sequence — so a dislike
+        // of "_" alone would silently exclude every recipe with a 1+
+        // character ingredient name (i.e. all of them). Switched to instr()
+        // for true substring matching; this test proves the wildcards are
+        // now treated literally.
+        let db = setup_db().await;
+        // "100% Pure Olive Oil" contains a literal '%'.
+        // "a_b mix" contains a literal '_'.
+        // "garlic" is a benign control.
+        RecipeService::create(
+            &db,
+            recipe_with(
+                "Marinade",
+                vec!["100% Pure Olive Oil", "a_b mix", "garlic"],
+                vec![],
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+
+        // Dislike "_" with old LIKE would have matched everything; with
+        // instr() it matches only ingredient names containing a literal
+        // underscore. "garlic" has no underscore → recipe is excluded
+        // because "a_b mix" does. Drop "a_b mix" from the recipe and
+        // "_" should not exclude.
+        let out_underscore = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                excluded_ingredient_substrings: vec!["_".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            names(&out_underscore),
+            Vec::<&str>::new(),
+            "dislike '_' should match the literal '_' in 'a_b mix' and exclude this recipe"
+        );
+
+        // A dislike that doesn't appear as a literal substring of any
+        // ingredient name should NOT exclude. "%%" is the canonical
+        // wildcard-trap pattern; under LIKE it matched everything.
+        let out_double_percent = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                excluded_ingredient_substrings: vec!["%%".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            names(&out_double_percent),
+            vec!["Marinade"],
+            "dislike '%%' is not a literal substring of any name; recipe must remain"
+        );
+
+        // And `%` alone IS a literal substring of "100% Pure Olive Oil",
+        // so it correctly excludes — same logic, opposite outcome.
+        let out_single_percent = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                excluded_ingredient_substrings: vec!["%".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            names(&out_single_percent),
+            Vec::<&str>::new(),
+            "dislike '%' should match the literal '%' in '100% Pure Olive Oil'"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_filtered_orders_by_slug_not_name_to_avoid_binary_collation_quirk() {
+        // Regression: SQLite's default BINARY collation puts uppercase ASCII
+        // before lowercase, so `ORDER BY name ASC` would interleave like
+        // ["Apple", "Cherry", "banana"] instead of the intuitive
+        // ["Apple", "banana", "Cherry"]. We sort by slug (always lowercase
+        // by construction via slugify) to dodge the case-folding issue
+        // entirely. This test would fail if someone "helpfully" reverted
+        // search_filtered to order_by_asc(Name).
+        let db = setup_db().await;
+        // Mixed-case names; tag them all with "fruit" so we can pull them
+        // back via search_filtered with a single tag filter.
+        for n in ["Apple", "banana", "Cherry"] {
+            RecipeService::create(&db, recipe_with(n, vec![], vec!["fruit"], None))
+                .await
+                .unwrap();
+        }
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                tags: vec!["fruit".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        // Slug-sorted: "apple" < "banana" < "cherry".
+        assert_eq!(
+            out.iter().map(|r| r.slug.as_str()).collect::<Vec<_>>(),
+            vec!["apple", "banana", "cherry"]
+        );
+        // And the names round-trip in that slug-sorted order.
+        assert_eq!(names(&out), vec!["Apple", "banana", "Cherry"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_excludes_match_title_case_ingredient_names() {
+        // Same gap on the ingredient side: stored ingredients are likely
+        // capitalized as users type them ("Olive Oil", "Garlic"). The
+        // handler pre-lowercases the dislike substrings; the SQL's
+        // LOWER(json_extract(...)) makes the comparison case-insensitive.
+        let db = setup_db().await;
+        RecipeService::create(
+            &db,
+            recipe_with("Pasta Aglio", vec!["Olive Oil", "Garlic"], vec![], None),
+        )
+        .await
+        .unwrap();
+        RecipeService::create(
+            &db,
+            recipe_with("Beef Stew", vec!["Beef", "Carrot"], vec![], None),
+        )
+        .await
+        .unwrap();
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                excluded_ingredient_substrings: vec!["olive".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out), vec!["Beef Stew"]);
+    }
 }

@@ -24,8 +24,11 @@ mod people;
 mod recipes;
 mod shopping;
 
-pub use common::{DateRangeParams, EmptyParams, GetRecipeParams, SearchParams};
+pub use common::{DateRangeParams, EmptyParams, GetRecipeParams};
 pub use meals::{create_meal_input_to_dto, meal_to_brief, CreateMealInput};
 pub use people::{person_to_prefs, render_family_overview};
-pub use recipes::{create_recipe_input_to_dto, recipe_to_brief, recipe_to_full, CreateRecipeInput};
+pub use recipes::{
+    create_recipe_input_to_dto, recipe_to_brief, recipe_to_full, CreateRecipeInput,
+    SearchRecipesParams,
+};
 pub use shopping::shopping_item_from_dto;

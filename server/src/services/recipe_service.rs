@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+
+use sea_orm::sea_query::Expr;
 use sea_orm::*;
 
 use crate::dto::{CreateRecipeDto, UpdateRecipeDto};
@@ -5,6 +8,47 @@ use crate::entities::recipe::{self, Entity as Recipe};
 use crate::services::to_json;
 
 pub struct RecipeService;
+
+/// Filter set for [`RecipeService::search_filtered`]. All fields are optional;
+/// callers (the MCP handler) are responsible for refusing the all-empty case
+/// before ever reaching the service. Composes at the DB layer so cost grows
+/// with the *result* size, not the catalog.
+#[derive(Debug, Default, Clone)]
+pub struct SearchFilters {
+    /// Case-insensitive substring on `name`. Empty / `*` should be normalized
+    /// to `None` by the caller; the service applies this verbatim if `Some`.
+    pub query: Option<String>,
+    /// Lowercased exact-match tags. Multiple tags compose as AND (recipe must
+    /// have every listed tag).
+    pub tags: Vec<String>,
+    /// Maximum recipe `total_time.value`, assumed unit=minutes. Recipes with
+    /// no `total_time` are excluded (json_extract on NULL returns NULL).
+    pub max_total_time_minutes: Option<i32>,
+    pub min_rating: Option<f64>,
+    pub is_favorite: Option<bool>,
+    /// Recipes not made in at least N days (or never made).
+    pub unmade_since_days: Option<i32>,
+    /// Lowercased substrings — recipe is excluded if ANY ingredient name
+    /// contains ANY listed substring (case-insensitive). Already-flattened
+    /// across all `excludes_for_persons` resolved in the handler.
+    pub excluded_ingredient_substrings: Vec<String>,
+}
+
+impl SearchFilters {
+    /// True when no filter has been supplied. Mirrors the equivalent guard
+    /// in `SearchRecipesParams::validate_has_filter` at the MCP layer; used
+    /// by `RecipeService::search_filtered` as defense-in-depth so a caller
+    /// that bypasses the schema-level check still gets a loud error.
+    pub fn is_empty(&self) -> bool {
+        self.query.is_none()
+            && self.tags.is_empty()
+            && self.max_total_time_minutes.is_none()
+            && self.min_rating.is_none()
+            && self.is_favorite.is_none()
+            && self.unmade_since_days.is_none()
+            && self.excluded_ingredient_substrings.is_empty()
+    }
+}
 
 impl RecipeService {
     pub async fn get_all(db: &DatabaseConnection) -> Result<Vec<recipe::Model>, DbErr> {
@@ -177,6 +221,155 @@ impl RecipeService {
             .await
     }
 
+    /// Bounded shortlist for the MCP `list_curated_recipes` tool.
+    ///
+    /// Policy: every is_favorite first (never truncated — the user's explicit
+    /// signal), then most-recently-made, then top-rated. Deduped by id. Capped
+    /// at `max(CURATED_CAP, favorite_count)` so a family with 50 favorites
+    /// gets all 50, while a family with 5 favorites gets a 30-row blend.
+    /// Within the favorites bucket, ordered by slug ascending — slugs are
+    /// always lowercase by construction so the ordering is deterministic
+    /// regardless of the original recipe-name capitalization (`Name` ASC
+    /// would put "garlicky potatoes" after "Thai Green Curry" because
+    /// SQLite's BINARY collation puts uppercase before lowercase).
+    pub async fn get_curated(db: &DatabaseConnection) -> Result<Vec<recipe::Model>, DbErr> {
+        let favorites = Recipe::find()
+            .filter(recipe::Column::IsFavorite.eq(true))
+            .order_by_asc(recipe::Column::Slug)
+            .all(db)
+            .await?;
+        // Slug ASC tiebreaker on both buckets: same-second timestamps and
+        // same ratings would otherwise let SQLite return rows in
+        // implementation-defined order, so the curated shortlist could
+        // shift between calls. Slug is the deterministic, stable choice
+        // (always lowercase, never rewritten after creation).
+        let recent = Recipe::find()
+            .filter(recipe::Column::LastMade.is_not_null())
+            .order_by_desc(recipe::Column::LastMade)
+            .order_by_asc(recipe::Column::Slug)
+            .limit(CURATED_CAP)
+            .all(db)
+            .await?;
+        let top_rated = Recipe::find()
+            .filter(recipe::Column::Rating.is_not_null())
+            .order_by_desc(recipe::Column::Rating)
+            .order_by_asc(recipe::Column::Slug)
+            .limit(CURATED_CAP)
+            .all(db)
+            .await?;
+
+        let target_total = (CURATED_CAP as usize).max(favorites.len());
+        let mut seen: HashSet<String> = HashSet::with_capacity(target_total);
+        let mut out: Vec<recipe::Model> = Vec::with_capacity(target_total);
+
+        for r in favorites {
+            if seen.insert(r.id.clone()) {
+                out.push(r);
+            }
+        }
+        for r in recent.into_iter().chain(top_rated) {
+            if out.len() >= target_total {
+                break;
+            }
+            if seen.insert(r.id.clone()) {
+                out.push(r);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Filtered search for the MCP `search_recipes` tool. All clauses compose
+    /// at the DB layer (including JSON-field filters via SQLite's `json_each`
+    /// / `json_extract`).
+    ///
+    /// Results are ordered by `slug` ascending — slugs are always lowercase
+    /// by construction so the ordering is deterministic regardless of the
+    /// original recipe-name capitalization. Sorting by `Name` would use
+    /// SQLite's BINARY collation which puts uppercase ASCII before lowercase
+    /// (so "garlicky potatoes" would sort after "Thai Green Curry"); slug
+    /// avoids the case-folding issue without needing COLLATE NOCASE.
+    ///
+    /// Rejects the all-default filter set with `DbErr::Custom` so a future
+    /// caller that forgets to validate via `SearchRecipesParams::
+    /// validate_has_filter` gets a loud error instead of silently returning
+    /// the entire catalog (which is exactly what `list_curated_recipes`
+    /// exists to replace).
+    pub async fn search_filtered(
+        db: &DatabaseConnection,
+        filters: SearchFilters,
+    ) -> Result<Vec<recipe::Model>, DbErr> {
+        if filters.is_empty() {
+            return Err(DbErr::Custom(
+                "RecipeService::search_filtered called with no filters; \
+                 callers must validate via SearchRecipesParams::validate_has_filter \
+                 before invoking the service"
+                    .to_string(),
+            ));
+        }
+
+        let mut q = Recipe::find();
+
+        if let Some(query) = filters.query.as_deref() {
+            q = q.filter(recipe::Column::Name.contains(query));
+        }
+
+        for tag in &filters.tags {
+            // EXISTS over json_each lets us match exact tags inside the JSON
+            // array column without resorting to fragile substring matching on
+            // the raw JSON text.
+            q = q.filter(Expr::cust_with_values(
+                "EXISTS (SELECT 1 FROM json_each(\"recipes\".\"tags\") AS je WHERE LOWER(je.value) = ?)",
+                [tag.clone()],
+            ));
+        }
+
+        if let Some(n) = filters.max_total_time_minutes {
+            // total_time is JSON `{"value": i32, "unit": String}` with
+            // free-form unit. We assume unit=minutes — recipes authored in
+            // hours will not match, which is documented as a known limitation
+            // in the tool description until a `total_minutes` column lands.
+            q = q.filter(Expr::cust_with_values(
+                "CAST(json_extract(\"recipes\".\"total_time\", '$.value') AS INTEGER) <= ?",
+                [n],
+            ));
+        }
+
+        if let Some(min) = filters.min_rating {
+            q = q.filter(recipe::Column::Rating.gte(min));
+        }
+
+        if let Some(b) = filters.is_favorite {
+            q = q.filter(recipe::Column::IsFavorite.eq(b));
+        }
+
+        if let Some(days) = filters.unmade_since_days {
+            let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
+            q = q.filter(
+                Condition::any()
+                    .add(recipe::Column::LastMade.is_null())
+                    .add(recipe::Column::LastMade.lt(cutoff)),
+            );
+        }
+
+        for substring in &filters.excluded_ingredient_substrings {
+            // Match against the ingredient `name` field specifically — not the
+            // raw JSON blob — so unrelated fields (`prep`, `unit`, `notes`)
+            // don't trigger false exclusions. Substring match is intentional
+            // (per the bead): "olive oil" is excluded when "olive" is disliked.
+            //
+            // `instr(haystack, needle) > 0` instead of LIKE because LIKE would
+            // treat `%` and `_` in the needle as wildcards. A family member
+            // with "100% pure olive oil" or "a_b mix" in their dislikes would
+            // otherwise over-match. instr() does true substring matching.
+            q = q.filter(Expr::cust_with_values(
+                "NOT EXISTS (SELECT 1 FROM json_each(\"recipes\".\"ingredients\") AS ie WHERE instr(LOWER(json_extract(ie.value, '$.name')), ?) > 0)",
+                [substring.clone()],
+            ));
+        }
+
+        q.order_by_asc(recipe::Column::Slug).all(db).await
+    }
+
     pub async fn toggle_favorite(
         db: &DatabaseConnection,
         id: String,
@@ -198,6 +391,10 @@ impl RecipeService {
 /// Cap on slug-suffix retries. `recipes` has only one UNIQUE constraint (slug),
 /// so any unique violation from INSERT is a slug collision and we bump the suffix.
 const MAX_SLUG_ATTEMPTS: u32 = 1000;
+
+/// Soft cap on `get_curated` output. Soft because favorites are never
+/// truncated — if a family marks 50 favorites we return all 50.
+const CURATED_CAP: u64 = 30;
 
 fn is_slug_conflict(err: &DbErr) -> bool {
     matches!(

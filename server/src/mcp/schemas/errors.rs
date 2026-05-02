@@ -28,7 +28,7 @@ impl std::fmt::Display for ResolveError {
             ),
             Self::UnknownRecipe(slug) => write!(
                 f,
-                "no recipe with slug '{slug}'. Call search_recipes or list_recipes to see valid slugs."
+                "no recipe with slug '{slug}'. Call list_curated_recipes for the shortlist or search_recipes with a filter to see valid slugs."
             ),
         }
     }

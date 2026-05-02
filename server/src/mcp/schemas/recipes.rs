@@ -56,6 +56,114 @@ pub struct RecipeFull {
     pub rating: Option<f64>,
 }
 
+/// Input for `search_recipes`. Every filter is optional, but at least one
+/// must be provided — call [`SearchRecipesParams::validate_has_filter`]
+/// before building the service-layer query. Bare / wildcard calls are
+/// rejected with a pointer at `list_curated_recipes`.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct SearchRecipesParams {
+    /// Case-insensitive substring on the recipe name. Empty string and `*`
+    /// are treated as no-query (and don't count as a filter on their own).
+    #[serde(default)]
+    pub query: Option<String>,
+    /// Tag membership (case-insensitive exact match). Multiple tags compose
+    /// as AND — recipe must have every listed tag.
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    /// Maximum recipe `total_time`, **assumed to be in minutes**. Recipes
+    /// authored in a different unit (e.g. hours) will not match — known
+    /// limitation pending a normalized `total_minutes` column.
+    #[serde(default)]
+    pub max_total_time_minutes: Option<i32>,
+    /// Minimum star rating. Recipes with no rating are excluded.
+    #[serde(default)]
+    pub min_rating: Option<f64>,
+    /// If true, only is_favorite recipes; if false, only non-favorites.
+    #[serde(default)]
+    pub is_favorite: Option<bool>,
+    /// Recipes not made in at least N days (or never made).
+    #[serde(default)]
+    pub unmade_since_days: Option<i32>,
+    /// Exclude recipes that contain ingredients any of these family members
+    /// dislikes. Each named person's `dislikes` are matched as
+    /// case-insensitive substrings against ingredient names — e.g. "olive
+    /// oil" is excluded when a person dislikes "olive". Plan around this
+    /// when the substring is genuinely shared between an avoided and
+    /// acceptable ingredient. Unknown names return an actionable error
+    /// pointing at `list_people`.
+    #[serde(default)]
+    pub excludes_for_persons: Option<Vec<String>>,
+}
+
+impl SearchRecipesParams {
+    /// Reject the all-empty / wildcard-only case. The full archive is
+    /// intentionally not exposed via this tool — for an unfiltered shortlist
+    /// the LLM should call `list_curated_recipes`.
+    ///
+    /// Validation is based on the *normalized* form of each filter so the
+    /// outcome is consistent with what the service actually receives. E.g.,
+    /// `tags: Some(vec![""])` is non-empty as a Vec but `normalized_tags()`
+    /// drops the empty entry, leaving an effectively-empty filter set; this
+    /// validator rejects the bare-empty-string case here so the LLM gets the
+    /// "needs a filter" hint instead of `RecipeService::search_filtered`'s
+    /// internal "caller must validate" error.
+    pub fn validate_has_filter(&self) -> Result<(), &'static str> {
+        let q_provides_filter = self
+            .query
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && *s != "*")
+            .is_some();
+        let tags_provides_filter = self
+            .tags
+            .as_ref()
+            .is_some_and(|v| v.iter().any(|t| !t.trim().is_empty()));
+        let excludes_provides_filter = self
+            .excludes_for_persons
+            .as_ref()
+            .is_some_and(|v| v.iter().any(|n| !n.trim().is_empty()));
+
+        if q_provides_filter
+            || tags_provides_filter
+            || excludes_provides_filter
+            || self.max_total_time_minutes.is_some()
+            || self.min_rating.is_some()
+            || self.is_favorite.is_some()
+            || self.unmade_since_days.is_some()
+        {
+            Ok(())
+        } else {
+            Err("search_recipes requires at least one filter \
+                 (query, tags, max_total_time_minutes, min_rating, is_favorite, \
+                 unmade_since_days, or excludes_for_persons). \
+                 For an unfiltered shortlist call list_curated_recipes.")
+        }
+    }
+
+    /// Trim the query to a meaningful filter substring or `None`. Strips
+    /// whitespace and treats `*` / empty as no-query.
+    pub fn normalized_query(&self) -> Option<String> {
+        self.query
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && *s != "*")
+            .map(str::to_string)
+    }
+
+    /// Lowercased, whitespace-trimmed tags with empties dropped.
+    pub fn normalized_tags(&self) -> Vec<String> {
+        self.tags
+            .as_ref()
+            .map(|v| {
+                v.iter()
+                    .map(|t| t.trim().to_lowercase())
+                    .filter(|t| !t.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
 /// Input for `create_recipe`. Mirrors [`CreateRecipeDto`] but replaces
 /// `parent_recipe_id` with a slug reference the LLM can actually produce.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -237,5 +345,119 @@ mod tests {
         let dto = create_recipe_input_to_dto(mk_input("Tacos", 4), None).unwrap();
         assert_eq!(dto.name, "Tacos");
         assert_eq!(dto.servings, 4);
+    }
+
+    #[test]
+    fn search_params_validate_rejects_all_empty() {
+        let p = SearchRecipesParams::default();
+        let err = p.validate_has_filter().unwrap_err();
+        assert!(err.contains("list_curated_recipes"));
+    }
+
+    #[test]
+    fn search_params_validate_rejects_wildcard_only_query() {
+        let p = SearchRecipesParams {
+            query: Some("*".into()),
+            ..Default::default()
+        };
+        assert!(p.validate_has_filter().is_err());
+    }
+
+    #[test]
+    fn search_params_validate_rejects_whitespace_only_query_and_empty_lists() {
+        let p = SearchRecipesParams {
+            query: Some("   ".into()),
+            tags: Some(vec![]),
+            excludes_for_persons: Some(vec![]),
+            ..Default::default()
+        };
+        assert!(p.validate_has_filter().is_err());
+    }
+
+    #[test]
+    fn search_params_validate_rejects_only_empty_string_tags() {
+        // Regression: previously `tags: Some(vec![""])` passed
+        // validate_has_filter (Vec is non-empty) but normalized_tags() drops
+        // the empty entry — leaving the service with no actual filter and
+        // emitting a misleading "caller must validate" error. The validator
+        // should now reject based on the normalized form.
+        let p = SearchRecipesParams {
+            tags: Some(vec!["".into(), "   ".into()]),
+            ..Default::default()
+        };
+        assert!(p.validate_has_filter().is_err());
+    }
+
+    #[test]
+    fn search_params_validate_rejects_only_empty_string_excludes_for_persons() {
+        let p = SearchRecipesParams {
+            excludes_for_persons: Some(vec!["".into(), "  ".into()]),
+            ..Default::default()
+        };
+        assert!(p.validate_has_filter().is_err());
+    }
+
+    #[test]
+    fn search_params_validate_accepts_tags_with_one_real_entry_among_empties() {
+        // `["", "dinner"]` should pass — the empty string is dropped by
+        // normalize, but "dinner" survives and is a real filter.
+        let p = SearchRecipesParams {
+            tags: Some(vec!["".into(), "dinner".into()]),
+            ..Default::default()
+        };
+        assert!(p.validate_has_filter().is_ok());
+    }
+
+    #[test]
+    fn search_params_validate_accepts_non_query_filter() {
+        // is_favorite=true alone is enough to count as a filter.
+        let p = SearchRecipesParams {
+            is_favorite: Some(true),
+            ..Default::default()
+        };
+        assert!(p.validate_has_filter().is_ok());
+    }
+
+    #[test]
+    fn search_params_validate_accepts_query() {
+        let p = SearchRecipesParams {
+            query: Some("chicken".into()),
+            ..Default::default()
+        };
+        assert!(p.validate_has_filter().is_ok());
+    }
+
+    #[test]
+    fn search_params_normalized_query_strips_wildcard_and_whitespace() {
+        let cases = [
+            (None, None),
+            (Some(""), None),
+            (Some("   "), None),
+            (Some("*"), None),
+            (Some("  *  "), None),
+            (Some("chicken"), Some("chicken".to_string())),
+            (Some("  chicken  "), Some("chicken".to_string())),
+        ];
+        for (input, expected) in cases {
+            let p = SearchRecipesParams {
+                query: input.map(str::to_string),
+                ..Default::default()
+            };
+            assert_eq!(p.normalized_query(), expected, "input was {input:?}");
+        }
+    }
+
+    #[test]
+    fn search_params_normalized_tags_lowercases_and_drops_empties() {
+        let p = SearchRecipesParams {
+            tags: Some(vec![
+                "Dinner".into(),
+                "  EASY  ".into(),
+                "".into(),
+                "   ".into(),
+            ]),
+            ..Default::default()
+        };
+        assert_eq!(p.normalized_tags(), vec!["dinner", "easy"]);
     }
 }
