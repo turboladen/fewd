@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use rmcp::handler::server::wrapper::Parameters;
@@ -11,9 +12,10 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, S
 use sea_orm::DatabaseConnection;
 use serde::Serialize;
 
+use crate::entities::person;
 use crate::services::meal_service::MealService;
 use crate::services::person_service::PersonService;
-use crate::services::recipe_service::RecipeService;
+use crate::services::recipe_service::{RecipeService, SearchFilters};
 use crate::services::shopping_service::ShoppingService;
 
 use super::lookups::MealLookups;
@@ -21,7 +23,7 @@ use super::schemas::{
     create_meal_input_to_dto, create_recipe_input_to_dto, meal_to_brief, person_to_prefs,
     recipe_to_brief, recipe_to_full, render_family_overview, shopping_item_from_dto,
     CreateMealInput, CreateRecipeInput, DateRangeParams, EmptyParams, GetRecipeParams,
-    SearchParams,
+    SearchRecipesParams,
 };
 use super::AuthenticatedPerson;
 
@@ -56,14 +58,16 @@ impl FewdMcp {
     }
 
     #[tool(
-        name = "list_recipes",
-        description = "List every recipe in fewd (brief shape: slug, name, tags, total time, rating, etc.). Ingredients and instructions are omitted — use `get_recipe` with the slug to fetch the full record."
+        name = "list_curated_recipes",
+        description = "Return a bounded shortlist (≤30 unless the family has more than 30 favorites — favorites are never truncated) of likely-relevant recipes: every is_favorite first, then most-recently-made, then top-rated, deduped. Use this as the default starting point for meal-planning — it keeps tool payloads small. For everything else use `search_recipes` with at least one filter; the full archive is intentionally not exposed (the web UI is for human browsing)."
     )]
-    async fn list_recipes(
+    async fn list_curated_recipes(
         &self,
         Parameters(_): Parameters<EmptyParams>,
     ) -> Result<CallToolResult, McpError> {
-        let recipes = RecipeService::get_all(&self.db).await.map_err(db_error)?;
+        let recipes = RecipeService::get_curated(&self.db)
+            .await
+            .map_err(db_error)?;
         let out = recipes
             .iter()
             .map(recipe_to_brief)
@@ -74,13 +78,31 @@ impl FewdMcp {
 
     #[tool(
         name = "search_recipes",
-        description = "Search recipes by case-insensitive substring on the recipe name. Returns brief rows — use `get_recipe` with the slug for full details."
+        description = "Search recipes by one or more filters. Bare calls (no filters / `query='*'`) are rejected — call `list_curated_recipes` for an unfiltered shortlist. Filters: `query` (case-insensitive substring on name); `tags` (case-insensitive exact match, multiple tags = AND); `max_total_time_minutes` (assumes recipe total_time is in minutes — recipes authored in hours won't match, known limitation); `min_rating`; `is_favorite`; `unmade_since_days`; `excludes_for_persons` (named family members whose dislikes exclude matching recipes — substring match on ingredient names, e.g. 'olive oil' is excluded when a person dislikes 'olive'). Returns brief rows — use `get_recipe` with the slug for full details. Unknown person names return an actionable error pointing at `list_people`."
     )]
     async fn search_recipes(
         &self,
-        Parameters(params): Parameters<SearchParams>,
+        Parameters(params): Parameters<SearchRecipesParams>,
     ) -> Result<CallToolResult, McpError> {
-        let recipes = RecipeService::search(&self.db, params.query)
+        params
+            .validate_has_filter()
+            .map_err(|m| McpError::invalid_params(m.to_string(), None))?;
+
+        let excluded_ingredient_substrings = self
+            .resolve_dislikes_for_persons(params.excludes_for_persons.as_deref())
+            .await?;
+
+        let filters = SearchFilters {
+            query: params.normalized_query(),
+            tags: params.normalized_tags(),
+            max_total_time_minutes: params.max_total_time_minutes,
+            min_rating: params.min_rating,
+            is_favorite: params.is_favorite,
+            unmade_since_days: params.unmade_since_days,
+            excluded_ingredient_substrings,
+        };
+
+        let recipes = RecipeService::search_filtered(&self.db, filters)
             .await
             .map_err(db_error)?;
         let out = recipes
@@ -89,6 +111,56 @@ impl FewdMcp {
             .collect::<Result<Vec<_>, _>>()
             .map_err(internal_error)?;
         tool_json_result(&out)
+    }
+
+    /// Resolve `excludes_for_persons` (a list of family-member names) into the
+    /// flat, deduped, lowercased set of disliked ingredient substrings the
+    /// service-layer filter expects. Unknown names surface as
+    /// `invalid_params` so the LLM can retry with a corrected list.
+    async fn resolve_dislikes_for_persons(
+        &self,
+        names: Option<&[String]>,
+    ) -> Result<Vec<String>, McpError> {
+        let Some(names) = names else {
+            return Ok(Vec::new());
+        };
+        if names.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let lookups = MealLookups::load(&self.db).await.map_err(db_error)?;
+        let people = PersonService::get_all(&self.db).await.map_err(db_error)?;
+        let people_by_id: HashMap<&str, &person::Model> =
+            people.iter().map(|p| (p.id.as_str(), p)).collect();
+
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut out: Vec<String> = Vec::new();
+        for raw in names {
+            let id = lookups.person_id_for_name(raw).ok_or_else(|| {
+                McpError::invalid_params(
+                    format!(
+                        "excludes_for_persons: no active family member named '{raw}'. Call list_people for valid names."
+                    ),
+                    None,
+                )
+            })?;
+            let person = people_by_id
+                .get(id)
+                .expect("MealLookups id must reference an active person");
+            let dislikes: Vec<String> = serde_json::from_str(&person.dislikes).map_err(|err| {
+                internal_error(format!(
+                    "person '{}' has malformed dislikes JSON: {err}",
+                    person.name
+                ))
+            })?;
+            for d in dislikes {
+                let normalized = d.trim().to_lowercase();
+                if !normalized.is_empty() && seen.insert(normalized.clone()) {
+                    out.push(normalized);
+                }
+            }
+        }
+        Ok(out)
     }
 
     #[tool(
@@ -106,7 +178,7 @@ impl FewdMcp {
             .ok_or_else(|| {
                 McpError::invalid_params(
                     format!(
-                        "no recipe with slug '{}'. Call search_recipes or list_recipes to find valid slugs.",
+                        "no recipe with slug '{}'. Call list_curated_recipes for the shortlist or search_recipes with a filter to find valid slugs.",
                         params.slug
                     ),
                     None,
@@ -291,8 +363,10 @@ impl ServerHandler for FewdMcp {
             .with_instructions(
                 "fewd MCP: plan dinners and generate shopping lists. \
                  Start with `get_family_overview` (or the fewd://family/overview resource) \
-                 to see everyone's diets/dislikes, then `list_recipes` or `search_recipes` \
-                 to find existing recipes — or `create_recipe` to add a new one. \
+                 to see everyone's diets/dislikes, then `list_curated_recipes` for the \
+                 family's likely-relevant shortlist — or `search_recipes` with filters \
+                 (tags, max time, min rating, excludes_for_persons, …) when you need \
+                 something specific. Use `create_recipe` to add a new one. \
                  Schedule meals with `create_meal` (one call per dinner slot, by date and \
                  family-member name). When the week's planned, `get_shopping_list` over \
                  the date range produces the consolidated grocery list. All date inputs \

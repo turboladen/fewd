@@ -19,16 +19,10 @@ use super::errors::InputError;
 pub struct EmptyParams {}
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct SearchParams {
-    /// Case-insensitive substring to match against recipe names.
-    pub query: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetRecipeParams {
     /// URL-safe slug that uniquely identifies the recipe (e.g. "carbonara" or
-    /// "roasted-chicken-2"). Use `list_recipes` or `search_recipes` to find
-    /// slugs.
+    /// "roasted-chicken-2"). Use `list_curated_recipes` for the shortlist or
+    /// `search_recipes` (with at least one filter) to find slugs.
     pub slug: String,
 }
 
