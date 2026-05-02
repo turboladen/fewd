@@ -484,7 +484,10 @@ mod tests {
 
     fn lookups_for(people: &[person::Model]) -> MealLookups {
         MealLookups::from_people_and_recipes(
-            people.iter().map(|p| (p.id.clone(), p.name.clone())).collect(),
+            people
+                .iter()
+                .map(|p| (p.id.clone(), p.name.clone()))
+                .collect(),
             vec![],
         )
     }
@@ -499,12 +502,7 @@ mod tests {
         let lookups = lookups_for(&people);
         let by_id = index(&people);
 
-        let err = flatten_disliked_substrings(
-            &["Bob".to_string()],
-            &lookups,
-            &by_id,
-        )
-        .unwrap_err();
+        let err = flatten_disliked_substrings(&["Bob".to_string()], &lookups, &by_id).unwrap_err();
 
         let msg = format!("{err:?}");
         assert!(
@@ -554,8 +552,7 @@ mod tests {
         let lookups = lookups_for(&people);
         let by_id = index(&people);
 
-        let out =
-            flatten_disliked_substrings(&["Alice".to_string()], &lookups, &by_id).unwrap();
+        let out = flatten_disliked_substrings(&["Alice".to_string()], &lookups, &by_id).unwrap();
         assert_eq!(out, vec!["olives", "beets"]);
     }
 
@@ -565,8 +562,8 @@ mod tests {
         let lookups = lookups_for(&people);
         let by_id = index(&people);
 
-        let err = flatten_disliked_substrings(&["Broken".to_string()], &lookups, &by_id)
-            .unwrap_err();
+        let err =
+            flatten_disliked_substrings(&["Broken".to_string()], &lookups, &by_id).unwrap_err();
         let msg = format!("{err:?}");
         assert!(msg.contains("Broken"), "error must name the person: {msg}");
         assert!(

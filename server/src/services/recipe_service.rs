@@ -283,7 +283,8 @@ impl RecipeService {
             return Err(DbErr::Custom(
                 "RecipeService::search_filtered called with no filters; \
                  callers must validate via SearchRecipesParams::validate_has_filter \
-                 before invoking the service".to_string(),
+                 before invoking the service"
+                    .to_string(),
             ));
         }
 
