@@ -164,16 +164,13 @@ impl FewdMcp {
         let normalized = params.slug.trim().to_lowercase();
         let recipe = RecipeService::get_by_slug(&self.db, normalized.clone())
             .await
-            .map_err(db_error)?
-            .ok_or_else(|| {
-                McpError::invalid_params(
-                    format!(
-                        "no recipe with slug '{}'. Call list_curated_recipes for the shortlist or search_recipes with a filter to find valid slugs.",
-                        params.slug
-                    ),
-                    None,
-                )
-            })?;
+            .map_err(db_error)?;
+        let Some(recipe) = recipe else {
+            return Ok(tool_user_error(format!(
+                "no recipe with slug '{}'. Call list_curated_recipes for the shortlist or search_recipes with a filter to find valid slugs.",
+                params.slug
+            )));
+        };
 
         let parent_slug = match recipe.parent_recipe_id.as_deref() {
             None => None,
@@ -238,9 +235,9 @@ impl FewdMcp {
         &self,
         Parameters(params): Parameters<DateRangeParams>,
     ) -> Result<CallToolResult, McpError> {
-        params
-            .validate()
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        if let Err(e) = params.validate() {
+            return Ok(tool_user_error(e.to_string()));
+        }
 
         let meals = MealService::get_all_for_date_range(
             &self.db,
@@ -267,9 +264,9 @@ impl FewdMcp {
         &self,
         Parameters(params): Parameters<DateRangeParams>,
     ) -> Result<CallToolResult, McpError> {
-        params
-            .validate()
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        if let Err(e) = params.validate() {
+            return Ok(tool_user_error(e.to_string()));
+        }
 
         let list = ShoppingService::get_shopping_list(&self.db, params.start_date, params.end_date)
             .await
@@ -298,15 +295,12 @@ impl FewdMcp {
                 let normalized = slug.trim().to_lowercase();
                 let parent = RecipeService::get_by_slug(&self.db, normalized)
                     .await
-                    .map_err(db_error)?
-                    .ok_or_else(|| {
-                        McpError::invalid_params(
-                            format!(
-                                "parent_recipe_slug '{slug}' does not exist. Omit it or use a valid slug from search_recipes."
-                            ),
-                            None,
-                        )
-                    })?;
+                    .map_err(db_error)?;
+                let Some(parent) = parent else {
+                    return Ok(tool_user_error(format!(
+                        "parent_recipe_slug '{slug}' does not exist. Omit it or use a valid slug from search_recipes."
+                    )));
+                };
                 Some((parent.id, parent.slug))
             }
         };
@@ -315,8 +309,10 @@ impl FewdMcp {
             None => (None, None),
         };
 
-        let dto = create_recipe_input_to_dto(input, parent_recipe_id)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let dto = match create_recipe_input_to_dto(input, parent_recipe_id) {
+            Ok(dto) => dto,
+            Err(e) => return Ok(tool_user_error(e.to_string())),
+        };
         let created = RecipeService::create(&self.db, dto)
             .await
             .map_err(db_error)?;
@@ -333,8 +329,10 @@ impl FewdMcp {
         Parameters(input): Parameters<CreateMealInput>,
     ) -> Result<CallToolResult, McpError> {
         let lookups = MealLookups::load(&self.db).await.map_err(db_error)?;
-        let dto = create_meal_input_to_dto(input, &lookups)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let dto = match create_meal_input_to_dto(input, &lookups) {
+            Ok(dto) => dto,
+            Err(e) => return Ok(tool_user_error(e.to_string())),
+        };
 
         let created = MealService::create(&self.db, dto).await.map_err(db_error)?;
         let brief = meal_to_brief(&created, &lookups).map_err(internal_error)?;
@@ -658,6 +656,128 @@ mod tests {
         assert!(
             serialized.contains("\"isError\":true"),
             "isError flag must serialize for the wire: {serialized}"
+        );
+    }
+
+    // ─── LLM-facing error message contracts ─────────────────────────
+    //
+    // The fewd-m95 sweep replaced `McpError::invalid_params(e.to_string(), …)`
+    // with `tool_user_error(e.to_string())` in every write/read tool that
+    // validates LLM-supplied input. The Display strings of `InputError`,
+    // `ResolveError`, and `CreateMealError` are now the user-facing
+    // messages. These tests pin the contract: every variant must echo the
+    // offending value AND point at a discovery tool (or describe the
+    // expected format) so the LLM can retry. Without this guard, a future
+    // variant could ship with a vague Display impl and silently degrade
+    // the LLM-recovery path.
+
+    #[test]
+    fn input_error_displays_actionable_messages_for_each_variant() {
+        use super::super::schemas::errors::InputError;
+
+        let cases = [
+            (
+                InputError::NonPositiveServings(0).to_string(),
+                vec!["servings must be >= 1", "0"],
+            ),
+            (
+                InputError::NonPositiveServingsCount(-0.5).to_string(),
+                vec!["servings_count must be > 0", "-0.5"],
+            ),
+            (
+                InputError::UnknownMealType("brunch".into()).to_string(),
+                vec!["Breakfast", "Lunch", "Dinner", "Snack", "brunch"],
+            ),
+            (
+                InputError::EmptyName("name").to_string(),
+                vec!["name", "empty"],
+            ),
+            (
+                InputError::InvalidDate {
+                    field: "start_date",
+                    value: "garbage".into(),
+                }
+                .to_string(),
+                vec!["start_date", "YYYY-MM-DD", "garbage"],
+            ),
+        ];
+
+        for (msg, expected_fragments) in &cases {
+            for frag in expected_fragments {
+                assert!(
+                    msg.contains(frag),
+                    "InputError message {msg:?} must mention {frag:?} so the LLM can fix the call"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_error_displays_point_at_discovery_tool() {
+        use super::super::schemas::errors::ResolveError;
+
+        let person_msg = ResolveError::UnknownPerson("Bob".into()).to_string();
+        assert!(
+            person_msg.contains("Bob"),
+            "must echo unknown name: {person_msg}"
+        );
+        assert!(
+            person_msg.contains("list_people"),
+            "must point at discovery tool: {person_msg}"
+        );
+
+        let recipe_msg = ResolveError::UnknownRecipe("ghost-pasta".into()).to_string();
+        assert!(
+            recipe_msg.contains("ghost-pasta"),
+            "must echo unknown slug: {recipe_msg}"
+        );
+        assert!(
+            recipe_msg.contains("list_curated_recipes") || recipe_msg.contains("search_recipes"),
+            "must point at a recipe-discovery tool: {recipe_msg}"
+        );
+    }
+
+    #[test]
+    fn create_meal_error_forwards_inner_message() {
+        use super::super::schemas::errors::{CreateMealError, InputError, ResolveError};
+
+        // Input variant routes through InputError's Display unchanged.
+        let from_input: CreateMealError = InputError::UnknownMealType("brunch".into()).into();
+        assert_eq!(
+            from_input.to_string(),
+            InputError::UnknownMealType("brunch".into()).to_string(),
+            "CreateMealError::Input must forward InputError's Display verbatim"
+        );
+
+        // Resolve variant routes through ResolveError's Display unchanged.
+        let from_resolve: CreateMealError = ResolveError::UnknownPerson("Bob".into()).into();
+        assert_eq!(
+            from_resolve.to_string(),
+            ResolveError::UnknownPerson("Bob".into()).to_string(),
+            "CreateMealError::Resolve must forward ResolveError's Display verbatim"
+        );
+    }
+
+    #[test]
+    fn tool_user_error_preserves_input_error_display_message() {
+        use super::super::schemas::errors::InputError;
+
+        // End-to-end: an InputError::Display string survives the wrap into
+        // CallToolResult and shows up on the wire as the LLM-visible content.
+        let err = InputError::InvalidDate {
+            field: "start_date",
+            value: "garbage".into(),
+        };
+        let result = tool_user_error(err.to_string());
+        let serialized = serde_json::to_string(&result).expect("CallToolResult serializes");
+        assert!(serialized.contains("\"isError\":true"));
+        assert!(
+            serialized.contains("YYYY-MM-DD"),
+            "format hint must reach the wire: {serialized}"
+        );
+        assert!(
+            serialized.contains("garbage"),
+            "offending value must reach the wire: {serialized}"
         );
     }
 }

@@ -18,7 +18,7 @@
 //! single `use super::schemas::{…}` import.
 
 mod common;
-mod errors;
+pub(super) mod errors;
 mod meals;
 mod people;
 mod recipes;
