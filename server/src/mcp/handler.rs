@@ -84,13 +84,24 @@ impl FewdMcp {
         &self,
         Parameters(params): Parameters<SearchRecipesParams>,
     ) -> Result<CallToolResult, McpError> {
-        params
-            .validate_has_filter()
-            .map_err(|m| McpError::invalid_params(m.to_string(), None))?;
+        // LLM-recoverable validation failures are returned as tool-level
+        // errors (CallToolResult { is_error: true, content: [...] }) rather
+        // than JSON-RPC protocol errors. Most MCP clients (Claude Desktop,
+        // Claude.ai) display the latter as a generic "Tool execution failed"
+        // and swallow the message; tool-level errors carry the actionable
+        // text through to the LLM so it can retry with a corrected call.
+        if let Err(msg) = params.validate_has_filter() {
+            return Ok(tool_user_error(msg));
+        }
 
-        let excluded_ingredient_substrings = self
+        let excluded_ingredient_substrings = match self
             .resolve_dislikes_for_persons(params.excludes_for_persons.as_deref())
-            .await?;
+            .await
+        {
+            Ok(v) => v,
+            Err(DislikeResolveError::UnknownPerson(msg)) => return Ok(tool_user_error(msg)),
+            Err(DislikeResolveError::Internal(err)) => return Err(err),
+        };
 
         let filters = SearchFilters {
             query: params.normalized_query(),
@@ -115,12 +126,14 @@ impl FewdMcp {
 
     /// Resolve `excludes_for_persons` (a list of family-member names) into the
     /// flat, deduped, lowercased set of disliked ingredient substrings the
-    /// service-layer filter expects. Unknown names surface as
-    /// `invalid_params` so the LLM can retry with a corrected list.
+    /// service-layer filter expects. Returns a typed error so the caller can
+    /// distinguish LLM-recoverable problems (unknown name → retry with
+    /// corrected list) from internal failures (TOCTOU, malformed JSON →
+    /// JSON-RPC protocol error so it logs server-side).
     async fn resolve_dislikes_for_persons(
         &self,
         names: Option<&[String]>,
-    ) -> Result<Vec<String>, McpError> {
+    ) -> Result<Vec<String>, DislikeResolveError> {
         let Some(names) = names else {
             return Ok(Vec::new());
         };
@@ -128,8 +141,12 @@ impl FewdMcp {
             return Ok(Vec::new());
         }
 
-        let lookups = MealLookups::load(&self.db).await.map_err(db_error)?;
-        let people = PersonService::get_all(&self.db).await.map_err(db_error)?;
+        let lookups = MealLookups::load(&self.db)
+            .await
+            .map_err(|e| DislikeResolveError::Internal(db_error(e)))?;
+        let people = PersonService::get_all(&self.db)
+            .await
+            .map_err(|e| DislikeResolveError::Internal(db_error(e)))?;
         let people_by_id: HashMap<&str, &person::Model> =
             people.iter().map(|p| (p.id.as_str(), p)).collect();
 
@@ -416,39 +433,60 @@ fn internal_error(msg: String) -> McpError {
     McpError::internal_error(msg, None)
 }
 
+/// Build a tool-level error result so the actionable message reaches the
+/// LLM. Use this for input-validation failures and unknown-reference errors
+/// — anything the LLM can recover from by retrying with corrected input.
+/// JSON-RPC protocol errors (`Err(McpError)`) are typically displayed by
+/// MCP clients as a generic "Tool execution failed" with the message
+/// dropped, so they're reserved for transport / internal failures.
+fn tool_user_error(message: impl Into<String>) -> CallToolResult {
+    CallToolResult::error(vec![Content::text(message.into())])
+}
+
+/// Failure modes for `flatten_disliked_substrings` / the MCP-side resolver.
+/// Split so the caller can route LLM-recoverable problems to a tool-level
+/// error and internal failures to a JSON-RPC protocol error.
+#[derive(Debug)]
+pub(super) enum DislikeResolveError {
+    /// LLM-recoverable: the named person doesn't exist (or is ambiguous).
+    /// Carries the user-facing message; gets surfaced via `tool_user_error`.
+    UnknownPerson(String),
+    /// Server-side problem (TOCTOU race, malformed `dislikes` JSON, DB
+    /// error). Surface as `McpError` so it logs server-side.
+    Internal(McpError),
+}
+
 /// Pure helper extracted from `FewdMcp::resolve_dislikes_for_persons` so the
 /// resolution + dedup logic is testable without spinning up a DB. Takes the
 /// already-loaded lookups + people-by-id map; the wrapper handles I/O.
 ///
-/// Returns `invalid_params` for unknown names (so the LLM can retry) and
-/// `internal_error` for the rare TOCTOU window where a person resolved
-/// through `MealLookups` got deactivated before the second `get_all` ran.
+/// Returns `UnknownPerson` for names not in `lookups` (the LLM will see an
+/// actionable retry hint pointing at `list_people`) and `Internal` for the
+/// rare TOCTOU window where a person resolved through `MealLookups` got
+/// deactivated before the second `get_all` ran, or for malformed JSON.
 fn flatten_disliked_substrings(
     names: &[String],
     lookups: &MealLookups,
     people_by_id: &HashMap<&str, &person::Model>,
-) -> Result<Vec<String>, McpError> {
+) -> Result<Vec<String>, DislikeResolveError> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut out: Vec<String> = Vec::new();
     for raw in names {
         let id = lookups.person_id_for_name(raw).ok_or_else(|| {
-            McpError::invalid_params(
-                format!(
-                    "excludes_for_persons: no active family member named '{raw}'. Call list_people for valid names."
-                ),
-                None,
-            )
+            DislikeResolveError::UnknownPerson(format!(
+                "excludes_for_persons: no active family member named '{raw}'. Call list_people for valid names."
+            ))
         })?;
         let person = people_by_id.get(id).ok_or_else(|| {
-            internal_error(format!(
+            DislikeResolveError::Internal(internal_error(format!(
                 "person id '{id}' resolved by MealLookups is no longer active; retry the tool call"
-            ))
+            )))
         })?;
         let dislikes: Vec<String> = serde_json::from_str(&person.dislikes).map_err(|err| {
-            internal_error(format!(
+            DislikeResolveError::Internal(internal_error(format!(
                 "person '{}' has malformed dislikes JSON: {err}",
                 person.name
-            ))
+            )))
         })?;
         for d in dislikes {
             let normalized = d.trim().to_lowercase();
@@ -497,14 +535,15 @@ mod tests {
     }
 
     #[test]
-    fn flatten_unknown_name_returns_invalid_params_with_actionable_hint() {
+    fn flatten_unknown_name_returns_user_retryable_error_with_actionable_hint() {
         let people = vec![mk_person("p1", "Alice", "[\"olives\"]")];
         let lookups = lookups_for(&people);
         let by_id = index(&people);
 
         let err = flatten_disliked_substrings(&["Bob".to_string()], &lookups, &by_id).unwrap_err();
-
-        let msg = format!("{err:?}");
+        let DislikeResolveError::UnknownPerson(msg) = err else {
+            panic!("expected UnknownPerson, got {err:?}");
+        };
         assert!(
             msg.contains("excludes_for_persons"),
             "error must name the offending field: {msg}"
@@ -564,7 +603,10 @@ mod tests {
 
         let err =
             flatten_disliked_substrings(&["Broken".to_string()], &lookups, &by_id).unwrap_err();
-        let msg = format!("{err:?}");
+        let DislikeResolveError::Internal(mcp_err) = err else {
+            panic!("expected Internal, got {err:?}");
+        };
+        let msg = format!("{mcp_err:?}");
         assert!(msg.contains("Broken"), "error must name the person: {msg}");
         assert!(
             msg.contains("malformed dislikes JSON"),
@@ -584,7 +626,10 @@ mod tests {
 
         let err =
             flatten_disliked_substrings(&["Alice".to_string()], &lookups, &by_id).unwrap_err();
-        let msg = format!("{err:?}");
+        let DislikeResolveError::Internal(mcp_err) = err else {
+            panic!("expected Internal, got {err:?}");
+        };
+        let msg = format!("{mcp_err:?}");
         assert!(
             msg.contains("p1"),
             "error must include the orphan id: {msg}"
@@ -592,6 +637,27 @@ mod tests {
         assert!(
             msg.contains("retry"),
             "error must hint that a retry is appropriate: {msg}"
+        );
+    }
+
+    #[test]
+    fn tool_user_error_returns_call_tool_result_with_is_error_and_text_content() {
+        // Regression guard for the "Tool execution failed with no detail"
+        // problem: rejection messages MUST surface as CallToolResult { is_error: true,
+        // content: [Content::text(...)] } so MCP clients display the actionable
+        // text to the LLM. JSON-RPC protocol errors get displayed as a generic
+        // "Tool execution failed" with the message dropped.
+        let result = tool_user_error("retry with at least one filter");
+        assert_eq!(result.is_error, Some(true));
+        assert_eq!(result.content.len(), 1);
+        let serialized = serde_json::to_string(&result).expect("CallToolResult serializes");
+        assert!(
+            serialized.contains("retry with at least one filter"),
+            "message must round-trip through serialization: {serialized}"
+        );
+        assert!(
+            serialized.contains("\"isError\":true"),
+            "isError flag must serialize for the wire: {serialized}"
         );
     }
 }
