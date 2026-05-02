@@ -238,15 +238,22 @@ impl RecipeService {
             .order_by_asc(recipe::Column::Slug)
             .all(db)
             .await?;
+        // Slug ASC tiebreaker on both buckets: same-second timestamps and
+        // same ratings would otherwise let SQLite return rows in
+        // implementation-defined order, so the curated shortlist could
+        // shift between calls. Slug is the deterministic, stable choice
+        // (always lowercase, never rewritten after creation).
         let recent = Recipe::find()
             .filter(recipe::Column::LastMade.is_not_null())
             .order_by_desc(recipe::Column::LastMade)
+            .order_by_asc(recipe::Column::Slug)
             .limit(CURATED_CAP)
             .all(db)
             .await?;
         let top_rated = Recipe::find()
             .filter(recipe::Column::Rating.is_not_null())
             .order_by_desc(recipe::Column::Rating)
+            .order_by_asc(recipe::Column::Slug)
             .limit(CURATED_CAP)
             .all(db)
             .await?;
@@ -349,9 +356,14 @@ impl RecipeService {
             // raw JSON blob — so unrelated fields (`prep`, `unit`, `notes`)
             // don't trigger false exclusions. Substring match is intentional
             // (per the bead): "olive oil" is excluded when "olive" is disliked.
+            //
+            // `instr(haystack, needle) > 0` instead of LIKE because LIKE would
+            // treat `%` and `_` in the needle as wildcards. A family member
+            // with "100% pure olive oil" or "a_b mix" in their dislikes would
+            // otherwise over-match. instr() does true substring matching.
             q = q.filter(Expr::cust_with_values(
-                "NOT EXISTS (SELECT 1 FROM json_each(\"recipes\".\"ingredients\") AS ie WHERE LOWER(json_extract(ie.value, '$.name')) LIKE ?)",
-                [format!("%{}%", substring)],
+                "NOT EXISTS (SELECT 1 FROM json_each(\"recipes\".\"ingredients\") AS ie WHERE instr(LOWER(json_extract(ie.value, '$.name')), ?) > 0)",
+                [substring.clone()],
             ));
         }
 

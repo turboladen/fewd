@@ -99,6 +99,14 @@ impl SearchRecipesParams {
     /// Reject the all-empty / wildcard-only case. The full archive is
     /// intentionally not exposed via this tool — for an unfiltered shortlist
     /// the LLM should call `list_curated_recipes`.
+    ///
+    /// Validation is based on the *normalized* form of each filter so the
+    /// outcome is consistent with what the service actually receives. E.g.,
+    /// `tags: Some(vec![""])` is non-empty as a Vec but `normalized_tags()`
+    /// drops the empty entry, leaving an effectively-empty filter set; this
+    /// validator rejects the bare-empty-string case here so the LLM gets the
+    /// "needs a filter" hint instead of `RecipeService::search_filtered`'s
+    /// internal "caller must validate" error.
     pub fn validate_has_filter(&self) -> Result<(), &'static str> {
         let q_provides_filter = self
             .query
@@ -106,11 +114,14 @@ impl SearchRecipesParams {
             .map(str::trim)
             .filter(|s| !s.is_empty() && *s != "*")
             .is_some();
-        let tags_provides_filter = self.tags.as_ref().is_some_and(|v| !v.is_empty());
+        let tags_provides_filter = self
+            .tags
+            .as_ref()
+            .is_some_and(|v| v.iter().any(|t| !t.trim().is_empty()));
         let excludes_provides_filter = self
             .excludes_for_persons
             .as_ref()
-            .is_some_and(|v| !v.is_empty());
+            .is_some_and(|v| v.iter().any(|n| !n.trim().is_empty()));
 
         if q_provides_filter
             || tags_provides_filter
@@ -361,6 +372,40 @@ mod tests {
             ..Default::default()
         };
         assert!(p.validate_has_filter().is_err());
+    }
+
+    #[test]
+    fn search_params_validate_rejects_only_empty_string_tags() {
+        // Regression: previously `tags: Some(vec![""])` passed
+        // validate_has_filter (Vec is non-empty) but normalized_tags() drops
+        // the empty entry — leaving the service with no actual filter and
+        // emitting a misleading "caller must validate" error. The validator
+        // should now reject based on the normalized form.
+        let p = SearchRecipesParams {
+            tags: Some(vec!["".into(), "   ".into()]),
+            ..Default::default()
+        };
+        assert!(p.validate_has_filter().is_err());
+    }
+
+    #[test]
+    fn search_params_validate_rejects_only_empty_string_excludes_for_persons() {
+        let p = SearchRecipesParams {
+            excludes_for_persons: Some(vec!["".into(), "  ".into()]),
+            ..Default::default()
+        };
+        assert!(p.validate_has_filter().is_err());
+    }
+
+    #[test]
+    fn search_params_validate_accepts_tags_with_one_real_entry_among_empties() {
+        // `["", "dinner"]` should pass — the empty string is dropped by
+        // normalize, but "dinner" survives and is a real filter.
+        let p = SearchRecipesParams {
+            tags: Some(vec!["".into(), "dinner".into()]),
+            ..Default::default()
+        };
+        assert!(p.validate_has_filter().is_ok());
     }
 
     #[test]

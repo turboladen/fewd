@@ -3030,6 +3030,87 @@ mod recipe_discovery {
     }
 
     #[tokio::test]
+    async fn search_filtered_excludes_treats_percent_and_underscore_as_literal_chars() {
+        // Regression: with the old `LIKE '%' || ? || '%'` filter, a dislike
+        // string containing `%` or `_` would act as a SQL wildcard — `_`
+        // would match any single character, `%` any sequence — so a dislike
+        // of "_" alone would silently exclude every recipe with a 1+
+        // character ingredient name (i.e. all of them). Switched to instr()
+        // for true substring matching; this test proves the wildcards are
+        // now treated literally.
+        let db = setup_db().await;
+        // "100% Pure Olive Oil" contains a literal '%'.
+        // "a_b mix" contains a literal '_'.
+        // "garlic" is a benign control.
+        RecipeService::create(
+            &db,
+            recipe_with(
+                "Marinade",
+                vec!["100% Pure Olive Oil", "a_b mix", "garlic"],
+                vec![],
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+
+        // Dislike "_" with old LIKE would have matched everything; with
+        // instr() it matches only ingredient names containing a literal
+        // underscore. "garlic" has no underscore → recipe is excluded
+        // because "a_b mix" does. Drop "a_b mix" from the recipe and
+        // "_" should not exclude.
+        let out_underscore = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                excluded_ingredient_substrings: vec!["_".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            names(&out_underscore),
+            Vec::<&str>::new(),
+            "dislike '_' should match the literal '_' in 'a_b mix' and exclude this recipe"
+        );
+
+        // A dislike that doesn't appear as a literal substring of any
+        // ingredient name should NOT exclude. "%%" is the canonical
+        // wildcard-trap pattern; under LIKE it matched everything.
+        let out_double_percent = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                excluded_ingredient_substrings: vec!["%%".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            names(&out_double_percent),
+            vec!["Marinade"],
+            "dislike '%%' is not a literal substring of any name; recipe must remain"
+        );
+
+        // And `%` alone IS a literal substring of "100% Pure Olive Oil",
+        // so it correctly excludes — same logic, opposite outcome.
+        let out_single_percent = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                excluded_ingredient_substrings: vec!["%".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            names(&out_single_percent),
+            Vec::<&str>::new(),
+            "dislike '%' should match the literal '%' in '100% Pure Olive Oil'"
+        );
+    }
+
+    #[tokio::test]
     async fn search_filtered_orders_by_slug_not_name_to_avoid_binary_collation_quirk() {
         // Regression: SQLite's default BINARY collation puts uppercase ASCII
         // before lowercase, so `ORDER BY name ASC` would interleave like
