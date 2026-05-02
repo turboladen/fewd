@@ -133,34 +133,7 @@ impl FewdMcp {
         let people_by_id: HashMap<&str, &person::Model> =
             people.iter().map(|p| (p.id.as_str(), p)).collect();
 
-        let mut seen: HashSet<String> = HashSet::new();
-        let mut out: Vec<String> = Vec::new();
-        for raw in names {
-            let id = lookups.person_id_for_name(raw).ok_or_else(|| {
-                McpError::invalid_params(
-                    format!(
-                        "excludes_for_persons: no active family member named '{raw}'. Call list_people for valid names."
-                    ),
-                    None,
-                )
-            })?;
-            let person = people_by_id
-                .get(id)
-                .expect("MealLookups id must reference an active person");
-            let dislikes: Vec<String> = serde_json::from_str(&person.dislikes).map_err(|err| {
-                internal_error(format!(
-                    "person '{}' has malformed dislikes JSON: {err}",
-                    person.name
-                ))
-            })?;
-            for d in dislikes {
-                let normalized = d.trim().to_lowercase();
-                if !normalized.is_empty() && seen.insert(normalized.clone()) {
-                    out.push(normalized);
-                }
-            }
-        }
-        Ok(out)
+        flatten_disliked_substrings(names, &lookups, &people_by_id)
     }
 
     #[tool(
@@ -441,4 +414,187 @@ fn db_error(err: sea_orm::DbErr) -> McpError {
 fn internal_error(msg: String) -> McpError {
     tracing::error!(%msg, "MCP tool: internal error");
     McpError::internal_error(msg, None)
+}
+
+/// Pure helper extracted from `FewdMcp::resolve_dislikes_for_persons` so the
+/// resolution + dedup logic is testable without spinning up a DB. Takes the
+/// already-loaded lookups + people-by-id map; the wrapper handles I/O.
+///
+/// Returns `invalid_params` for unknown names (so the LLM can retry) and
+/// `internal_error` for the rare TOCTOU window where a person resolved
+/// through `MealLookups` got deactivated before the second `get_all` ran.
+fn flatten_disliked_substrings(
+    names: &[String],
+    lookups: &MealLookups,
+    people_by_id: &HashMap<&str, &person::Model>,
+) -> Result<Vec<String>, McpError> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out: Vec<String> = Vec::new();
+    for raw in names {
+        let id = lookups.person_id_for_name(raw).ok_or_else(|| {
+            McpError::invalid_params(
+                format!(
+                    "excludes_for_persons: no active family member named '{raw}'. Call list_people for valid names."
+                ),
+                None,
+            )
+        })?;
+        let person = people_by_id.get(id).ok_or_else(|| {
+            internal_error(format!(
+                "person id '{id}' resolved by MealLookups is no longer active; retry the tool call"
+            ))
+        })?;
+        let dislikes: Vec<String> = serde_json::from_str(&person.dislikes).map_err(|err| {
+            internal_error(format!(
+                "person '{}' has malformed dislikes JSON: {err}",
+                person.name
+            ))
+        })?;
+        for d in dislikes {
+            let normalized = d.trim().to_lowercase();
+            if !normalized.is_empty() && seen.insert(normalized.clone()) {
+                out.push(normalized);
+            }
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{NaiveDate, Utc};
+
+    fn mk_person(id: &str, name: &str, dislikes_json: &str) -> person::Model {
+        person::Model {
+            id: id.to_string(),
+            name: name.to_string(),
+            birthdate: NaiveDate::from_ymd_opt(1990, 1, 1).unwrap(),
+            dietary_goals: None,
+            dislikes: dislikes_json.to_string(),
+            favorites: "[]".to_string(),
+            notes: None,
+            drink_preferences: None,
+            drink_dislikes: None,
+            is_active: true,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn lookups_for(people: &[person::Model]) -> MealLookups {
+        MealLookups::from_people_and_recipes(
+            people.iter().map(|p| (p.id.clone(), p.name.clone())).collect(),
+            vec![],
+        )
+    }
+
+    fn index(people: &[person::Model]) -> HashMap<&str, &person::Model> {
+        people.iter().map(|p| (p.id.as_str(), p)).collect()
+    }
+
+    #[test]
+    fn flatten_unknown_name_returns_invalid_params_with_actionable_hint() {
+        let people = vec![mk_person("p1", "Alice", "[\"olives\"]")];
+        let lookups = lookups_for(&people);
+        let by_id = index(&people);
+
+        let err = flatten_disliked_substrings(
+            &["Bob".to_string()],
+            &lookups,
+            &by_id,
+        )
+        .unwrap_err();
+
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("excludes_for_persons"),
+            "error must name the offending field: {msg}"
+        );
+        assert!(
+            msg.contains("Bob"),
+            "error must echo the unknown name: {msg}"
+        );
+        assert!(
+            msg.contains("list_people"),
+            "error must point at the discovery tool: {msg}"
+        );
+    }
+
+    #[test]
+    fn flatten_dedups_across_people_case_insensitively() {
+        // Alice dislikes "Olives" (Title-case) and "beets".
+        // Bob dislikes "OLIVES  " (uppercase + trailing whitespace) and "carrots".
+        // Expected output: ["olives", "beets", "carrots"] (deduped, order
+        // preserves first appearance per person).
+        let people = vec![
+            mk_person("p1", "Alice", "[\"Olives\",\"beets\"]"),
+            mk_person("p2", "Bob", "[\"OLIVES  \",\"carrots\"]"),
+        ];
+        let lookups = lookups_for(&people);
+        let by_id = index(&people);
+
+        let out = flatten_disliked_substrings(
+            &["Alice".to_string(), "Bob".to_string()],
+            &lookups,
+            &by_id,
+        )
+        .unwrap();
+
+        assert_eq!(out, vec!["olives", "beets", "carrots"]);
+    }
+
+    #[test]
+    fn flatten_drops_empty_and_whitespace_only_dislike_entries() {
+        let people = vec![mk_person(
+            "p1",
+            "Alice",
+            "[\"olives\",\"\",\"   \",\"beets\"]",
+        )];
+        let lookups = lookups_for(&people);
+        let by_id = index(&people);
+
+        let out =
+            flatten_disliked_substrings(&["Alice".to_string()], &lookups, &by_id).unwrap();
+        assert_eq!(out, vec!["olives", "beets"]);
+    }
+
+    #[test]
+    fn flatten_malformed_dislikes_json_returns_internal_error_naming_person() {
+        let people = vec![mk_person("p1", "Broken", "not-json")];
+        let lookups = lookups_for(&people);
+        let by_id = index(&people);
+
+        let err = flatten_disliked_substrings(&["Broken".to_string()], &lookups, &by_id)
+            .unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(msg.contains("Broken"), "error must name the person: {msg}");
+        assert!(
+            msg.contains("malformed dislikes JSON"),
+            "error must describe the failure mode: {msg}"
+        );
+    }
+
+    #[test]
+    fn flatten_lookup_id_missing_from_index_returns_internal_error() {
+        // Simulates the TOCTOU window where MealLookups resolved a name
+        // but the second PersonService::get_all returned a snapshot without
+        // that id (e.g. the person was deactivated between the two reads).
+        let people = vec![mk_person("p1", "Alice", "[\"olives\"]")];
+        let lookups = lookups_for(&people);
+        // Empty index — Alice's id is not present.
+        let by_id: HashMap<&str, &person::Model> = HashMap::new();
+
+        let err =
+            flatten_disliked_substrings(&["Alice".to_string()], &lookups, &by_id).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("p1"),
+            "error must include the orphan id: {msg}"
+        );
+        assert!(
+            msg.contains("retry"),
+            "error must hint that a retry is appropriate: {msg}"
+        );
+    }
 }

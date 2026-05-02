@@ -34,6 +34,22 @@ pub struct SearchFilters {
     pub excluded_ingredient_substrings: Vec<String>,
 }
 
+impl SearchFilters {
+    /// True when no filter has been supplied. Mirrors the equivalent guard
+    /// in `SearchRecipesParams::validate_has_filter` at the MCP layer; used
+    /// by `RecipeService::search_filtered` as defense-in-depth so a caller
+    /// that bypasses the schema-level check still gets a loud error.
+    pub fn is_empty(&self) -> bool {
+        self.query.is_none()
+            && self.tags.is_empty()
+            && self.max_total_time_minutes.is_none()
+            && self.min_rating.is_none()
+            && self.is_favorite.is_none()
+            && self.unmade_since_days.is_none()
+            && self.excluded_ingredient_substrings.is_empty()
+    }
+}
+
 impl RecipeService {
     pub async fn get_all(db: &DatabaseConnection) -> Result<Vec<recipe::Model>, DbErr> {
         Recipe::find()
@@ -252,14 +268,25 @@ impl RecipeService {
 
     /// Filtered search for the MCP `search_recipes` tool. All clauses compose
     /// at the DB layer (including JSON-field filters via SQLite's `json_each`
-    /// / `json_extract`). The caller must reject the all-empty case before
-    /// invoking — an unfiltered call here would silently behave like
-    /// `get_all`, which is exactly what `list_curated_recipes` exists to
-    /// replace.
+    /// / `json_extract`).
+    ///
+    /// Rejects the all-default filter set with `DbErr::Custom` so a future
+    /// caller that forgets to validate via `SearchRecipesParams::
+    /// validate_has_filter` gets a loud error instead of silently returning
+    /// the entire catalog (which is exactly what `list_curated_recipes`
+    /// exists to replace).
     pub async fn search_filtered(
         db: &DatabaseConnection,
         filters: SearchFilters,
     ) -> Result<Vec<recipe::Model>, DbErr> {
+        if filters.is_empty() {
+            return Err(DbErr::Custom(
+                "RecipeService::search_filtered called with no filters; \
+                 callers must validate via SearchRecipesParams::validate_has_filter \
+                 before invoking the service".to_string(),
+            ));
+        }
+
         let mut q = Recipe::find();
 
         if let Some(query) = filters.query.as_deref() {

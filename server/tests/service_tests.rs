@@ -2976,22 +2976,88 @@ mod recipe_discovery {
     }
 
     #[tokio::test]
-    async fn search_filtered_with_no_filters_falls_back_to_all_recipes() {
-        // Documented behavior: the service does NOT enforce the
-        // not-all-empty rule (the handler does, via SearchRecipesParams::
-        // validate_has_filter). Calling search_filtered with all-default
-        // filters returns every recipe — equivalent to get_all. This is the
-        // contract the handler relies on; if it ever changes, the handler
-        // rejection guard becomes load-bearing in a different way.
+    async fn search_filtered_rejects_all_default_filters_as_caller_bug() {
+        // Defense-in-depth: the handler should already have rejected via
+        // SearchRecipesParams::validate_has_filter, but the service refuses
+        // too so a future caller that forgets the validation gets a loud
+        // error instead of an unbounded payload (which is exactly what
+        // list_curated_recipes exists to replace).
         let db = setup_db().await;
         for n in ["A", "B", "C"] {
             RecipeService::create(&db, recipe_with(n, vec![], vec![], None))
                 .await
                 .unwrap();
         }
-        let out = RecipeService::search_filtered(&db, SearchFilters::default())
+        let err = RecipeService::search_filtered(&db, SearchFilters::default())
             .await
-            .unwrap();
-        assert_eq!(out.len(), 3);
+            .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("validate_has_filter"),
+            "error must point at the validator: {msg}"
+        );
+    }
+
+    // ── case-insensitivity round-trip (filter side already lowercased,
+    //    stored side may be Title-case as humans naturally type) ──────
+
+    #[tokio::test]
+    async fn search_filtered_tags_match_title_case_stored_data() {
+        // Stored tags are Title-case ("Dinner", "EASY") but the handler
+        // pre-lowercases the filter input. The SQL's LOWER(je.value) makes
+        // this work end-to-end; without it, the recipe would be invisible
+        // to a "dinner" filter. Earlier tests stored already-lowercased
+        // data and would still pass if LOWER() were dropped — this one
+        // wouldn't.
+        let db = setup_db().await;
+        RecipeService::create(
+            &db,
+            recipe_with("Pot Roast", vec![], vec!["Dinner", "EASY"], None),
+        )
+        .await
+        .unwrap();
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                tags: vec!["dinner".to_string(), "easy".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out), vec!["Pot Roast"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_excludes_match_title_case_ingredient_names() {
+        // Same gap on the ingredient side: stored ingredients are likely
+        // capitalized as users type them ("Olive Oil", "Garlic"). The
+        // handler pre-lowercases the dislike substrings; the SQL's
+        // LOWER(json_extract(...)) makes the comparison case-insensitive.
+        let db = setup_db().await;
+        RecipeService::create(
+            &db,
+            recipe_with("Pasta Aglio", vec!["Olive Oil", "Garlic"], vec![], None),
+        )
+        .await
+        .unwrap();
+        RecipeService::create(
+            &db,
+            recipe_with("Beef Stew", vec!["Beef", "Carrot"], vec![], None),
+        )
+        .await
+        .unwrap();
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                excluded_ingredient_substrings: vec!["olive".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out), vec!["Beef Stew"]);
     }
 }
