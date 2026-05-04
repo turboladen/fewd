@@ -853,6 +853,10 @@ dinner, quick, mexican";
         // known-unit registry — that's the existing fewd-prh territory,
         // out of scope here. What matters: the alt becomes its own DTO
         // with the right amount/unit/name.
+        //
+        // TODO(fewd-prh): the `name` assertion below will need updating when
+        // size qualifiers (medium, large, etc.) become a separate field.
+        // Expected post-fewd-prh: name=="flour tortillas", size_qualifier=="medium".
         let tortillas = line("8 medium flour tortillas (8-inch) or 10 corn tortillas");
         assert_eq!(tortillas.name, "medium flour tortillas (8-inch)");
         assert_eq!(tortillas.unit, "whole");
@@ -907,6 +911,15 @@ dinner, quick, mexican";
         let alt2 = alt1.or_alternative.as_ref().expect("second alt");
         assert_eq!(alt2.name, "water");
         assert!(alt2.or_alternative.is_none());
+
+        // fewd-4nb: degenerate trailing "or" with no right-hand content. The
+        // markdown trim strips trailing whitespace, so the byte scan never
+        // sees a complete ` or ` (4-byte) pattern — `first_top_level_or`
+        // returns None and the line stays unsplit. Pinned so a future change
+        // that loosens the trailing-space requirement doesn't silently
+        // produce a malformed alt with an empty name.
+        let trailing_or = line("8 flour tortillas or");
+        assert!(trailing_or.or_alternative.is_none());
     }
 
     #[test]
