@@ -236,4 +236,94 @@ mod tests {
             _ => panic!("expected Single"),
         }
     }
+
+    #[test]
+    fn scales_or_alternative_recursively_and_never_flags_alts() {
+        // Primary: 8 flour tortillas (whole, discrete) → at 2x = 16 (no flag)
+        // Alt: 10 corn tortillas (whole, discrete) → at 2x must also become 20
+        // Chained alt: 0.5 cups water (cups, non-discrete) → at 2x = 1.0 cups
+        //
+        // Two invariants: (1) every level of the chain scales by the same
+        // ratio; (2) discrete-fractional flagging is primary-only — a chain
+        // member with a fractional discrete amount must NOT add a flag row,
+        // since flags index back into `ingredients` by primary position only.
+        let chained_alt = IngredientDto {
+            name: "water".to_string(),
+            prep: None,
+            amount: IngredientAmountDto::Single { value: 0.5 },
+            unit: "cups".to_string(),
+            notes: None,
+            or_alternative: None,
+        };
+        let alt = IngredientDto {
+            name: "corn tortillas".to_string(),
+            prep: None,
+            amount: IngredientAmountDto::Single { value: 10.0 },
+            unit: "whole".to_string(),
+            notes: None,
+            or_alternative: Some(Box::new(chained_alt)),
+        };
+        let primary = IngredientDto {
+            name: "flour tortillas".to_string(),
+            prep: None,
+            amount: IngredientAmountDto::Single { value: 8.0 },
+            unit: "whole".to_string(),
+            notes: None,
+            or_alternative: Some(Box::new(alt)),
+        };
+        let result = scale_ingredients(&[primary], 2.0);
+
+        // Primary scaled.
+        match &result.ingredients[0].amount {
+            IngredientAmountDto::Single { value } => assert_eq!(*value, 16.0),
+            _ => panic!("expected Single"),
+        }
+        // Depth-1 alt scaled.
+        let alt = result.ingredients[0]
+            .or_alternative
+            .as_ref()
+            .expect("alt present");
+        match &alt.amount {
+            IngredientAmountDto::Single { value } => assert_eq!(*value, 20.0),
+            _ => panic!("expected Single"),
+        }
+        // Depth-2 alt scaled too.
+        let chained = alt.or_alternative.as_ref().expect("chained alt present");
+        match &chained.amount {
+            IngredientAmountDto::Single { value } => assert_eq!(*value, 1.0),
+            _ => panic!("expected Single"),
+        }
+        // Flagging is primary-only — the alt's would-be-flag-eligible state
+        // is intentionally invisible to the flagged list.
+        assert!(result.flagged.is_empty());
+    }
+
+    #[test]
+    fn fractional_alt_does_not_emit_flag() {
+        // 3 eggs primary → 4.5 (flagged), alt 1 cup egg substitute → 1.5
+        // (a fractional cup is fine — non-discrete unit). Even if a chained
+        // alt did land on a fractional discrete unit, the flagged Vec must
+        // still contain a single entry pointing at the primary, never the
+        // alt.
+        let alt = IngredientDto {
+            name: "egg substitute".to_string(),
+            prep: None,
+            amount: IngredientAmountDto::Single { value: 1.0 },
+            unit: "cup".to_string(),
+            notes: None,
+            or_alternative: None,
+        };
+        let primary = IngredientDto {
+            name: "eggs".to_string(),
+            prep: None,
+            amount: IngredientAmountDto::Single { value: 3.0 },
+            unit: "whole".to_string(),
+            notes: None,
+            or_alternative: Some(Box::new(alt)),
+        };
+        let result = scale_ingredients(&[primary], 1.5);
+        assert_eq!(result.flagged.len(), 1);
+        assert_eq!(result.flagged[0].name, "eggs");
+        assert_eq!(result.flagged[0].scaled_value, 4.5);
+    }
 }

@@ -99,9 +99,12 @@ pub struct IngredientOut {
     /// unit-less items.
     #[serde(default)]
     pub unit: String,
-    /// Mirrors `IngredientDto.notes` — also drops to absent (rather than
-    /// `null`) on the wire when unset, so MCP tool output stays consistent
-    /// with the HTTP API and with `prep`/`or_alternative` on this struct.
+    /// Drops to absent (rather than `null`) on the wire when unset, matching
+    /// the `prep` and `or_alternative` annotations on this same struct so MCP
+    /// tool output stays uniform across optional fields. Note: this is more
+    /// conservative than `IngredientDto.notes`, which still serializes `null`
+    /// over the HTTP API — bringing those into sync would change the public
+    /// JSON shape and is out of scope for fewd-4nb.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     /// Optional alternative ingredient parsed from `<primary> or <alt>` lines

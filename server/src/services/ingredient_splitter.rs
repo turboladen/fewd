@@ -7,7 +7,7 @@
 //! the runtime ingest paths can never drift. Server-side callers import
 //! through this module to keep the call site readable.
 
-pub use migration::split_name_and_prep;
+pub use migration::{first_top_level_or, split_name_and_prep};
 
 /// Defensive normalization for `(name, prep)` pairs arriving at an ingest
 /// boundary (MCP write tools, URL importer post-process). Coerces empty /

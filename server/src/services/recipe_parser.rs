@@ -1,6 +1,6 @@
 use crate::dto::{CreateRecipeDto, IngredientAmountDto, IngredientDto, TimeValueDto};
 use crate::services::ingredient_amount::{is_known_unit, try_parse_amount_dto};
-use crate::services::ingredient_splitter::split_name_and_prep;
+use crate::services::ingredient_splitter::{first_top_level_or, split_name_and_prep};
 use crate::services::paren_notes::peel_size_paren;
 
 pub struct RecipeParser;
@@ -310,39 +310,6 @@ fn build_ingredient(
         notes,
         or_alternative: None,
     }
-}
-
-/// Find the byte offset of the first ` or ` token at paren depth 0.
-///
-/// Skips matches inside `()`, `[]`, or `{}` so a parenthesized alternative
-/// like `pear (or Fuji apple), grated` does NOT split on the inner `or` —
-/// the downstream comma-prep splitter still owns that case.
-///
-/// Byte-level scan is safe because ` or ` is pure ASCII; the depth tracking
-/// works correctly with multi-byte UTF-8 chars since `(`, `)`, `[`, `]`,
-/// `{`, `}`, and space are all single-byte ASCII.
-///
-/// Modeled on `migration::ingredient_splitter::first_top_level_comma`.
-fn first_top_level_or(s: &str) -> Option<usize> {
-    let mut depth: i32 = 0;
-    let bytes = s.as_bytes();
-    let pat = b" or ";
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'(' | b'[' | b'{' => depth += 1,
-            b')' | b']' | b'}' if depth > 0 => depth -= 1,
-            b' ' if depth == 0
-                && i + pat.len() <= bytes.len()
-                && &bytes[i..i + pat.len()] == pat =>
-            {
-                return Some(i);
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
 }
 
 /// Extract parenthetical notes from end of string.
@@ -940,26 +907,6 @@ dinner, quick, mexican";
         let alt2 = alt1.or_alternative.as_ref().expect("second alt");
         assert_eq!(alt2.name, "water");
         assert!(alt2.or_alternative.is_none());
-    }
-
-    #[test]
-    fn test_first_top_level_or() {
-        // Top-level match.
-        assert_eq!(first_top_level_or("a or b"), Some(1));
-        // Inside parens — skipped.
-        assert_eq!(first_top_level_or("a (b or c) d"), None);
-        // Inside parens but a top-level " or " follows — find the outer one.
-        assert_eq!(
-            first_top_level_or("a (b or c) or d"),
-            Some(10) // position of the space before the outer " or "
-        );
-        // No " or " at all.
-        assert_eq!(first_top_level_or("hello world"), None);
-        // Word boundary — "or" inside another word ("cor") does not match
-        // because the leading space isn't there.
-        assert_eq!(first_top_level_or("colorful"), None);
-        // Multi-byte UTF-8 elsewhere doesn't break the depth tracking.
-        assert_eq!(first_top_level_or("¼ cup or 50g"), Some("¼ cup".len()));
     }
 
     #[test]
