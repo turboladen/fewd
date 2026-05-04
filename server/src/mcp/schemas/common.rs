@@ -99,7 +99,10 @@ pub struct IngredientOut {
     /// unit-less items.
     #[serde(default)]
     pub unit: String,
-    #[serde(default)]
+    /// Mirrors `IngredientDto.notes` — also drops to absent (rather than
+    /// `null`) on the wire when unset, so MCP tool output stays consistent
+    /// with the HTTP API and with `prep`/`or_alternative` on this struct.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     /// Optional alternative ingredient parsed from `<primary> or <alt>` lines
     /// (e.g. "8 flour tortillas or 10 corn tortillas"). Recursive so the

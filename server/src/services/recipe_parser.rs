@@ -927,6 +927,19 @@ dinner, quick, mexican";
         assert_eq!(pear.name, "pear (or Fuji apple)");
         assert_eq!(pear.prep.as_deref(), Some("grated"));
         assert!(pear.or_alternative.is_none());
+
+        // fewd-4nb: chained `X or Y or Z` builds a depth-2 linked chain via
+        // recursion on the right half — the result is `milk → cream → water`,
+        // NOT `milk → [cream, water]`. Pinned here so a future change that
+        // flips `first_top_level_or` to find the rightmost ` or ` (also a
+        // valid interpretation) doesn't silently reverse the order.
+        let chained = line("1 cup milk or 2 cups cream or 3 cups water");
+        assert_eq!(chained.name, "milk");
+        let alt1 = chained.or_alternative.as_ref().expect("first alt");
+        assert_eq!(alt1.name, "cream");
+        let alt2 = alt1.or_alternative.as_ref().expect("second alt");
+        assert_eq!(alt2.name, "water");
+        assert!(alt2.or_alternative.is_none());
     }
 
     #[test]
