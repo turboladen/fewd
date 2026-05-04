@@ -99,8 +99,19 @@ pub struct IngredientOut {
     /// unit-less items.
     #[serde(default)]
     pub unit: String,
-    #[serde(default)]
+    /// Drops to absent (rather than `null`) on the wire when unset, matching
+    /// the `prep` and `or_alternative` annotations on this same struct so MCP
+    /// tool output stays uniform across optional fields. Note: this is more
+    /// conservative than `IngredientDto.notes`, which still serializes `null`
+    /// over the HTTP API — bringing those into sync would change the public
+    /// JSON shape and is out of scope for fewd-4nb.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// Optional alternative ingredient parsed from `<primary> or <alt>` lines
+    /// (e.g. "8 flour tortillas or 10 corn tortillas"). Recursive so the
+    /// alternative carries its own amount/unit/prep/notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub or_alternative: Option<Box<IngredientOut>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -161,6 +172,10 @@ pub(super) fn ingredient_out(ing: &IngredientDto) -> IngredientOut {
         amount: amount_out(ing.amount.clone()),
         unit: ing.unit.clone(),
         notes: ing.notes.clone(),
+        or_alternative: ing
+            .or_alternative
+            .as_deref()
+            .map(|alt| Box::new(ingredient_out(alt))),
     }
 }
 
@@ -206,6 +221,7 @@ pub(super) fn ingredient_in(ing: IngredientOut) -> IngredientDto {
         amount: amount_in(ing.amount),
         unit: ing.unit,
         notes: ing.notes,
+        or_alternative: ing.or_alternative.map(|alt| Box::new(ingredient_in(*alt))),
     }
 }
 
@@ -251,6 +267,7 @@ mod tests {
             amount: IngredientAmountOut::Single { value: 1.0 },
             unit: "clove".to_string(),
             notes: None,
+            or_alternative: None,
         }
     }
 

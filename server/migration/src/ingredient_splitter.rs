@@ -44,6 +44,43 @@ fn first_top_level_comma(s: &str) -> Option<usize> {
     None
 }
 
+/// Find the byte offset of the first ` or ` token at paren/bracket depth 0.
+///
+/// Skips matches inside `()`, `[]`, or `{}` so a parenthesized alternative
+/// like `pear (or Fuji apple), grated` does NOT split on the inner `or` —
+/// the `split_name_and_prep` comma splitter still owns that case.
+///
+/// Byte-level scan is safe because ` or ` is pure ASCII; the depth tracking
+/// works correctly with multi-byte UTF-8 chars since `(`, `)`, `[`, `]`,
+/// `{`, `}`, and space are all single-byte ASCII.
+///
+/// Lives next to `first_top_level_comma` so the runtime parser
+/// (`fewd_lib::services::recipe_parser`) and any future backfill that walks
+/// existing rows (fewd-6ai) consume the same canonical helper, the same way
+/// `peel_size_paren` is shared with `m20260429_000015_*`. See CLAUDE.md
+/// "Shared helpers between runtime ingest paths and backfill migrations".
+pub fn first_top_level_or(s: &str) -> Option<usize> {
+    let mut depth: i32 = 0;
+    let bytes = s.as_bytes();
+    let pat = b" or ";
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' if depth > 0 => depth -= 1,
+            b' ' if depth == 0
+                && i + pat.len() <= bytes.len()
+                && &bytes[i..i + pat.len()] == pat =>
+            {
+                return Some(i);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,5 +363,33 @@ mod tests {
             };
             assert_eq!(&recombined, raw, "recombination should round-trip");
         }
+    }
+
+    #[test]
+    fn first_top_level_or_basic() {
+        assert_eq!(first_top_level_or("a or b"), Some(1));
+        // No " or " at all.
+        assert_eq!(first_top_level_or("hello world"), None);
+        // Word boundary — "or" inside another word does not match because
+        // the leading space isn't there.
+        assert_eq!(first_top_level_or("colorful"), None);
+    }
+
+    #[test]
+    fn first_top_level_or_skips_inner_parens() {
+        // Inside parens — skipped.
+        assert_eq!(first_top_level_or("a (b or c) d"), None);
+        // Inside parens AND a top-level " or " follows — find the outer one.
+        assert_eq!(
+            first_top_level_or("a (b or c) or d"),
+            Some(10) // position of the space before the outer " or "
+        );
+    }
+
+    #[test]
+    fn first_top_level_or_handles_multibyte_utf8() {
+        // `¼` is 2 bytes — the byte-level scan must still find the
+        // single-byte ASCII space-or-space token at the right offset.
+        assert_eq!(first_top_level_or("¼ cup or 50g"), Some("¼ cup".len()));
     }
 }

@@ -69,6 +69,17 @@ impl ShoppingService {
                                     amount: scaled_amount.clone(),
                                     unit: ing.unit.clone(),
                                     notes: ing.notes,
+                                    // Recursively scale the alternative chain
+                                    // so primary and alternative stay in the
+                                    // same serving scale — without this, a 2x
+                                    // recipe would carry "16 flour tortillas"
+                                    // primary alongside an unscaled "10 corn
+                                    // tortillas" alt. Aggregator still groups
+                                    // by primary `name` only; the data is
+                                    // forwarded for downstream UX (fewd-ad0).
+                                    or_alternative: ing
+                                        .or_alternative
+                                        .map(|alt| Box::new(scale_alt(*alt, scale))),
                                 };
 
                                 let source = IngredientSourceDto {
@@ -176,6 +187,21 @@ fn scale_amount(amount: &IngredientAmountDto, scale: f64) -> IngredientAmountDto
             min: min * scale,
             max: max * scale,
         },
+    }
+}
+
+/// Recursively scale an `or_alternative` ingredient (and any chained
+/// alternatives) using the shopping pipeline's unrounded `scale_amount`.
+/// Kept private here rather than reusing `recipe_scaler::scale_one` so the
+/// shopping aggregator stays in full precision — `recipe_scaler` rounds to
+/// 2 decimals for UI display, which would compound across alts.
+fn scale_alt(alt: IngredientDto, scale: f64) -> IngredientDto {
+    IngredientDto {
+        amount: scale_amount(&alt.amount, scale),
+        or_alternative: alt
+            .or_alternative
+            .map(|nested| Box::new(scale_alt(*nested, scale))),
+        ..alt
     }
 }
 

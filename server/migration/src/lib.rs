@@ -21,7 +21,7 @@ pub mod paren_notes;
 pub mod slug;
 
 pub use ingredient_amount::{is_known_unit, try_parse_amount, try_parse_amount_json, AmountKind};
-pub use ingredient_splitter::split_name_and_prep;
+pub use ingredient_splitter::{first_top_level_or, split_name_and_prep};
 pub use paren_notes::peel_size_paren;
 pub use slug::slugify;
 

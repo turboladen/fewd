@@ -56,6 +56,7 @@ fn test_recipe_dto(name: &str) -> CreateRecipeDto {
                 amount: IngredientAmountDto::Single { value: 2.0 },
                 unit: "cups".to_string(),
                 notes: None,
+                or_alternative: None,
             },
             IngredientDto {
                 name: "eggs".to_string(),
@@ -63,6 +64,7 @@ fn test_recipe_dto(name: &str) -> CreateRecipeDto {
                 amount: IngredientAmountDto::Single { value: 3.0 },
                 unit: "whole".to_string(),
                 notes: None,
+                or_alternative: None,
             },
         ],
         nutrition_per_serving: None,
@@ -724,6 +726,7 @@ async fn meal_with_adhoc_items() {
                 amount: IngredientAmountDto::Single { value: 1.0 },
                 unit: "whole".to_string(),
                 notes: None,
+                or_alternative: None,
             }],
             notes: None,
         }],
@@ -825,6 +828,7 @@ async fn shopping_list_includes_adhoc() {
                 amount: IngredientAmountDto::Single { value: 2.0 },
                 unit: "whole".to_string(),
                 notes: None,
+                or_alternative: None,
             }],
             notes: None,
         }],
@@ -1024,6 +1028,7 @@ async fn meal_template_update() {
                 amount: IngredientAmountDto::Single { value: 2.0 },
                 unit: "slices".to_string(),
                 notes: None,
+                or_alternative: None,
             }],
             notes: None,
         }],
@@ -1695,6 +1700,7 @@ async fn shopping_list_adhoc_source_has_no_serving_info() {
                 amount: IngredientAmountDto::Single { value: 1.0 },
                 unit: "whole".to_string(),
                 notes: None,
+                or_alternative: None,
             }],
             notes: None,
         }],
@@ -1774,6 +1780,7 @@ async fn shopping_aggregates_same_name_different_prep() {
         amount: IngredientAmountDto::Single { value: 3.0 },
         unit: "cloves".to_string(),
         notes: None,
+        or_alternative: None,
     }];
     let r1 = RecipeService::create(&db, minced_recipe).await.unwrap();
 
@@ -1785,6 +1792,7 @@ async fn shopping_aggregates_same_name_different_prep() {
         amount: IngredientAmountDto::Single { value: 2.0 },
         unit: "cloves".to_string(),
         notes: None,
+        or_alternative: None,
     }];
     let r2 = RecipeService::create(&db, sliced_recipe).await.unwrap();
 
@@ -1884,6 +1892,7 @@ async fn shopping_keeps_distinct_purchasable_names_separate() {
         amount: IngredientAmountDto::Single { value: 1.0 },
         unit: "lb".to_string(),
         notes: None,
+        or_alternative: None,
     }];
     let r1 = RecipeService::create(&db, breast_recipe).await.unwrap();
 
@@ -1895,6 +1904,7 @@ async fn shopping_keeps_distinct_purchasable_names_separate() {
         amount: IngredientAmountDto::Single { value: 1.0 },
         unit: "whole".to_string(),
         notes: None,
+        or_alternative: None,
     }];
     let r2 = RecipeService::create(&db, whole_recipe).await.unwrap();
 
@@ -1972,6 +1982,7 @@ async fn shopping_aggregates_range_amounts_across_prep_variants() {
         amount: IngredientAmountDto::Range { min: 2.0, max: 3.0 },
         unit: "cloves".to_string(),
         notes: None,
+        or_alternative: None,
     }];
     let r1 = RecipeService::create(&db, minced_recipe).await.unwrap();
 
@@ -1983,6 +1994,7 @@ async fn shopping_aggregates_range_amounts_across_prep_variants() {
         amount: IngredientAmountDto::Range { min: 1.0, max: 2.0 },
         unit: "cloves".to_string(),
         notes: None,
+        or_alternative: None,
     }];
     let r2 = RecipeService::create(&db, sliced_recipe).await.unwrap();
 
@@ -2083,6 +2095,7 @@ async fn shopping_split_partitions_staples_and_buys() {
             amount: IngredientAmountDto::Single { value: 1.0 },
             unit: "lb".to_string(),
             notes: None,
+            or_alternative: None,
         },
         IngredientDto {
             name: "yellow onion".to_string(),
@@ -2090,6 +2103,7 @@ async fn shopping_split_partitions_staples_and_buys() {
             amount: IngredientAmountDto::Single { value: 1.0 },
             unit: "whole".to_string(),
             notes: None,
+            or_alternative: None,
         },
         // Allowlisted staples in non-small units
         IngredientDto {
@@ -2098,6 +2112,7 @@ async fn shopping_split_partitions_staples_and_buys() {
             amount: IngredientAmountDto::Single { value: 0.25 },
             unit: "cup".to_string(),
             notes: None,
+            or_alternative: None,
         },
         IngredientDto {
             name: "kosher salt".to_string(),
@@ -2105,6 +2120,7 @@ async fn shopping_split_partitions_staples_and_buys() {
             amount: IngredientAmountDto::Single { value: 1.0 },
             unit: "tsp".to_string(),
             notes: None,
+            or_alternative: None,
         },
         // Small-unit staple with a name that's NOT in the allowlist —
         // proves Rule 1 (small unit) fires independently.
@@ -2114,6 +2130,7 @@ async fn shopping_split_partitions_staples_and_buys() {
             amount: IngredientAmountDto::Single { value: 1.0 },
             unit: "tbsp".to_string(),
             notes: None,
+            or_alternative: None,
         },
     ];
     let recipe = RecipeService::create(&db, recipe).await.unwrap();
@@ -2167,6 +2184,7 @@ async fn shopping_split_all_staples() {
             amount: IngredientAmountDto::Single { value: 1.0 },
             unit: "tbsp".to_string(),
             notes: None,
+            or_alternative: None,
         },
         IngredientDto {
             name: "kosher salt".to_string(),
@@ -2174,6 +2192,7 @@ async fn shopping_split_all_staples() {
             amount: IngredientAmountDto::Single { value: 1.0 },
             unit: "tsp".to_string(),
             notes: None,
+            or_alternative: None,
         },
         IngredientDto {
             name: "garlic powder".to_string(),
@@ -2181,6 +2200,7 @@ async fn shopping_split_all_staples() {
             amount: IngredientAmountDto::Single { value: 1.0 },
             unit: "tsp".to_string(),
             notes: None,
+            or_alternative: None,
         },
     ];
     let recipe = RecipeService::create(&db, recipe).await.unwrap();
@@ -2234,6 +2254,7 @@ async fn shopping_split_preserves_source_breakdown() {
         amount: IngredientAmountDto::Single { value: 1.0 },
         unit: "lb".to_string(),
         notes: None,
+        or_alternative: None,
     }];
     let recipe = RecipeService::create(&db, recipe).await.unwrap();
     let alice = PersonService::create(&db, test_person_dto("Alice"))
@@ -2293,6 +2314,7 @@ async fn shopping_split_preserves_range_amounts() {
         amount: IngredientAmountDto::Range { min: 1.0, max: 2.0 },
         unit: "lb".to_string(),
         notes: None,
+        or_alternative: None,
     }];
     let recipe = RecipeService::create(&db, recipe).await.unwrap();
     let alice = PersonService::create(&db, test_person_dto("Alice"))
@@ -2412,6 +2434,7 @@ async fn shopping_split_partitions_adhoc_items() {
                         amount: IngredientAmountDto::Single { value: 2.0 },
                         unit: "whole".to_string(),
                         notes: None,
+                        or_alternative: None,
                     },
                     IngredientDto {
                         name: "olive oil".to_string(),
@@ -2419,6 +2442,7 @@ async fn shopping_split_partitions_adhoc_items() {
                         amount: IngredientAmountDto::Single { value: 1.0 },
                         unit: "tbsp".to_string(),
                         notes: None,
+                        or_alternative: None,
                     },
                 ],
                 notes: None,
@@ -2478,6 +2502,7 @@ mod recipe_discovery {
                     amount: IngredientAmountDto::Single { value: 1.0 },
                     unit: "each".to_string(),
                     notes: None,
+                    or_alternative: None,
                 })
                 .collect(),
             nutrition_per_serving: None,
@@ -2895,6 +2920,7 @@ mod recipe_discovery {
                 amount: IngredientAmountDto::Single { value: 2.0 },
                 unit: "olives".to_string(), // bizarre but legal
                 notes: Some("olives optional".to_string()),
+                or_alternative: None,
             }],
             nutrition_per_serving: None,
             tags: vec![],

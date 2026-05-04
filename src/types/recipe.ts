@@ -27,6 +27,13 @@ export interface Ingredient {
   amount: IngredientAmount
   unit: string
   notes?: string
+  /**
+   * Optional alternative ingredient parsed from `<primary> or <alt>` lines
+   * (e.g. "8 flour tortillas or 10 corn tortillas"). Recursive — the
+   * alternative carries its own amount/unit/prep/notes. Snake_case matches
+   * the Rust DTO's wire format (no `rename_all` applied server-side).
+   */
+  or_alternative?: Ingredient
 }
 
 /**

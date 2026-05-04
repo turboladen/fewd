@@ -81,6 +81,17 @@ pub struct IngredientDto {
     #[serde(default)]
     pub unit: String,
     pub notes: Option<String>,
+    /// Optional alternative ingredient parsed from `<primary> or <alt>` lines
+    /// (e.g. "8 flour tortillas or 10 corn tortillas"). Recursive so the
+    /// alternative carries its own amount/unit/prep/notes — chained `or`
+    /// collapses naturally via the recursive `Box`. Boxed to keep
+    /// `IngredientDto`'s size finite.
+    ///
+    /// The shopping aggregator currently counts only the primary; UX for
+    /// "primary vs alternative" selection is deferred — see the fewd-4nb
+    /// follow-up bead. Existing rows deserialize this as `None` automatically.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub or_alternative: Option<Box<IngredientDto>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

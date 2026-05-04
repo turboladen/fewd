@@ -166,6 +166,7 @@ mod tests {
             amount: IngredientAmountDto::Single { value },
             unit: unit.to_string(),
             notes: None,
+            or_alternative: None,
         }
     }
 
@@ -232,6 +233,7 @@ mod tests {
             amount: IngredientAmountDto::Range { min: 2.0, max: 3.0 },
             unit: "clove".to_string(),
             notes: None,
+            or_alternative: None,
         }];
         let instructions = "Mince garlic finely.";
         let result = enhance_instructions(&ingredients, instructions);

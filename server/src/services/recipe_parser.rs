@@ -1,6 +1,6 @@
 use crate::dto::{CreateRecipeDto, IngredientAmountDto, IngredientDto, TimeValueDto};
 use crate::services::ingredient_amount::{is_known_unit, try_parse_amount_dto};
-use crate::services::ingredient_splitter::split_name_and_prep;
+use crate::services::ingredient_splitter::{first_top_level_or, split_name_and_prep};
 use crate::services::paren_notes::peel_size_paren;
 
 pub struct RecipeParser;
@@ -203,33 +203,49 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
         (None, None) => None,
     };
 
+    // fewd-4nb: detect an `<primary> or <alt>` alternative at paren depth 0.
+    // The split runs AFTER extract_notes/peel_size_paren so any parenthesized
+    // "(or 1 cup half-and-half)" already lives in `notes` and we never see it
+    // here. Guard: only split when the right half starts with a parseable
+    // amount, so "salt or pepper to taste" stays a single ingredient.
+    let (line, alt_line) = match first_top_level_or(&line) {
+        Some(idx) => {
+            let right = line[idx + 4..].trim();
+            let first_word = right.split_whitespace().next();
+            if first_word.and_then(try_parse_amount).is_some() {
+                (line[..idx].trim().to_string(), Some(right.to_string()))
+            } else {
+                (line, None)
+            }
+        }
+        None => (line, None),
+    };
+    let or_alternative = alt_line
+        .and_then(|alt| parse_ingredient_line(&format!("* {alt}")))
+        .map(Box::new);
+
     let parts: Vec<&str> = line.splitn(3, ' ').collect();
 
-    match parts.len() {
+    let mut primary = match parts.len() {
         // Just a name like "salt"
-        1 => Some(build_ingredient(
+        1 => build_ingredient(
             parts[0],
             IngredientAmountDto::Single { value: 1.0 },
             "to taste".to_string(),
             notes,
-        )),
+        ),
         2 => {
             if let Some(amount) = try_parse_amount(parts[0]) {
                 // Amount + name like "2 eggs"
-                Some(build_ingredient(
-                    parts[1],
-                    amount,
-                    "whole".to_string(),
-                    notes,
-                ))
+                build_ingredient(parts[1], amount, "whole".to_string(), notes)
             } else {
                 // Two-word name like "black pepper"
-                Some(build_ingredient(
+                build_ingredient(
                     &line,
                     IngredientAmountDto::Single { value: 1.0 },
                     "to taste".to_string(),
                     notes,
-                ))
+                )
             }
         }
         // 3 parts: dispatch on whether parts[1] is a known unit.
@@ -254,34 +270,26 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
                 let token = parts[1];
                 let token_stripped = token.strip_suffix(',').unwrap_or(token);
                 if is_known_unit(token_stripped) {
-                    Some(build_ingredient(
-                        parts[2],
-                        amount,
-                        token_stripped.to_string(),
-                        notes,
-                    ))
+                    build_ingredient(parts[2], amount, token_stripped.to_string(), notes)
                 } else {
                     // Preserve the original token (with any trailing comma)
                     // so the splitter can peel prep.
                     let raw_name = format!("{} {}", token, parts[2]);
-                    Some(build_ingredient(
-                        &raw_name,
-                        amount,
-                        "whole".to_string(),
-                        notes,
-                    ))
+                    build_ingredient(&raw_name, amount, "whole".to_string(), notes)
                 }
             } else {
                 // Entire line is a name (no parseable amount).
-                Some(build_ingredient(
+                build_ingredient(
                     &line,
                     IngredientAmountDto::Single { value: 1.0 },
                     "to taste".to_string(),
                     notes,
-                ))
+                )
             }
         }
-    }
+    };
+    primary.or_alternative = or_alternative;
+    Some(primary)
 }
 
 /// Apply the name/prep splitter to a raw name segment before constructing
@@ -300,6 +308,7 @@ fn build_ingredient(
         amount,
         unit,
         notes,
+        or_alternative: None,
     }
 }
 
@@ -838,6 +847,79 @@ dinner, quick, mexican";
         assert_eq!(tomatoes.name, "crushed San Marzano tomatoes");
         assert_eq!(tomatoes.unit, "cans");
         assert_eq!(tomatoes.notes.as_deref(), Some("28 oz each"));
+
+        // fewd-4nb: top-level " or " splits cleanly. The `(8-inch)` is
+        // preserved in the primary's name because "inch" is not in the
+        // known-unit registry — that's the existing fewd-prh territory,
+        // out of scope here. What matters: the alt becomes its own DTO
+        // with the right amount/unit/name.
+        //
+        // TODO(fewd-prh): the `name` assertion below will need updating when
+        // size qualifiers (medium, large, etc.) become a separate field.
+        // Expected post-fewd-prh: name=="flour tortillas", size_qualifier=="medium".
+        let tortillas = line("8 medium flour tortillas (8-inch) or 10 corn tortillas");
+        assert_eq!(tortillas.name, "medium flour tortillas (8-inch)");
+        assert_eq!(tortillas.unit, "whole");
+        assert!(matches!(
+            tortillas.amount,
+            IngredientAmountDto::Single { value } if (value - 8.0).abs() < 0.001
+        ));
+        let alt = tortillas
+            .or_alternative
+            .as_ref()
+            .expect("alternative present");
+        assert_eq!(alt.name, "corn tortillas");
+        assert_eq!(alt.unit, "whole");
+        assert!(matches!(
+            alt.amount,
+            IngredientAmountDto::Single { value } if (value - 10.0).abs() < 0.001
+        ));
+        assert!(alt.or_alternative.is_none());
+
+        // fewd-4nb: bare "or" without a parseable amount on the right side
+        // does NOT split — `pepper` is not an amount.
+        let salt_pepper = line("salt or pepper to taste");
+        assert_eq!(salt_pepper.name, "salt or pepper to taste");
+        assert!(salt_pepper.or_alternative.is_none());
+
+        // fewd-4nb: parenthesized alternative with a unit token gets peeled
+        // into `notes` by extract_notes (closing `)` at end of line), so the
+        // " or " splitter never sees the inner alternative — preserves the
+        // existing pre-fewd-4nb behavior for this shape.
+        let milk_alt = line("1 cup milk (or 1 cup half-and-half)");
+        assert_eq!(milk_alt.name, "milk");
+        assert_eq!(milk_alt.unit, "cup");
+        assert!(milk_alt.or_alternative.is_none());
+        assert_eq!(milk_alt.notes.as_deref(), Some("or 1 cup half-and-half"));
+
+        // fewd-4nb: depth-aware — inner "or" inside parens does not split.
+        // The downstream comma-prep splitter still owns this case.
+        let pear = line("pear (or Fuji apple), grated");
+        assert_eq!(pear.name, "pear (or Fuji apple)");
+        assert_eq!(pear.prep.as_deref(), Some("grated"));
+        assert!(pear.or_alternative.is_none());
+
+        // fewd-4nb: chained `X or Y or Z` builds a depth-2 linked chain via
+        // recursion on the right half — the result is `milk → cream → water`,
+        // NOT `milk → [cream, water]`. Pinned here so a future change that
+        // flips `first_top_level_or` to find the rightmost ` or ` (also a
+        // valid interpretation) doesn't silently reverse the order.
+        let chained = line("1 cup milk or 2 cups cream or 3 cups water");
+        assert_eq!(chained.name, "milk");
+        let alt1 = chained.or_alternative.as_ref().expect("first alt");
+        assert_eq!(alt1.name, "cream");
+        let alt2 = alt1.or_alternative.as_ref().expect("second alt");
+        assert_eq!(alt2.name, "water");
+        assert!(alt2.or_alternative.is_none());
+
+        // fewd-4nb: degenerate trailing "or" with no right-hand content. The
+        // markdown trim strips trailing whitespace, so the byte scan never
+        // sees a complete ` or ` (4-byte) pattern — `first_top_level_or`
+        // returns None and the line stays unsplit. Pinned so a future change
+        // that loosens the trailing-space requirement doesn't silently
+        // produce a malformed alt with an empty name.
+        let trailing_or = line("8 flour tortillas or");
+        assert!(trailing_or.or_alternative.is_none());
     }
 
     #[test]
