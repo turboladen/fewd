@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use rmcp::handler::server::common::FromContextPart;
+use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     AnnotateAble, CallToolResult, Content, Implementation, ListResourcesResult,
@@ -10,6 +12,7 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler};
 use sea_orm::DatabaseConnection;
+use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::entities::person;
@@ -78,12 +81,21 @@ impl FewdMcp {
 
     #[tool(
         name = "search_recipes",
-        description = "Search recipes by one or more filters. Bare calls (no filters / `query='*'`) are rejected — call `list_curated_recipes` for an unfiltered shortlist. Filters: `query` (case-insensitive substring on name); `tags` (case-insensitive exact match, multiple tags = AND); `max_total_time_minutes` (assumes recipe total_time is in minutes — recipes authored in hours won't match, known limitation); `min_rating`; `is_favorite`; `unmade_since_days`; `excludes_for_persons` (named family members whose dislikes exclude matching recipes — substring match on ingredient names, e.g. 'olive oil' is excluded when a person dislikes 'olive'). Returns brief rows — use `get_recipe` with the slug for full details. Unknown person names return an actionable error pointing at `list_people`."
+        description = "Search recipes by one or more filters. Bare calls (no filters / `query='*'`) are rejected — call `list_curated_recipes` for an unfiltered shortlist. Filters: `query` (case-insensitive substring on name); `tags` (case-insensitive exact match, multiple tags = AND); `max_total_time_minutes` (assumes recipe total_time is in minutes — recipes authored in hours won't match, known limitation); `min_rating`; `is_favorite`; `unmade_since_days`; `excludes_for_persons` (named family members whose dislikes exclude matching recipes — substring match on ingredient names, e.g. 'olive oil' is excluded when a person dislikes 'olive'). Returns brief rows — use `get_recipe` with the slug for full details. Unknown person names return an actionable error pointing at `list_people`.",
+        input_schema = rmcp::handler::server::common::schema_for_type::<SearchRecipesParams>()
     )]
     async fn search_recipes(
         &self,
-        Parameters(params): Parameters<SearchRecipesParams>,
+        LenientParameters(params): LenientParameters<SearchRecipesParams>,
     ) -> Result<CallToolResult, McpError> {
+        let params = match params {
+            Ok(v) => v,
+            Err(e) => {
+                return Ok(tool_user_error(format!(
+                    "search_recipes: {e}. Check the tool schema for required fields."
+                )))
+            }
+        };
         if let Err(msg) = params.validate_has_filter() {
             return Ok(tool_user_error(msg));
         }
@@ -149,12 +161,21 @@ impl FewdMcp {
 
     #[tool(
         name = "get_recipe",
-        description = "Fetch the full record for one recipe by slug: ingredients (with amounts and units), instructions, nutrition, prep/cook time, and any parent recipe it was adapted from."
+        description = "Fetch the full record for one recipe by slug: ingredients (with amounts and units), instructions, nutrition, prep/cook time, and any parent recipe it was adapted from.",
+        input_schema = rmcp::handler::server::common::schema_for_type::<GetRecipeParams>()
     )]
     async fn get_recipe(
         &self,
-        Parameters(params): Parameters<GetRecipeParams>,
+        LenientParameters(params): LenientParameters<GetRecipeParams>,
     ) -> Result<CallToolResult, McpError> {
+        let params = match params {
+            Ok(v) => v,
+            Err(e) => {
+                return Ok(tool_user_error(format!(
+                    "get_recipe: {e}. Check the tool schema for required fields."
+                )))
+            }
+        };
         let normalized = params.slug.trim().to_lowercase();
         let recipe = RecipeService::get_by_slug(&self.db, normalized.clone())
             .await
@@ -223,12 +244,21 @@ impl FewdMcp {
 
     #[tool(
         name = "list_meals",
-        description = "List all scheduled meals within an inclusive date range. Each meal lists the assigned servings — who's eating which recipe (or ad-hoc items), how many servings, and optional notes."
+        description = "List all scheduled meals within an inclusive date range. Each meal lists the assigned servings — who's eating which recipe (or ad-hoc items), how many servings, and optional notes.",
+        input_schema = rmcp::handler::server::common::schema_for_type::<DateRangeParams>()
     )]
     async fn list_meals(
         &self,
-        Parameters(params): Parameters<DateRangeParams>,
+        LenientParameters(params): LenientParameters<DateRangeParams>,
     ) -> Result<CallToolResult, McpError> {
+        let params = match params {
+            Ok(v) => v,
+            Err(e) => {
+                return Ok(tool_user_error(format!(
+                    "list_meals: {e}. Check the tool schema for required fields."
+                )))
+            }
+        };
         if let Err(e) = params.validate() {
             return Ok(tool_user_error(e.to_string()));
         }
@@ -252,12 +282,21 @@ impl FewdMcp {
 
     #[tool(
         name = "get_shopping_list",
-        description = "Generate a consolidated grocery list for the given date range: ingredients are aggregated across meals and scaled by person-servings, with unit conversion where compatible. Each item shows the per-meal sources so the user can trace back which recipe contributed what."
+        description = "Generate a consolidated grocery list for the given date range: ingredients are aggregated across meals and scaled by person-servings, with unit conversion where compatible. Each item shows the per-meal sources so the user can trace back which recipe contributed what.",
+        input_schema = rmcp::handler::server::common::schema_for_type::<DateRangeParams>()
     )]
     async fn get_shopping_list(
         &self,
-        Parameters(params): Parameters<DateRangeParams>,
+        LenientParameters(params): LenientParameters<DateRangeParams>,
     ) -> Result<CallToolResult, McpError> {
+        let params = match params {
+            Ok(v) => v,
+            Err(e) => {
+                return Ok(tool_user_error(format!(
+                    "get_shopping_list: {e}. Check the tool schema for required fields."
+                )))
+            }
+        };
         if let Err(e) = params.validate() {
             return Ok(tool_user_error(e.to_string()));
         }
@@ -271,12 +310,21 @@ impl FewdMcp {
 
     #[tool(
         name = "create_recipe",
-        description = "Create a new recipe. The slug is auto-generated from the name (with a numeric suffix on collisions). Returns the full created recipe. Before calling this, prefer `search_recipes` to avoid duplicates — the LLM should check whether a similar recipe already exists."
+        description = "Create a new recipe. The slug is auto-generated from the name (with a numeric suffix on collisions). Returns the full created recipe. Before calling this, prefer `search_recipes` to avoid duplicates — the LLM should check whether a similar recipe already exists.",
+        input_schema = rmcp::handler::server::common::schema_for_type::<CreateRecipeInput>()
     )]
     async fn create_recipe(
         &self,
-        Parameters(input): Parameters<CreateRecipeInput>,
+        LenientParameters(input): LenientParameters<CreateRecipeInput>,
     ) -> Result<CallToolResult, McpError> {
+        let input = match input {
+            Ok(v) => v,
+            Err(e) => {
+                return Ok(tool_user_error(format!(
+                    "create_recipe: {e}. Check the tool schema for required fields."
+                )))
+            }
+        };
         // Resolve the parent (if any) once, capturing both the id we need
         // for storage AND the canonical slug we want to echo back. Echoing
         // the original input would round-trip whatever case/whitespace the
@@ -316,12 +364,21 @@ impl FewdMcp {
 
     #[tool(
         name = "create_meal",
-        description = "Schedule a meal on a specific date. Each serving assigns one family member to either an existing recipe (by slug) or an ad-hoc ingredient list. Unknown names or slugs return a clear error so the caller can retry with corrected values. Returns the created meal with slugs/names resolved."
+        description = "Schedule a meal on a specific date. Each serving assigns one family member to either an existing recipe (by slug) or an ad-hoc ingredient list. Unknown names or slugs return a clear error so the caller can retry with corrected values. Returns the created meal with slugs/names resolved.",
+        input_schema = rmcp::handler::server::common::schema_for_type::<CreateMealInput>()
     )]
     async fn create_meal(
         &self,
-        Parameters(input): Parameters<CreateMealInput>,
+        LenientParameters(input): LenientParameters<CreateMealInput>,
     ) -> Result<CallToolResult, McpError> {
+        let input = match input {
+            Ok(v) => v,
+            Err(e) => {
+                return Ok(tool_user_error(format!(
+                    "create_meal: {e}. Check the tool schema for required fields."
+                )))
+            }
+        };
         let lookups = MealLookups::load(&self.db).await.map_err(db_error)?;
         // Match each variant so a future `CreateMealError` variant that
         // is NOT LLM-recoverable (e.g. an internal-failure variant) fails
@@ -438,6 +495,38 @@ fn internal_error(msg: String) -> McpError {
 /// dropped, so they're reserved for transport / internal failures.
 fn tool_user_error(message: impl Into<String>) -> CallToolResult {
     CallToolResult::error(vec![Content::text(message.into())])
+}
+
+/// Parameter wrapper that defers deserialize errors to the handler so they
+/// can be returned as tool-level errors instead of bubbling up as JSON-RPC
+/// `-32602` ("invalid_params") responses. rmcp's stock `Parameters<T>`
+/// extractor errors at extraction time, which most MCP clients render as a
+/// generic "Tool execution failed" with the message dropped — the same UX
+/// class fewd-m95 fixed for handler-side errors. `LenientParameters<T>`
+/// always succeeds at extraction and exposes a `Result<T, String>` for the
+/// handler to inspect; on `Err` the handler returns
+/// `Ok(tool_user_error("…"))` so the actionable serde message reaches the
+/// LLM.
+///
+/// The rmcp `#[tool]` macro only generates input schemas from a literal
+/// `Parameters<T>` ident in the function signature, so every method using
+/// `LenientParameters<T>` must specify
+/// `input_schema = rmcp::handler::server::common::schema_for_type::<T>()`
+/// in its `#[tool(...)]` attribute to keep the LLM-facing JSON Schema
+/// intact. Tools that take `EmptyParams` don't need this wrapper — there
+/// are no fields to omit, so deserialize can't fail.
+pub(super) struct LenientParameters<T>(pub Result<T, String>);
+
+impl<S, T> FromContextPart<ToolCallContext<'_, S>> for LenientParameters<T>
+where
+    T: DeserializeOwned,
+{
+    fn from_context_part(context: &mut ToolCallContext<S>) -> Result<Self, McpError> {
+        let arguments = context.arguments.take().unwrap_or_default();
+        let parsed = serde_json::from_value::<T>(serde_json::Value::Object(arguments))
+            .map_err(|e| e.to_string());
+        Ok(LenientParameters(parsed))
+    }
 }
 
 /// Failure modes for `flatten_disliked_substrings` / the MCP-side resolver.
@@ -829,9 +918,9 @@ mod tests {
 
         let mcp = setup_test_mcp().await;
         let result = mcp
-            .get_recipe(Parameters(GetRecipeParams {
+            .get_recipe(LenientParameters(Ok(GetRecipeParams {
                 slug: "ghost-pasta".into(),
-            }))
+            })))
             .await;
         assert_tool_user_error(result, &["ghost-pasta", "list_curated_recipes"]);
     }
@@ -840,10 +929,10 @@ mod tests {
     async fn list_meals_invalid_date_returns_tool_level_error() {
         let mcp = setup_test_mcp().await;
         let result = mcp
-            .list_meals(Parameters(DateRangeParams {
+            .list_meals(LenientParameters(Ok(DateRangeParams {
                 start_date: "garbage".into(),
                 end_date: "2026-01-01".into(),
-            }))
+            })))
             .await;
         assert_tool_user_error(result, &["start_date", "YYYY-MM-DD", "garbage"]);
     }
@@ -852,10 +941,10 @@ mod tests {
     async fn get_shopping_list_invalid_date_returns_tool_level_error() {
         let mcp = setup_test_mcp().await;
         let result = mcp
-            .get_shopping_list(Parameters(DateRangeParams {
+            .get_shopping_list(LenientParameters(Ok(DateRangeParams {
                 start_date: "2026-01-01".into(),
                 end_date: "garbage".into(),
-            }))
+            })))
             .await;
         assert_tool_user_error(result, &["end_date", "YYYY-MM-DD", "garbage"]);
     }
@@ -864,12 +953,12 @@ mod tests {
     async fn create_meal_unknown_meal_type_returns_tool_level_error() {
         let mcp = setup_test_mcp().await;
         let result = mcp
-            .create_meal(Parameters(CreateMealInput {
+            .create_meal(LenientParameters(Ok(CreateMealInput {
                 date: "2026-01-01".into(),
                 meal_type: "brunch".into(),
                 order_index: None,
                 servings: vec![],
-            }))
+            })))
             .await;
         assert_tool_user_error(result, &["brunch", "Breakfast", "Lunch", "Dinner", "Snack"]);
     }
@@ -890,7 +979,7 @@ mod tests {
             }"#,
         )
         .expect("CreateRecipeInput JSON shape");
-        let result = mcp.create_recipe(Parameters(input)).await;
+        let result = mcp.create_recipe(LenientParameters(Ok(input))).await;
         assert_tool_user_error(result, &["ghost-recipe", "search_recipes"]);
     }
 
@@ -909,7 +998,7 @@ mod tests {
             }"#,
         )
         .expect("CreateRecipeInput JSON shape");
-        let result = mcp.create_recipe(Parameters(input)).await;
+        let result = mcp.create_recipe(LenientParameters(Ok(input))).await;
         assert_tool_user_error(result, &["servings must be >= 1", "0"]);
     }
 
@@ -922,10 +1011,10 @@ mod tests {
         // meals scheduled". Tool-level error is the only signal the LLM
         // gets that the range is backwards.
         let result = mcp
-            .list_meals(Parameters(DateRangeParams {
+            .list_meals(LenientParameters(Ok(DateRangeParams {
                 start_date: "2026-04-30".into(),
                 end_date: "2026-04-26".into(),
-            }))
+            })))
             .await;
         assert_tool_user_error(
             result,
@@ -955,7 +1044,30 @@ mod tests {
             }"#,
         )
         .expect("CreateMealInput JSON shape");
-        let result = mcp.create_meal(Parameters(input)).await;
+        let result = mcp.create_meal(LenientParameters(Ok(input))).await;
         assert_tool_user_error(result, &["Bob", "list_people"]);
+    }
+
+    #[tokio::test]
+    async fn create_recipe_missing_source_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        // Reproduces the actual rmcp deserialize failure surfaced by Claude
+        // Desktop testing of PR #27: the LLM omitted the required `source`
+        // field. Without LenientParameters this would fail upstream of the
+        // handler with JSON-RPC -32602, rendered as the opaque "Tool
+        // execution failed" the LLM can't recover from. With
+        // LenientParameters, the deserialize error reaches the handler and
+        // becomes a tool-level error naming the missing field.
+        let bad_json = serde_json::json!({
+            "name": "Test Recipe",
+            // missing "source"
+            "servings": 4,
+            "instructions": "Cook.",
+            "ingredients": []
+        });
+        let parsed: Result<CreateRecipeInput, String> =
+            serde_json::from_value(bad_json).map_err(|e| e.to_string());
+        let result = mcp.create_recipe(LenientParameters(parsed)).await;
+        assert_tool_user_error(result, &["create_recipe", "source"]);
     }
 }
