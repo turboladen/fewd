@@ -69,6 +69,11 @@ impl ShoppingService {
                                     amount: scaled_amount.clone(),
                                     unit: ing.unit.clone(),
                                     notes: ing.notes,
+                                    // Forward the alternative through the
+                                    // shopping pipeline so future aggregator
+                                    // logic can act on it. Aggregation here
+                                    // still groups by primary `name` only.
+                                    or_alternative: ing.or_alternative,
                                 };
 
                                 let source = IngredientSourceDto {

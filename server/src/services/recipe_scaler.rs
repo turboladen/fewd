@@ -39,6 +39,15 @@ pub fn scale_ingredients(ingredients: &[IngredientDto], ratio: f64) -> ScaleResu
             amount: new_amount.clone(),
             unit: ing.unit.clone(),
             notes: ing.notes.clone(),
+            // Recursively scale the alternative so a 2x recipe scales BOTH
+            // "8 flour tortillas" and "10 corn tortillas". Flagging stays
+            // primary-only — surfacing fractional alternatives as separate
+            // rows would clutter the UI for what is conceptually one
+            // ingredient slot.
+            or_alternative: ing
+                .or_alternative
+                .as_deref()
+                .map(|alt| Box::new(scale_one(alt, ratio))),
         };
 
         // Flag discrete units with fractional amounts
@@ -60,6 +69,23 @@ pub fn scale_ingredients(ingredients: &[IngredientDto], ratio: f64) -> ScaleResu
     ScaleResult {
         ingredients: scaled,
         flagged,
+    }
+}
+
+/// Scale a single ingredient (used recursively for `or_alternative`).
+/// Does not flag — flagging is intentionally primary-only at the top-level
+/// `scale_ingredients` boundary.
+fn scale_one(ing: &IngredientDto, ratio: f64) -> IngredientDto {
+    IngredientDto {
+        name: ing.name.clone(),
+        prep: ing.prep.clone(),
+        amount: scale_amount(&ing.amount, ratio),
+        unit: ing.unit.clone(),
+        notes: ing.notes.clone(),
+        or_alternative: ing
+            .or_alternative
+            .as_deref()
+            .map(|alt| Box::new(scale_one(alt, ratio))),
     }
 }
 
@@ -98,6 +124,7 @@ mod tests {
             amount: IngredientAmountDto::Single { value },
             unit: unit.to_string(),
             notes: None,
+            or_alternative: None,
         }
     }
 
@@ -158,6 +185,7 @@ mod tests {
             amount: IngredientAmountDto::Range { min: 2.0, max: 3.0 },
             unit: "clove".to_string(),
             notes: None,
+            or_alternative: None,
         }];
         let result = scale_ingredients(&ingredients, 2.0);
         match &result.ingredients[0].amount {
@@ -177,6 +205,7 @@ mod tests {
             amount: IngredientAmountDto::Range { min: 2.0, max: 3.0 },
             unit: "clove".to_string(),
             notes: None,
+            or_alternative: None,
         }];
         // 2 * 1.5 = 3.0, but min is 2*1.5=3.0 — no flag. Let's use 1.3
         let result = scale_ingredients(&ingredients, 1.3);
