@@ -1,14 +1,9 @@
 import { type ReactNode, useEffect } from 'react'
 import { useChrome } from '../contexts/ChromeContext'
 import { useWakeLock } from '../hooks/useWakeLock'
-import {
-  formatAmount,
-  formatIngredientLabel,
-  formatTime,
-  type ParsedRecipe,
-  parseInstructionSteps,
-} from '../types/recipe'
+import { formatTime, type ParsedRecipe, parseInstructionSteps } from '../types/recipe'
 import { IconClose } from './Icon'
+import { IngredientLineText } from './IngredientLineText'
 
 interface Props {
   parsed: ParsedRecipe
@@ -99,12 +94,7 @@ export function CookingView({ parsed, onExit, enhancedInstructions }: Props) {
             <ul className='space-y-2 text-lg md:text-base text-stone-700'>
               {parsed.ingredients.map((ing, i) => (
                 <li key={i}>
-                  <span className='font-semibold text-stone-900'>
-                    {formatAmount(ing.amount)}
-                  </span>
-                  {ing.unit && <span className='text-stone-500'>{` ${ing.unit}`}</span>}
-                  <span>{` ${formatIngredientLabel(ing)}`}</span>
-                  {ing.notes && <span className='text-stone-400 italic'>{` (${ing.notes})`}</span>}
+                  <IngredientLineText ingredient={ing} />
                 </li>
               ))}
             </ul>

@@ -4,15 +4,10 @@ import { useSetting } from '../hooks/useSettings'
 import { useAiSuggestMeals } from '../hooks/useSuggestions'
 import type { Person } from '../types/person'
 import { parsePerson } from '../types/person'
-import type {
-  CreateRecipeDto,
-  Ingredient,
-  IngredientAmount,
-  PersonAdaptOptions,
-} from '../types/recipe'
-import { formatAmount, formatIngredientLabel } from '../types/recipe'
+import type { CreateRecipeDto, PersonAdaptOptions } from '../types/recipe'
 import type { MealCharacter } from '../types/suggestion'
 import { IconArrowLeft, IconChevronDown, IconChevronRight, IconClose } from './Icon'
+import { IngredientLineText } from './IngredientLineText'
 import { FieldToggle, PersonSummary } from './PersonFieldToggles'
 
 interface AiSuggestionSectionProps {
@@ -406,13 +401,9 @@ function SuggestionCard({
           <div>
             <h6 className='text-xs font-medium text-stone-700 mb-1'>Ingredients</h6>
             <ul className='text-xs space-y-0.5'>
-              {suggestion.ingredients.map((ing: Ingredient, i: number) => (
+              {suggestion.ingredients.map((ing, i: number) => (
                 <li key={i} className='text-stone-600'>
-                  <span className='font-medium'>
-                    {formatAmount(ing.amount as IngredientAmount)}
-                  </span>
-                  {ing.unit && ` ${ing.unit}`} {formatIngredientLabel(ing)}
-                  {ing.notes && <span className='text-stone-400'>({ing.notes})</span>}
+                  <IngredientLineText ingredient={ing} />
                 </li>
               ))}
             </ul>
