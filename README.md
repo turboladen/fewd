@@ -130,7 +130,7 @@ The MCP endpoint is mounted at `/mcp` on the same port as the web UI. Transport 
 
 - `fewd://family/overview` — Markdown summary of every active family member. Clients that auto-load MCP resources will pick this up at conversation start. Mirrored by the `get_family_overview` tool above for clients (e.g. Claude Desktop) that surface resources for user attachment but don't let the LLM fetch them autonomously.
 
-### Authentication
+### Authentication and threat model
 
 fewd uses a deliberately light "family-name bearer" scheme to stay out of your way on your LAN. Every MCP request must send:
 
@@ -138,7 +138,15 @@ fewd uses a deliberately light "family-name bearer" scheme to stay out of your w
 Authorization: Bearer <family-member-name>
 ```
 
-The name is matched case-insensitively against active `Person` rows. Unknown names get a `401`. There's no OAuth, no API keys — the assumption is that only people on your local network can reach fewd.
+The name is matched case-insensitively against active `Person` rows. Unknown names get a `401`. There's no OAuth, no API keys, no per-user tokens.
+
+**Be explicit about what this is and isn't:**
+
+- **`/mcp` is LAN-only by design.** The server binds `0.0.0.0`, but the security model assumes only people on your local network can reach it. **Do not expose `fewd-server` to the public internet without putting a real auth layer (reverse proxy with mTLS, HTTP basic auth, OAuth, etc.) in front of it.** Family-name bearer alone is not safe on the open internet.
+- **Names are identifiers, not secrets.** They appear in `list_people`, `get_family_overview`, the shopping list briefs, and the meal plan. Anyone who can reach `/mcp` and knows or guesses a household member's first name can authenticate as them.
+- **Any authenticated family member can read and write anything.** There is no per-user authorization. A 9-year-old who knows a parent's name can read every recipe, schedule meals on anyone's behalf, and create new recipes. Audit logging at the database layer is also not in place — writes are not attributed to the authenticator.
+
+If your deployment ever leaves the household LAN, replace this with real auth before turning the server on. Two follow-ups are tracked in the project's beads tracker (inspect with `bd show <id>` from the project root): `fewd-2y6.6` for per-person opaque tokens and `fewd-2y6.8` for a typed `AuthenticatedPerson` extractor that forces every write tool to consult the authenticator at compile time.
 
 ### Enable in Claude Desktop
 
