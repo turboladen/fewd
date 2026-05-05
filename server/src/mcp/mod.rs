@@ -7,6 +7,37 @@
 //! active [`Person`](crate::entities::person::Model) row (case-insensitive),
 //! and the resolved row rides the request into tool handlers as an
 //! [`AuthenticatedPerson`] extension.
+//!
+//! # Threat model
+//!
+//! Three facts every contributor extending this surface should be holding
+//! explicitly. The README has the user-facing version of the same; this is
+//! the contributor-facing version, kept here so it surfaces during code
+//! review of any change to `/mcp`.
+//!
+//! 1. **`/mcp` is LAN-only by design.** The server binds `0.0.0.0` but the
+//!    security model assumes only people on the operator's LAN can reach
+//!    the port. Do not add features that assume internet exposure
+//!    (rate-limited public APIs, shareable tokens) without first replacing
+//!    this auth scheme. Issue `fewd-2y6.6` tracks per-person opaque
+//!    tokens for that follow-up.
+//!
+//! 2. **The bearer "token" has no entropy.** Family member names appear in
+//!    `list_people`, `get_family_overview`, shopping briefs, and meal
+//!    plans — they are identifiers, not secrets. A network observer or
+//!    anyone with access to a meal-plan summary learns every valid token
+//!    on the server. Treat the bearer like a username pickbox, not a
+//!    credential.
+//!
+//! 3. **Any authenticated family member can do anything.** There is no
+//!    per-user authorization. [`AuthenticatedPerson`] is plumbed through
+//!    the request extensions and made visible to tool handlers, but only
+//!    `whoami` reads it today. `create_meal` does not check that the
+//!    serving's person matches the caller; `create_recipe` does not
+//!    record the author. Adding a "self-only" or role-based rule means
+//!    enforcing it at every write site, not just one. Issue `fewd-2y6.8`
+//!    tracks promoting `AuthenticatedPerson` to a typed extractor so the
+//!    type system catches missed sites.
 
 use std::sync::Arc;
 use std::time::Duration;
