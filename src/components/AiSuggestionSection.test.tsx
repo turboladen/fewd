@@ -1,7 +1,16 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// Mock hooks
+// Mock hooks. `aiMockState` is hoisted so the mock factory can read live
+// values from it; tests update it before render() to drive the component
+// into a particular mutation state (e.g. data populated for the
+// SuggestionCard render path).
+const aiMockState = vi.hoisted(() => ({
+  data: null as unknown[] | null,
+  isPending: false,
+  error: null as unknown,
+  progress: null as unknown,
+}))
 const mockUseSetting = vi.fn()
 const mockAiMutate = vi.fn()
 const mockCreateMutate = vi.fn()
@@ -13,10 +22,10 @@ vi.mock('../hooks/useSettings', () => ({
 vi.mock('../hooks/useSuggestions', () => ({
   useAiSuggestMeals: () => ({
     mutate: mockAiMutate,
-    isPending: false,
-    error: null,
-    data: null,
-    progress: null,
+    isPending: aiMockState.isPending,
+    error: aiMockState.error,
+    data: aiMockState.data,
+    progress: aiMockState.progress,
     reset: vi.fn(),
   }),
 }))
@@ -68,6 +77,10 @@ const defaultProps = {
 describe('AiSuggestionSection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    aiMockState.data = null
+    aiMockState.isPending = false
+    aiMockState.error = null
+    aiMockState.progress = null
     mockUseSetting.mockReturnValue({ data: 'sk-ant-test-key', isLoading: false })
   })
 
@@ -136,5 +149,51 @@ describe('AiSuggestionSection', () => {
     render(<AiSuggestionSection {...defaultProps} />)
     fireEvent.click(screen.getByText('Custom'))
     expect(screen.getByPlaceholderText(/Mediterranean/)).toBeInTheDocument()
+  })
+
+  it('renders or_alternative in the expanded suggestion card (regression: fewd-2y6.1)', () => {
+    // Pre-populate the mock's mutation `data` so when the component flips
+    // to the results phase, `aiMutation.data` is already non-null and the
+    // SuggestionCard list renders. Then click the card to expand it,
+    // which is when the ingredient list with or_alternative shows up.
+    aiMockState.data = [{
+      name: 'Family taco night',
+      description: 'Crowd-pleaser',
+      servings: 4,
+      instructions: 'Warm tortillas; assemble.',
+      tags: ['dinner'],
+      source: 'manual',
+      icon: null,
+      prep_time: null,
+      cook_time: null,
+      total_time: null,
+      portion_size: null,
+      notes: null,
+      nutrition_per_serving: null,
+      parent_recipe_id: null,
+      ingredients: [{
+        name: 'flour tortillas',
+        amount: { type: 'single', value: 8 },
+        unit: 'whole',
+        or_alternative: {
+          name: 'corn tortillas',
+          amount: { type: 'single', value: 10 },
+          unit: 'whole',
+        },
+      }],
+    }]
+    render(<AiSuggestionSection {...defaultProps} />)
+    fireEvent.click(screen.getByText('Generate AI Suggestions'))
+
+    // SuggestionCard is rendered but collapsed; click the card header
+    // (which contains the recipe name) to expand the ingredient list.
+    fireEvent.click(screen.getByText('Family taco night'))
+
+    // "flour tortillas" appears twice (collapsed preview + expanded list).
+    // "corn tortillas" only appears in or_alternative, so it's the
+    // single signal that proves alternative rendering survived.
+    expect(screen.getAllByText('flour tortillas').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('corn tortillas')).toBeInTheDocument()
+    expect(screen.getByText(/\bor\b/)).toBeInTheDocument()
   })
 })

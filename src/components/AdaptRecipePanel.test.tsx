@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import type { ParsedRecipe } from '../types/recipe'
+import type { CreateRecipeDto, ParsedRecipe } from '../types/recipe'
 
 // Mock the hooks
 const mockUsePeople = vi.fn()
@@ -173,5 +173,39 @@ describe('AdaptRecipePanel', () => {
   it('displays recipe title in panel header', () => {
     render(<AdaptRecipePanel {...defaultProps} />)
     expect(screen.getByText('Adapt: Grilled Chicken')).toBeInTheDocument()
+  })
+
+  it('renders or_alternative in the adapted-recipe preview (regression: fewd-2y6.1)', () => {
+    // Drive into the post-success "preview" state by intercepting the
+    // adapt mutation's onSuccess. Mirrors how AdaptRecipePanel populates
+    // its `draft` state in production: `mutate(args, { onSuccess })`.
+    render(<AdaptRecipePanel {...defaultProps} />)
+    fireEvent.click(screen.getByText('Generate Adapted Recipe'))
+    expect(mockMutate).toHaveBeenCalledOnce()
+
+    const draftWithAlt: CreateRecipeDto = {
+      name: 'Family taco night',
+      source: 'manual',
+      servings: 4,
+      instructions: 'Warm tortillas; assemble.',
+      tags: [],
+      ingredients: [{
+        name: 'flour tortillas',
+        amount: { type: 'single', value: 8 },
+        unit: 'whole',
+        or_alternative: {
+          name: 'corn tortillas',
+          amount: { type: 'single', value: 10 },
+          unit: 'whole',
+        },
+      }],
+    }
+
+    const onSuccess = mockMutate.mock.calls[0][1].onSuccess as (r: CreateRecipeDto) => void
+    act(() => onSuccess(draftWithAlt))
+
+    expect(screen.getByText('flour tortillas')).toBeInTheDocument()
+    expect(screen.getByText('corn tortillas')).toBeInTheDocument()
+    expect(screen.getByText(/\bor\b/)).toBeInTheDocument()
   })
 })
