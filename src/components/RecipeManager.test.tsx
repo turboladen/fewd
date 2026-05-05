@@ -7,7 +7,7 @@ import { installFetchMock, mockJson, resetFetchMock } from '../test/fetchMock'
 import { renderWithProviders } from '../test/renderWithProviders'
 import { installStreamMock, mockStream, resetStreamMock } from '../test/streamMock'
 import type { Recipe } from '../types/recipe'
-import { RecipeManager } from './RecipeManager'
+import { RecipeManager, ScalingPreviewAltRow } from './RecipeManager'
 
 beforeEach(() => {
   installFetchMock()
@@ -155,5 +155,36 @@ describe('RecipeManager', () => {
     // The streaming mutation doesn't invalidate itself — the component's
     // onSuccess handler calls queryClient.invalidateQueries(['recipes']).
     await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['recipes'] }))
+  })
+})
+
+describe('ScalingPreviewAltRow', () => {
+  it('walks chained or_alternative levels so deeper alts surface in the preview', async () => {
+    // The bug being pinned: an earlier version of this row hardcoded a
+    // single sub-row, so `milk or cream or water` previewed as only
+    // `milk + or cream` and the deepest level was hidden before save.
+    const { renderToStaticMarkup } = await import('react-dom/server')
+    const chained = {
+      name: 'milk',
+      amount: { type: 'single' as const, value: 1 },
+      unit: 'cup',
+      notes: undefined,
+      or_alternative: {
+        name: 'cream',
+        amount: { type: 'single' as const, value: 2 },
+        unit: 'cups',
+        notes: undefined,
+        or_alternative: {
+          name: 'water',
+          amount: { type: 'single' as const, value: 3 },
+          unit: 'cups',
+          notes: undefined,
+        },
+      },
+    }
+    const html = renderToStaticMarkup(<ScalingPreviewAltRow ingredient={chained} />)
+    expect(html).toContain('or milk')
+    expect(html).toContain('or cream')
+    expect(html).toContain('or water')
   })
 })

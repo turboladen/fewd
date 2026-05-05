@@ -337,6 +337,31 @@ export function RecipeForm({
 
 // --- Import Form ---
 
+/**
+ * Recursive sub-row for the scaling preview's `or_alternative` chain.
+ * The scaling preview keeps a column-aligned [amount w-16][unit w-12][label]
+ * grid for the primary ingredient (the amount column is editable for
+ * fractional-discrete units); each chained alt renders one matching row
+ * underneath in italic muted text. Walks `or_alternative` recursively so
+ * "milk or cream or water" surfaces all three levels — without this the
+ * deeper alts would be hidden before the user saves the scaled recipe.
+ *
+ * Exported only for unit-testing the chained-alt rendering path; the
+ * scaling-preview's parent component is the only production consumer.
+ */
+export function ScalingPreviewAltRow({ ingredient }: { ingredient: Ingredient }) {
+  return (
+    <>
+      <div className='flex gap-2 items-center text-sm text-stone-500 italic p-1'>
+        <span className='w-16 text-right'>{formatAmount(ingredient.amount)}</span>
+        <span className='w-12'>{ingredient.unit}</span>
+        <span>or {formatIngredientLabel(ingredient)}</span>
+      </div>
+      {ingredient.or_alternative && <ScalingPreviewAltRow ingredient={ingredient.or_alternative} />}
+    </>
+  )
+}
+
 function ImportRecipeForm({
   onSubmitMarkdown,
   onSubmitUrl,
@@ -685,15 +710,7 @@ export function ScaleRecipePanel({
                     because the fractional-rounding workflow only applies to
                     primary ingredients. */
                 }
-                {ing.or_alternative && (
-                  <div className='flex gap-2 items-center text-sm text-stone-500 italic p-1'>
-                    <span className='w-16 text-right'>
-                      {formatAmount(ing.or_alternative.amount)}
-                    </span>
-                    <span className='w-12'>{ing.or_alternative.unit}</span>
-                    <span>or {formatIngredientLabel(ing.or_alternative)}</span>
-                  </div>
-                )}
+                {ing.or_alternative && <ScalingPreviewAltRow ingredient={ing.or_alternative} />}
               </div>
             ))}
           </div>
