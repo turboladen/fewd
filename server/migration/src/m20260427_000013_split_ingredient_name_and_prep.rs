@@ -1,7 +1,7 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::{DatabaseBackend, Statement};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::ingredient_splitter::split_name_and_prep;
 
@@ -88,11 +88,14 @@ struct Ingredient {
     unit: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     notes: Option<String>,
-    /// Pass-through. Added to the runtime DTO in fewd-4nb (post-m13).
-    /// Round-trip as opaque JSON so re-runs of this migration on a DB that
-    /// already has `or_alternative` populated don't silently drop the field.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    or_alternative: Option<Value>,
+    /// Generic unknown-fields passthrough. Captures anything the runtime
+    /// IngredientDto grows AFTER this migration shipped (fewd-4nb's
+    /// `or_alternative` is the first such field). Without this, every new
+    /// optional DTO field would be silently erased on rewrite — see
+    /// fewd-2y6.2. The migration body never reads `extra`; serde just
+    /// round-trips it through deserialize/serialize.
+    #[serde(flatten)]
+    extra: Map<String, Value>,
 }
 
 /// Returns `Ok(Some(new_json))` if any ingredient was rewritten,
@@ -332,13 +335,17 @@ mod tests {
 
     /// Regression: fewd-2y6.2. The runtime DTO grew an `or_alternative`
     /// field after this migration shipped (fewd-4nb). The frozen struct
-    /// must round-trip the field as opaque JSON so a re-run on a DB that
-    /// already has alternatives populated doesn't drop them on rewrite.
+    /// uses `#[serde(flatten)] extra: Map<String, Value>` to round-trip
+    /// every unknown field generically — not just `or_alternative` — so
+    /// the next DTO field addition doesn't reintroduce the same bug.
+    ///
+    /// Test fixture deliberately includes a `future_field` alongside
+    /// `or_alternative` to pin that contract.
     #[tokio::test]
-    async fn preserves_or_alternative_through_rewrite() {
+    async fn preserves_unknown_fields_through_rewrite() {
         let db = legacy_db().await;
-        // Comma name forces a rewrite path; or_alternative rides along
-        // and must survive the JSON round-trip.
+        // Comma name forces a rewrite path; or_alternative + an arbitrary
+        // future field both ride along and must survive the JSON round-trip.
         let json = r#"[{
             "name":"flour tortillas, warmed",
             "amount":{"type":"single","value":8.0},
@@ -349,7 +356,8 @@ mod tests {
                 "amount":{"type":"single","value":10.0},
                 "unit":"whole",
                 "notes":null
-            }
+            },
+            "future_field":"hypothetical post-m13 DTO field"
         }]"#;
         insert(&db, "r1", json).await;
 
@@ -369,12 +377,18 @@ mod tests {
         let raw: String = row.try_get("", "ingredients").unwrap();
         let parsed: Value = serde_json::from_str(&raw).unwrap();
 
+        // The primary's name got split — proves the rewrite ran, not a no-op.
+        assert_eq!(parsed[0]["name"], "flour tortillas");
+        assert_eq!(parsed[0]["prep"], "warmed");
+
+        // Both the named-but-not-declared field and a fully unknown field
+        // round-tripped cleanly via #[serde(flatten)] extra.
         let alt = &parsed[0]["or_alternative"];
         assert!(alt.is_object(), "or_alternative must round-trip; got {raw}");
         assert_eq!(alt["name"], "corn tortillas");
-
-        // The primary's name still got split as expected.
-        assert_eq!(parsed[0]["name"], "flour tortillas");
-        assert_eq!(parsed[0]["prep"], "warmed");
+        assert_eq!(
+            parsed[0]["future_field"], "hypothetical post-m13 DTO field",
+            "arbitrary unknown fields must round-trip; got {raw}"
+        );
     }
 }
