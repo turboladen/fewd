@@ -47,19 +47,17 @@ describe('IngredientInput', () => {
 
   it('removes a row when its trash button is clicked', () => {
     const onChange = vi.fn()
-    render(
+    const { container } = render(
       <IngredientInput
         value={[single(1, 'a'), single(2, 'b'), single(3, 'c')]}
         onChange={onChange}
       />,
     )
 
-    // Each row has a trash button with type='button' + btn-danger class; the
-    // "+ Add ingredient" trigger also renders as a button, so filter it out.
-    const addBtn = screen.getByRole('button', { name: /add ingredient/i })
-    const removeButtons = screen
-      .getAllByRole('button')
-      .filter((b) => b !== addBtn && b.textContent !== 'Exact' && b.textContent !== 'Range')
+    // Each row's trash button is the only `btn-danger` element on that row.
+    // Filtering by class avoids tangling with the "+ Add ingredient",
+    // "+ Add alternative", and Exact/Range toggle buttons.
+    const removeButtons = container.querySelectorAll('button.btn-danger')
     fireEvent.click(removeButtons[1])
 
     expect(onChange).toHaveBeenCalledWith([single(1, 'a'), single(3, 'c')])
@@ -158,5 +156,47 @@ describe('IngredientRow', () => {
     expect(onChange).toHaveBeenCalledWith({ ...original, name: 'sugar' })
     // original reference not mutated
     expect(original.name).toBe('flour')
+  })
+
+  it('clicking "+ Add alternative" attaches a default Ingredient to or_alternative', () => {
+    const onChange = vi.fn()
+    const original = single(8, 'flour tortillas', 'whole')
+    render(<IngredientRow ingredient={original} onChange={onChange} onRemove={() => {}} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /add alternative/i }))
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...original,
+      or_alternative: {
+        name: '',
+        prep: undefined,
+        amount: { type: 'single', value: 1 },
+        unit: '',
+        notes: undefined,
+      },
+    })
+  })
+
+  it('removing the alternative row clears the parent or_alternative without touching primary', () => {
+    const onChange = vi.fn()
+    const original = {
+      ...single(8, 'flour tortillas', 'whole'),
+      or_alternative: single(10, 'corn tortillas', 'whole'),
+    }
+    const { container } = render(
+      <IngredientRow ingredient={original} onChange={onChange} onRemove={() => {}} />,
+    )
+
+    // Two btn-danger buttons render in the recursive tree — primary first,
+    // then nested alt. Clicking the alt's button must clear the parent's
+    // or_alternative, not remove the primary.
+    const trashButtons = container.querySelectorAll('button.btn-danger')
+    expect(trashButtons).toHaveLength(2)
+    fireEvent.click(trashButtons[1])
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...single(8, 'flour tortillas', 'whole'),
+      or_alternative: undefined,
+    })
   })
 })

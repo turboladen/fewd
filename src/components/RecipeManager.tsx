@@ -39,6 +39,7 @@ import {
   IconTrash,
 } from './Icon'
 import { IngredientInput } from './IngredientInput'
+import { IngredientLineText } from './IngredientLineText'
 import { NumberInput } from './NumberInput'
 import { StarRating } from './StarRating'
 import { TagInput } from './TagInput'
@@ -642,35 +643,57 @@ export function ScaleRecipePanel({
 
           <div className='space-y-1 mb-4'>
             {editedIngredients.map((ing, i) => (
-              <div
-                key={i}
-                className={`flex gap-2 items-center text-sm ${
-                  flaggedIndices.has(i) ? 'bg-amber-50 border border-amber-200 rounded p-1' : 'p-1'
-                }`}
-              >
-                {flaggedIndices.has(i)
-                  ? (
-                    <input
-                      type='number'
-                      step='any'
-                      value={ing.amount.type === 'single'
-                        ? ing.amount.value
-                        : (ing.amount as { type: 'range'; min: number; max: number }).min}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0
-                        handleIngredientChange(i, {
-                          ...ing,
-                          amount: { type: 'single', value: val },
-                        })
-                      }}
-                      className='input-sm w-16 border-amber-300'
-                    />
-                  )
-                  : <span className='font-medium w-16 text-right'>{formatAmount(ing.amount)}</span>}
-                <span className='text-stone-500 w-12'>{ing.unit}</span>
-                <span>{formatIngredientLabel(ing)}</span>
-                {flaggedIndices.has(i) && (
-                  <span className='text-amber-600 text-xs ml-auto'>fractional</span>
+              <div key={i}>
+                <div
+                  className={`flex gap-2 items-center text-sm ${
+                    flaggedIndices.has(i)
+                      ? 'bg-amber-50 border border-amber-200 rounded p-1'
+                      : 'p-1'
+                  }`}
+                >
+                  {flaggedIndices.has(i)
+                    ? (
+                      <input
+                        type='number'
+                        step='any'
+                        value={ing.amount.type === 'single'
+                          ? ing.amount.value
+                          : (ing.amount as { type: 'range'; min: number; max: number }).min}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value) || 0
+                          handleIngredientChange(i, {
+                            ...ing,
+                            amount: { type: 'single', value: val },
+                          })
+                        }}
+                        className='input-sm w-16 border-amber-300'
+                      />
+                    )
+                    : (
+                      <span className='font-medium w-16 text-right'>
+                        {formatAmount(ing.amount)}
+                      </span>
+                    )}
+                  <span className='text-stone-500 w-12'>{ing.unit}</span>
+                  <span>{formatIngredientLabel(ing)}</span>
+                  {flaggedIndices.has(i) && (
+                    <span className='text-amber-600 text-xs ml-auto'>fractional</span>
+                  )}
+                </div>
+                {
+                  /* Alternative shown as a static sub-row — not editable here
+                    because the fractional-rounding workflow only applies to
+                    primary ingredients. */
+                }
+                {ing.or_alternative && (
+                  <div className='flex gap-2 items-center text-sm text-stone-600 italic pl-2'>
+                    <span className='w-16 text-right'>or</span>
+                    <span className='w-12'>{ing.or_alternative.unit}</span>
+                    <span>
+                      {formatAmount(ing.or_alternative.amount)}{' '}
+                      {formatIngredientLabel(ing.or_alternative)}
+                    </span>
+                  </div>
                 )}
               </div>
             ))}
@@ -948,11 +971,7 @@ export function RecipeDetail({
               <ul className='space-y-1'>
                 {parsed.ingredients.map((ing, i) => (
                   <li key={i} className='text-sm'>
-                    <span className='font-medium'>{formatAmount(ing.amount)}</span>
-                    {ing.unit && <span className='text-stone-500'>{` ${ing.unit}`}</span>}
-                    <span>{` ${formatIngredientLabel(ing)}`}</span>
-                    {ing.notes && <span className='text-stone-400 italic'>{` (${ing.notes})`}
-                    </span>}
+                    <IngredientLineText ingredient={ing} />
                   </li>
                 ))}
               </ul>
