@@ -79,6 +79,32 @@ describe('CookingView', () => {
     expect(onExit).toHaveBeenCalledTimes(1)
   })
 
+  it('renders or_alternative ingredients as `primary or alt` in the cooking sidebar', () => {
+    // Regression for fewd-2y6.1. The pre-fix CookingView hand-rolled an
+    // inline ingredient render that never branched on or_alternative, so a
+    // recipe with "8 flour tortillas or 10 corn tortillas" silently showed
+    // only the primary while the user was actively cooking.
+    const parsed = parseRecipe(makeRecipe({
+      ingredients: JSON.stringify([
+        {
+          name: 'flour tortillas',
+          amount: { type: 'single', value: 8 },
+          unit: 'whole',
+          or_alternative: {
+            name: 'corn tortillas',
+            amount: { type: 'single', value: 10 },
+            unit: 'whole',
+          },
+        },
+      ]),
+    }))
+    renderCookingView(parsed)
+
+    expect(screen.getByText('flour tortillas')).toBeInTheDocument()
+    expect(screen.getByText('corn tortillas')).toBeInTheDocument()
+    expect(screen.getByText(/\bor\b/)).toBeInTheDocument()
+  })
+
   it('renders enhancedInstructions in place of parsed.instructions when provided', () => {
     const parsed = parseRecipe(makeRecipe({
       instructions: 'Original step.',

@@ -4,9 +4,9 @@ import { useAdaptRecipe, useCreateRecipe } from '../hooks/useRecipes'
 import { useSetting } from '../hooks/useSettings'
 import { parsePerson } from '../types/person'
 import type { CreateRecipeDto, ParsedRecipe, PersonAdaptOptions } from '../types/recipe'
-import { formatAmount, formatIngredientLabel } from '../types/recipe'
 import { DraftReview } from './DraftReview'
 import { IconCheck } from './Icon'
+import { IngredientLineText } from './IngredientLineText'
 import { FieldToggle, PersonSummary } from './PersonFieldToggles'
 
 interface AdaptRecipePanelProps {
@@ -301,9 +301,7 @@ function RecipePreview({ draft }: { draft: CreateRecipeDto }) {
         <ul className='text-sm space-y-0.5'>
           {draft.ingredients.map((ing, i) => (
             <li key={i} className='text-stone-700'>
-              <span className='font-medium'>{formatAmount(ing.amount)}</span>
-              {ing.unit && ` ${ing.unit}`} {formatIngredientLabel(ing)}
-              {ing.notes && <span className='text-stone-400'>({ing.notes})</span>}
+              <IngredientLineText ingredient={ing} />
             </li>
           ))}
         </ul>
