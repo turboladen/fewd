@@ -1,6 +1,6 @@
 import type { DrinkRecipe, ParsedDrinkRecipe } from '../types/drinkRecipe'
-import { formatAmount, formatIngredientLabel } from '../types/recipe'
 import { IconEdit, IconStar, IconStarFilled, IconTrash } from './Icon'
+import { IngredientLineText } from './IngredientLineText'
 import { StarRating } from './StarRating'
 
 interface Props {
@@ -74,8 +74,7 @@ export function DrinkRecipeDetail({
           <ul className='text-sm text-stone-600 space-y-0.5'>
             {parsed.ingredients.map((ing, i) => (
               <li key={i}>
-                {formatAmount(ing.amount)} {ing.unit} {formatIngredientLabel(ing)}
-                {ing.notes && <span className='text-stone-400'>({ing.notes})</span>}
+                <IngredientLineText ingredient={ing} />
               </li>
             ))}
           </ul>
