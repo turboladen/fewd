@@ -32,10 +32,17 @@ build-arm64:
     cd server && cargo build --release --target {{arm64_target}}
 
 # Deploy to a remote Linux ARM64 host (e.g., just deploy user@192.168.1.50)
+#
+# Pushes the unit to BOTH /opt/fewd/fewd.service (the staging copy
+# `just setup-remote` reads on first install) and /etc/systemd/system/
+# (where systemd actually loads it from on every reload). Without the
+# /etc copy a deploy never propagates unit-file edits to the live
+# service — fewd-82e was a 403 regression caused by exactly this gap.
 deploy host: build-arm64
     ssh {{host}} "sudo systemctl stop fewd || true"
     cat target/{{arm64_target}}/release/fewd-server | ssh {{host}} "sudo tee /opt/fewd/fewd-server > /dev/null && sudo chmod +x /opt/fewd/fewd-server"
     cat deploy/fewd.service | ssh {{host}} "sudo tee /opt/fewd/fewd.service > /dev/null"
+    cat deploy/fewd.service | ssh {{host}} "sudo tee /etc/systemd/system/fewd.service > /dev/null"
     ssh {{host}} "sudo chown -R fewd:fewd /opt/fewd && sudo systemctl daemon-reload && sudo systemctl start fewd"
     @echo ""
     @echo "✅ Deployed to {{host}}. Verify at http://$(echo {{host}} | cut -d@ -f2):3000"
