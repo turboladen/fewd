@@ -146,7 +146,7 @@ The name is matched case-insensitively against active `Person` rows. Unknown nam
 - **Names are identifiers, not secrets.** They appear in `list_people`, `get_family_overview`, the shopping list briefs, and the meal plan. Anyone who can reach `/mcp` and knows or guesses a household member's first name can authenticate as them.
 - **Any authenticated family member can read and write anything.** There is no per-user authorization. A 9-year-old who knows a parent's name can read every recipe, schedule meals on anyone's behalf, and create new recipes. Audit logging at the database layer is also not in place — writes are not attributed to the authenticator.
 
-If your deployment ever leaves the household LAN, replace this with real auth before turning the server on. Issue [`fewd-2y6.6`](https://github.com/turboladen/fewd/issues) tracks per-person opaque tokens as a follow-up.
+If your deployment ever leaves the household LAN, replace this with real auth before turning the server on. Two follow-ups are tracked in the project's beads tracker (inspect with `bd show <id>` from the project root): `fewd-2y6.6` for per-person opaque tokens and `fewd-2y6.8` for a typed `AuthenticatedPerson` extractor that forces every write tool to consult the authenticator at compile time.
 
 ### Enable in Claude Desktop
 
