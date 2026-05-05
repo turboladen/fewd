@@ -462,6 +462,18 @@ mod tests {
         let raw: String = row.try_get("", "ingredients").unwrap();
         let parsed: Value = serde_json::from_str(&raw).unwrap();
 
+        // Verify the size-paren peel actually executed — without these
+        // assertions the test would still pass if the migration silently
+        // no-op'd, since the input already contains or_alternative.
+        assert_eq!(
+            parsed[0]["name"], "crushed tomatoes",
+            "size-paren peel should have stripped the leading paren from name"
+        );
+        assert_eq!(
+            parsed[0]["notes"], "28 oz each",
+            "size-paren peel should have moved the size info into notes"
+        );
+
         let alt = &parsed[0]["or_alternative"];
         assert!(alt.is_object(), "or_alternative must round-trip; got {raw}");
         assert_eq!(alt["name"], "fresh Roma tomatoes");

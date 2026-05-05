@@ -832,6 +832,22 @@ mod tests {
         let raw: String = row.try_get("", "ingredients").unwrap();
         let parsed: Value = serde_json::from_str(&raw).unwrap();
 
+        // Verify the pattern-A rewrite actually executed — without these
+        // assertions the test would still pass if the migration silently
+        // no-op'd, since the input already contains or_alternative.
+        assert_eq!(
+            parsed[0]["name"], "salt",
+            "pattern A should have peeled name from comma'd unit"
+        );
+        assert_eq!(
+            parsed[0]["prep"], "to taste",
+            "pattern A should have moved 'to taste' into prep"
+        );
+        assert_eq!(
+            parsed[0]["unit"], "whole",
+            "pattern A should have replaced the comma'd unit with 'whole'"
+        );
+
         let alt = &parsed[0]["or_alternative"];
         assert!(alt.is_object(), "or_alternative must round-trip; got {raw}");
         assert_eq!(alt["name"], "kosher salt");
