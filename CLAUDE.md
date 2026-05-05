@@ -322,7 +322,7 @@ Default for ordinary runtime/route/service/handler changes is **just `cargo test
 - sea-orm-migration helpers (`has_column`, `has_index`, etc.)
 - Cargo features in any workspace member
 
-…also run `cargo build --release` AND smoke-test the binary against a non-empty, pre-existing DB before declaring the change done. Until `fewd-ga2` (CI smoke test for migration drift) lands, the dietpi deploy is the fastest production-realistic verification.
+…also run `cargo build --release` AND smoke-test the binary against a non-empty, pre-existing DB before declaring the change done. CI runs `scripts/migration-smoke-test.sh` against pinned schema snapshots (see `.github/workflows/ci.yml` and `just smoke-test` to run it locally) — that's the production-realistic verification; reach for it before pushing rather than waiting for the dietpi deploy.
 
 ### Test Commands
 

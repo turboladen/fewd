@@ -187,7 +187,7 @@ Fully quit and relaunch Claude Desktop. You should see fewd's tools in the MCP i
 
 **Troubleshooting `Failed to spawn process: No such file or directory`** — Claude Desktop couldn't find `bunx` in its PATH. Run `which bunx` in your terminal; if it's somewhere Claude Desktop isn't searching, replace `"command": "bunx"` with the absolute path (e.g. `"command": "/Users/you/.bun/bin/bunx"`).
 
-**Troubleshooting `Forbidden: Host header is not allowed` (HTTP 403)** — the MCP transport ships with DNS-rebinding protection that allowlists the `Host` header, defaulting to `localhost`/`127.0.0.1`/`::1` only. When Claude Desktop reaches the server at, say, `http://dietpi.local:3000/mcp`, the `Host` header is `dietpi.local:3000` and the server rejects it. Set `MCP_ALLOWED_HOSTS=dietpi.local` (or whatever hostname your client uses) on the `fewd-server` process — for systemd deployments, that's an `Environment=` line in `deploy/fewd.service`. Multiple hosts go comma-separated; bare hostnames match any port, `host:port` matches one port.
+**Troubleshooting `Forbidden: Host header is not allowed` (HTTP 403)** — the MCP transport ships with DNS-rebinding protection that allowlists the `Host` header, defaulting to `localhost`/`127.0.0.1`/`::1` only. When Claude Desktop reaches the server at, say, `http://dietpi.local:3000/mcp`, the `Host` header is `dietpi.local:3000` and the server rejects it. Set `MCP_ALLOWED_HOSTS` to whatever address the client uses — that may be an mDNS/DNS name (`dietpi.local`, `homeserver`) **or** a raw IP literal (`192.168.1.42`, `[fe80::1]`). For systemd deployments that's an `Environment=` line in `deploy/fewd.service`. Multiple entries go comma-separated; a bare entry matches any port, `entry:port` matches one port.
 
 ### Scope of v1
 
