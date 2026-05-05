@@ -686,13 +686,12 @@ export function ScaleRecipePanel({
                     primary ingredients. */
                 }
                 {ing.or_alternative && (
-                  <div className='flex gap-2 items-center text-sm text-stone-600 italic pl-2'>
-                    <span className='w-16 text-right'>or</span>
-                    <span className='w-12'>{ing.or_alternative.unit}</span>
-                    <span>
-                      {formatAmount(ing.or_alternative.amount)}{' '}
-                      {formatIngredientLabel(ing.or_alternative)}
+                  <div className='flex gap-2 items-center text-sm text-stone-500 italic p-1'>
+                    <span className='w-16 text-right'>
+                      {formatAmount(ing.or_alternative.amount)}
                     </span>
+                    <span className='w-12'>{ing.or_alternative.unit}</span>
+                    <span>or {formatIngredientLabel(ing.or_alternative)}</span>
                   </div>
                 )}
               </div>

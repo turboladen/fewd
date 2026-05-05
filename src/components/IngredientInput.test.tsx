@@ -199,4 +199,38 @@ describe('IngredientRow', () => {
       or_alternative: undefined,
     })
   })
+
+  it('adding an alt at depth 2 attaches at the leaf, not at depth 1', () => {
+    // The recursion is the load-bearing piece — at depth 2 the inner
+    // IngredientRow's `updateAlternative` closes over depth-1's `ingredient`
+    // prop, so a stale-closure bug would surface as "depth 2 add overwrites
+    // depth 1's alt." Pin the correct nested-update behavior.
+    const onChange = vi.fn()
+    const original = {
+      ...single(8, 'flour tortillas', 'whole'),
+      or_alternative: single(10, 'corn tortillas', 'whole'),
+    }
+    render(<IngredientRow ingredient={original} onChange={onChange} onRemove={() => {}} />)
+
+    // Two "+ Add alternative" buttons render — primary's (which would
+    // overwrite the existing alt at depth 1) and the alt's (which adds at
+    // depth 2). Click the second one.
+    const addAltButtons = screen.getAllByRole('button', { name: /add alternative/i })
+    expect(addAltButtons).toHaveLength(1) // only the alt-row's, since primary already has an alt
+    fireEvent.click(addAltButtons[0])
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...single(8, 'flour tortillas', 'whole'),
+      or_alternative: {
+        ...single(10, 'corn tortillas', 'whole'),
+        or_alternative: {
+          name: '',
+          prep: undefined,
+          amount: { type: 'single', value: 1 },
+          unit: '',
+          notes: undefined,
+        },
+      },
+    })
+  })
 })
