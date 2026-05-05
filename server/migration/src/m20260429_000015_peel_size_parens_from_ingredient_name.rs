@@ -1,7 +1,7 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::{DatabaseBackend, Statement};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::paren_notes::peel_size_paren;
 
@@ -89,6 +89,14 @@ struct Ingredient {
     unit: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     notes: Option<String>,
+    /// Generic unknown-fields passthrough. Captures anything the runtime
+    /// IngredientDto grows AFTER this migration shipped (fewd-4nb's
+    /// `or_alternative` is the first such field). Without this, every new
+    /// optional DTO field would be silently erased on rewrite — see
+    /// fewd-2y6.2. The migration body never reads `extra`; serde just
+    /// round-trips it through deserialize/serialize.
+    #[serde(flatten)]
+    extra: Map<String, Value>,
 }
 
 fn rewrite_ingredients_json(raw: &str) -> Result<Option<String>, serde_json::Error> {
@@ -417,5 +425,68 @@ mod tests {
         assert_eq!(after[0].amount, single(2.0));
         assert_eq!(after[0].notes.as_deref(), Some("28 oz each"));
         assert_eq!(after[0].prep, None);
+    }
+
+    /// Regression: fewd-2y6.2. The frozen struct uses
+    /// `#[serde(flatten)] extra: Map<String, Value>` to round-trip every
+    /// unknown field generically. fewd-4nb's `or_alternative` was the
+    /// first such field; the test fixture also includes a `future_field`
+    /// to pin the generic contract for the next addition.
+    #[tokio::test]
+    async fn preserves_unknown_fields_through_rewrite() {
+        let db = legacy_db().await;
+        // Mid-string size parens force a rewrite path; or_alternative +
+        // a fully-unknown field both ride along and must survive.
+        let json = r#"[{
+            "name":"(28 oz each) crushed tomatoes",
+            "amount":{"type":"single","value":2.0},
+            "unit":"cans",
+            "notes":null,
+            "or_alternative":{
+                "name":"fresh Roma tomatoes",
+                "amount":{"type":"single","value":3.0},
+                "unit":"lb",
+                "notes":null
+            },
+            "future_field":"hypothetical post-m15 DTO field"
+        }]"#;
+        insert(&db, "r1", json).await;
+
+        Migration.up(&SchemaManager::new(&db)).await.unwrap();
+
+        // Read raw column so we assert on stored bytes, not a re-parse.
+        let row = db
+            .query_one(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                "SELECT ingredients FROM recipes WHERE id = ?".to_string(),
+                ["r1".into()],
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        let raw: String = row.try_get("", "ingredients").unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+
+        // Verify the size-paren peel actually executed — without these
+        // assertions the test would still pass if the migration silently
+        // no-op'd, since the input already contains the unknown fields.
+        assert_eq!(
+            parsed[0]["name"], "crushed tomatoes",
+            "size-paren peel should have stripped the leading paren from name"
+        );
+        assert_eq!(
+            parsed[0]["notes"], "28 oz each",
+            "size-paren peel should have moved the size info into notes"
+        );
+
+        // Both the named-but-not-declared field and a fully unknown field
+        // round-tripped cleanly via #[serde(flatten)] extra.
+        let alt = &parsed[0]["or_alternative"];
+        assert!(alt.is_object(), "or_alternative must round-trip; got {raw}");
+        assert_eq!(alt["name"], "fresh Roma tomatoes");
+        assert_eq!(
+            parsed[0]["future_field"], "hypothetical post-m15 DTO field",
+            "arbitrary unknown fields must round-trip; got {raw}"
+        );
     }
 }

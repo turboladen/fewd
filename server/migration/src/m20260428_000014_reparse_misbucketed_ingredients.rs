@@ -1,7 +1,7 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::{DatabaseBackend, Statement};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::ingredient_amount::{is_known_unit, try_parse_amount_json};
 use crate::ingredient_splitter::split_name_and_prep;
@@ -111,6 +111,14 @@ struct Ingredient {
     unit: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     notes: Option<String>,
+    /// Generic unknown-fields passthrough. Captures anything the runtime
+    /// IngredientDto grows AFTER this migration shipped (fewd-4nb's
+    /// `or_alternative` is the first such field). Without this, every new
+    /// optional DTO field would be silently erased on rewrite — see
+    /// fewd-2y6.2. The migration body never reads `extra`; serde just
+    /// round-trips it through deserialize/serialize.
+    #[serde(flatten)]
+    extra: Map<String, Value>,
 }
 
 fn rewrite_ingredients_json(raw: &str) -> Result<Option<String>, serde_json::Error> {
@@ -787,5 +795,73 @@ mod tests {
         assert!(!is_failed_parse(&single(1.0), "whole"));
         assert!(!is_failed_parse(&single(2.0), "to taste"));
         assert!(!is_failed_parse(&range(1.0, 2.0), "to taste"));
+    }
+
+    /// Regression: fewd-2y6.2. The frozen struct uses
+    /// `#[serde(flatten)] extra: Map<String, Value>` to round-trip every
+    /// unknown field generically. fewd-4nb's `or_alternative` was the
+    /// first such field; the test fixture also includes a `future_field`
+    /// to pin the generic contract for the next addition.
+    #[tokio::test]
+    async fn preserves_unknown_fields_through_rewrite() {
+        let db = legacy_db().await;
+        // Pattern-A misbucket (name='to taste', unit='salt,') forces a
+        // rewrite path; or_alternative + a fully-unknown field both ride
+        // along and must survive.
+        let json = r#"[{
+            "name":"to taste",
+            "amount":{"type":"single","value":1.0},
+            "unit":"salt,",
+            "notes":null,
+            "or_alternative":{
+                "name":"kosher salt",
+                "amount":{"type":"single","value":1.0},
+                "unit":"tsp",
+                "notes":null
+            },
+            "future_field":"hypothetical post-m14 DTO field"
+        }]"#;
+        insert(&db, "r1", json).await;
+
+        Migration.up(&SchemaManager::new(&db)).await.unwrap();
+
+        // Read raw column so we assert on stored bytes, not a re-parse.
+        let row = db
+            .query_one(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                "SELECT ingredients FROM recipes WHERE id = ?".to_string(),
+                ["r1".into()],
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        let raw: String = row.try_get("", "ingredients").unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+
+        // Verify the pattern-A rewrite actually executed — without these
+        // assertions the test would still pass if the migration silently
+        // no-op'd, since the input already contains the unknown fields.
+        assert_eq!(
+            parsed[0]["name"], "salt",
+            "pattern A should have peeled name from comma'd unit"
+        );
+        assert_eq!(
+            parsed[0]["prep"], "to taste",
+            "pattern A should have moved 'to taste' into prep"
+        );
+        assert_eq!(
+            parsed[0]["unit"], "whole",
+            "pattern A should have replaced the comma'd unit with 'whole'"
+        );
+
+        // Both the named-but-not-declared field and a fully unknown field
+        // round-tripped cleanly via #[serde(flatten)] extra.
+        let alt = &parsed[0]["or_alternative"];
+        assert!(alt.is_object(), "or_alternative must round-trip; got {raw}");
+        assert_eq!(alt["name"], "kosher salt");
+        assert_eq!(
+            parsed[0]["future_field"], "hypothetical post-m14 DTO field",
+            "arbitrary unknown fields must round-trip; got {raw}"
+        );
     }
 }
