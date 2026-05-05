@@ -94,15 +94,47 @@ pub fn router(db: DatabaseConnection) -> Router {
     let mut session_manager = LocalSessionManager::default();
     session_manager.session_config.keep_alive = Some(Duration::from_secs(60 * 60 * 24 * 7));
 
+    let config = StreamableHttpServerConfig::default().with_allowed_hosts(merge_allowed_hosts(
+        std::env::var("MCP_ALLOWED_HOSTS").ok().as_deref(),
+    ));
+
     let streamable = StreamableHttpService::new(
         move || Ok(FewdMcp::new(handler_db.clone())),
         Arc::new(session_manager),
-        StreamableHttpServerConfig::default(),
+        config,
     );
 
     Router::new()
         .fallback_service(streamable)
         .layer(middleware::from_fn_with_state(db, require_family_bearer))
+}
+
+/// Build the MCP host allowlist by appending operator-supplied hostnames from
+/// `MCP_ALLOWED_HOSTS` to rmcp's localhost defaults.
+///
+/// rmcp's `StreamableHttpService` rejects requests whose `Host` header isn't
+/// on this list (DNS-rebinding defense, on by default since rmcp 1.4). The
+/// crate's own default — `localhost`, `127.0.0.1`, `::1` — silently 403s any
+/// LAN hostname like `dietpi.local`, so a deploy bound to `0.0.0.0` becomes
+/// unreachable from other machines until the operator opts in.
+///
+/// Env-var format: comma-separated, e.g. `MCP_ALLOWED_HOSTS=dietpi.local,fewd.lan:3000`.
+/// Per rmcp matching rules, an entry without a port matches any port; an
+/// entry with a port matches only that port.
+fn merge_allowed_hosts(env_value: Option<&str>) -> Vec<String> {
+    let mut hosts: Vec<String> = vec!["localhost".into(), "127.0.0.1".into(), "::1".into()];
+
+    if let Some(raw) = env_value {
+        for entry in raw.split(',') {
+            let trimmed = entry.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            hosts.push(trimmed.to_string());
+        }
+    }
+
+    hosts
 }
 
 /// Resolve `Authorization: Bearer <name>` to an active `Person`.
@@ -150,4 +182,58 @@ fn error_response(status: StatusCode, message: &str) -> Response {
         json!({ "error": message }).to_string(),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_allowed_hosts;
+
+    fn defaults() -> Vec<String> {
+        vec!["localhost".into(), "127.0.0.1".into(), "::1".into()]
+    }
+
+    #[test]
+    fn unset_env_keeps_localhost_defaults() {
+        assert_eq!(merge_allowed_hosts(None), defaults());
+    }
+
+    #[test]
+    fn empty_env_keeps_localhost_defaults() {
+        assert_eq!(merge_allowed_hosts(Some("")), defaults());
+    }
+
+    #[test]
+    fn whitespace_only_env_keeps_localhost_defaults() {
+        assert_eq!(merge_allowed_hosts(Some("   ,  , ")), defaults());
+    }
+
+    #[test]
+    fn single_host_appends_to_defaults() {
+        let mut expected = defaults();
+        expected.push("dietpi.local".into());
+        assert_eq!(merge_allowed_hosts(Some("dietpi.local")), expected);
+    }
+
+    #[test]
+    fn comma_separated_hosts_all_appended_in_order() {
+        let mut expected = defaults();
+        expected.push("dietpi.local".into());
+        expected.push("fewd.lan:3000".into());
+        expected.push("192.168.1.42".into());
+        assert_eq!(
+            merge_allowed_hosts(Some("dietpi.local,fewd.lan:3000,192.168.1.42")),
+            expected,
+        );
+    }
+
+    #[test]
+    fn entries_are_trimmed_and_blanks_skipped() {
+        let mut expected = defaults();
+        expected.push("dietpi.local".into());
+        expected.push("fewd.lan".into());
+        assert_eq!(
+            merge_allowed_hosts(Some("  dietpi.local , , fewd.lan  ,  ")),
+            expected,
+        );
+    }
 }

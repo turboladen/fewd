@@ -9,6 +9,7 @@ Group=fewd
 ExecStart=/opt/fewd/fewd-server
 Environment="DATABASE_PATH=/opt/fewd/data/fewd.db"
 Environment="PORT=3000"
+Environment="MCP_ALLOWED_HOSTS=dietpi.local"
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

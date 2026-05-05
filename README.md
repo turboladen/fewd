@@ -56,10 +56,11 @@ The binary lands at `server/target/release/fewd-server`.
 DATABASE_PATH=/path/to/fewd.db PORT=3000 ./fewd-server
 ```
 
-| Variable        | Default          | Description                      |
-| --------------- | ---------------- | -------------------------------- |
-| `DATABASE_PATH` | `./data/fewd.db` | Path to the SQLite database file |
-| `PORT`          | `3000`           | HTTP port to listen on           |
+| Variable            | Default          | Description                                                                                                                                                         |
+| ------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_PATH`     | `./data/fewd.db` | Path to the SQLite database file                                                                                                                                    |
+| `PORT`              | `3000`           | HTTP port to listen on                                                                                                                                              |
+| `MCP_ALLOWED_HOSTS` | _(unset)_        | Comma-separated extra hostnames allowed in the MCP `Host` header — set this when reaching `/mcp` from anywhere other than localhost. See [MCP Server](#mcp-server). |
 
 The database and its parent directory are created automatically on first run.
 
@@ -185,6 +186,8 @@ Claude Desktop's settings → Developer → Edit Config opens `claude_desktop_co
 Fully quit and relaunch Claude Desktop. You should see fewd's tools in the MCP indicator. Call `whoami` first to confirm the bearer resolves correctly.
 
 **Troubleshooting `Failed to spawn process: No such file or directory`** — Claude Desktop couldn't find `bunx` in its PATH. Run `which bunx` in your terminal; if it's somewhere Claude Desktop isn't searching, replace `"command": "bunx"` with the absolute path (e.g. `"command": "/Users/you/.bun/bin/bunx"`).
+
+**Troubleshooting `Forbidden: Host header is not allowed` (HTTP 403)** — the MCP transport ships with DNS-rebinding protection that allowlists the `Host` header, defaulting to `localhost`/`127.0.0.1`/`::1` only. When Claude Desktop reaches the server at, say, `http://dietpi.local:3000/mcp`, the `Host` header is `dietpi.local:3000` and the server rejects it. Set `MCP_ALLOWED_HOSTS=dietpi.local` (or whatever hostname your client uses) on the `fewd-server` process — for systemd deployments, that's an `Environment=` line in `deploy/fewd.service`. Multiple hosts go comma-separated; bare hostnames match any port, `host:port` matches one port.
 
 ### Scope of v1
 
