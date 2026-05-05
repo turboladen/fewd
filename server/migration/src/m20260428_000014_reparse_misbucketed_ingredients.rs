@@ -111,6 +111,11 @@ struct Ingredient {
     unit: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     notes: Option<String>,
+    /// Pass-through. Added to the runtime DTO in fewd-4nb (post-m14).
+    /// Round-trip as opaque JSON so re-runs of this migration on a DB that
+    /// already has `or_alternative` populated don't silently drop the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    or_alternative: Option<Value>,
 }
 
 fn rewrite_ingredients_json(raw: &str) -> Result<Option<String>, serde_json::Error> {
@@ -787,5 +792,48 @@ mod tests {
         assert!(!is_failed_parse(&single(1.0), "whole"));
         assert!(!is_failed_parse(&single(2.0), "to taste"));
         assert!(!is_failed_parse(&range(1.0, 2.0), "to taste"));
+    }
+
+    /// Regression: fewd-2y6.2. The runtime DTO grew an `or_alternative`
+    /// field after this migration shipped (fewd-4nb). The frozen struct
+    /// must round-trip the field as opaque JSON so a re-run on a DB that
+    /// already has alternatives populated doesn't drop them on rewrite.
+    #[tokio::test]
+    async fn preserves_or_alternative_through_rewrite() {
+        let db = legacy_db().await;
+        // Pattern-A misbucket (name='to taste', unit='salt,') forces a
+        // rewrite path; or_alternative rides along and must survive.
+        let json = r#"[{
+            "name":"to taste",
+            "amount":{"type":"single","value":1.0},
+            "unit":"salt,",
+            "notes":null,
+            "or_alternative":{
+                "name":"kosher salt",
+                "amount":{"type":"single","value":1.0},
+                "unit":"tsp",
+                "notes":null
+            }
+        }]"#;
+        insert(&db, "r1", json).await;
+
+        Migration.up(&SchemaManager::new(&db)).await.unwrap();
+
+        // Read raw column so we assert on stored bytes, not a re-parse.
+        let row = db
+            .query_one(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                "SELECT ingredients FROM recipes WHERE id = ?".to_string(),
+                ["r1".into()],
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        let raw: String = row.try_get("", "ingredients").unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+
+        let alt = &parsed[0]["or_alternative"];
+        assert!(alt.is_object(), "or_alternative must round-trip; got {raw}");
+        assert_eq!(alt["name"], "kosher salt");
     }
 }
