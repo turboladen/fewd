@@ -94,15 +94,52 @@ pub fn router(db: DatabaseConnection) -> Router {
     let mut session_manager = LocalSessionManager::default();
     session_manager.session_config.keep_alive = Some(Duration::from_secs(60 * 60 * 24 * 7));
 
+    let default_config = StreamableHttpServerConfig::default();
+    let allowed_hosts = merge_allowed_hosts(
+        default_config.allowed_hosts.clone(),
+        std::env::var("MCP_ALLOWED_HOSTS").ok().as_deref(),
+    );
+    let config = default_config.with_allowed_hosts(allowed_hosts);
+
     let streamable = StreamableHttpService::new(
         move || Ok(FewdMcp::new(handler_db.clone())),
         Arc::new(session_manager),
-        StreamableHttpServerConfig::default(),
+        config,
     );
 
     Router::new()
         .fallback_service(streamable)
         .layer(middleware::from_fn_with_state(db, require_family_bearer))
+}
+
+/// Build the MCP host allowlist by appending operator-supplied hostnames from
+/// `MCP_ALLOWED_HOSTS` to whatever rmcp ships as its localhost defaults.
+///
+/// rmcp's `StreamableHttpService` rejects requests whose `Host` header isn't
+/// on this list (DNS-rebinding defense, on by default since rmcp 1.4). Its
+/// own defaults — currently `localhost`, `127.0.0.1`, `::1`, but read live
+/// from `StreamableHttpServerConfig::default().allowed_hosts` so a future
+/// upgrade can't silently drift this layer out of sync — silently 403 any
+/// LAN hostname like `dietpi.local`, so a deploy bound to `0.0.0.0` becomes
+/// unreachable from other machines until the operator opts in.
+///
+/// Env-var format: comma-separated, e.g. `MCP_ALLOWED_HOSTS=dietpi.local,fewd.lan:3000`.
+/// Per rmcp matching rules, an entry without a port matches any port; an
+/// entry with a port matches only that port.
+fn merge_allowed_hosts(defaults: Vec<String>, env_value: Option<&str>) -> Vec<String> {
+    let mut hosts = defaults;
+
+    if let Some(raw) = env_value {
+        for entry in raw.split(',') {
+            let trimmed = entry.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            hosts.push(trimmed.to_string());
+        }
+    }
+
+    hosts
 }
 
 /// Resolve `Authorization: Bearer <name>` to an active `Person`.
@@ -150,4 +187,88 @@ fn error_response(status: StatusCode, message: &str) -> Response {
         json!({ "error": message }).to_string(),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_allowed_hosts;
+    use rmcp::transport::streamable_http_server::tower::StreamableHttpServerConfig;
+
+    /// Stand-in for whatever rmcp's defaults happen to be; the helper is
+    /// agnostic to their content so tests pin a stable list. The separate
+    /// `merge_preserves_rmcp_defaults_verbatim` test guards the wiring at
+    /// the call site against future drift in rmcp itself.
+    fn fake_defaults() -> Vec<String> {
+        vec!["alpha".into(), "beta".into()]
+    }
+
+    #[test]
+    fn unset_env_keeps_defaults_unchanged() {
+        assert_eq!(merge_allowed_hosts(fake_defaults(), None), fake_defaults());
+    }
+
+    #[test]
+    fn empty_env_keeps_defaults_unchanged() {
+        assert_eq!(
+            merge_allowed_hosts(fake_defaults(), Some("")),
+            fake_defaults()
+        );
+    }
+
+    #[test]
+    fn whitespace_only_env_keeps_defaults_unchanged() {
+        assert_eq!(
+            merge_allowed_hosts(fake_defaults(), Some("   ,  , ")),
+            fake_defaults(),
+        );
+    }
+
+    #[test]
+    fn single_host_appends_to_defaults() {
+        let mut expected = fake_defaults();
+        expected.push("dietpi.local".into());
+        assert_eq!(
+            merge_allowed_hosts(fake_defaults(), Some("dietpi.local")),
+            expected,
+        );
+    }
+
+    #[test]
+    fn comma_separated_hosts_all_appended_in_order() {
+        let mut expected = fake_defaults();
+        expected.push("dietpi.local".into());
+        expected.push("fewd.lan:3000".into());
+        expected.push("192.168.1.42".into());
+        assert_eq!(
+            merge_allowed_hosts(
+                fake_defaults(),
+                Some("dietpi.local,fewd.lan:3000,192.168.1.42"),
+            ),
+            expected,
+        );
+    }
+
+    #[test]
+    fn entries_are_trimmed_and_blanks_skipped() {
+        let mut expected = fake_defaults();
+        expected.push("dietpi.local".into());
+        expected.push("fewd.lan".into());
+        assert_eq!(
+            merge_allowed_hosts(fake_defaults(), Some("  dietpi.local , , fewd.lan  ,  ")),
+            expected,
+        );
+    }
+
+    /// Confirms the call site reads rmcp's defaults instead of hardcoding
+    /// them — the original review concern for this helper. If rmcp ever
+    /// changes (or empties) its default allowlist, this test surfaces it
+    /// instead of letting our wiring drift silently.
+    #[test]
+    fn merge_preserves_rmcp_defaults_verbatim() {
+        let rmcp_defaults = StreamableHttpServerConfig::default().allowed_hosts;
+        assert_eq!(
+            merge_allowed_hosts(rmcp_defaults.clone(), None),
+            rmcp_defaults,
+        );
+    }
 }

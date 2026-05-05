@@ -9,6 +9,13 @@ Group=fewd
 ExecStart=/opt/fewd/fewd-server
 Environment="DATABASE_PATH=/opt/fewd/data/fewd.db"
 Environment="PORT=3000"
+# MCP_ALLOWED_HOSTS: comma-separated entries (mDNS/DNS names OR raw IP
+# literals) matching the Host header that clients send when reaching /mcp.
+# Replace `dietpi.local` with your deploy target's LAN address — that may
+# be a hostname (`dietpi.local`, `homeserver`) or an IP (`192.168.1.42`) —
+# before `just deploy`. Leave unset to allow only localhost. See README →
+# MCP Server troubleshooting.
+Environment="MCP_ALLOWED_HOSTS=dietpi.local"
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

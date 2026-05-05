@@ -314,13 +314,15 @@ mod tests {
 
 ### When tests are not enough
 
+Default for ordinary runtime/route/service/handler changes is **just `cargo test`** — skip release builds. The rule below applies only to the three listed scenarios.
+
 `cargo test` runs in dev mode and unifies dev-dependency features into the build, which can hide runtime feature-flag mismatches. For backend changes that touch:
 
 - Database schema or migrations
 - sea-orm-migration helpers (`has_column`, `has_index`, etc.)
 - Cargo features in any workspace member
 
-…also run `cargo build --release` AND smoke-test the binary against a non-empty, pre-existing DB before declaring the change done. Until `fewd-ga2` (CI smoke test for migration drift) lands, the dietpi deploy is the fastest production-realistic verification.
+…also run `cargo build --release` AND smoke-test the binary against a non-empty, pre-existing DB before declaring the change done. CI runs `scripts/migration-smoke-test.sh` against pinned schema snapshots (see `.github/workflows/ci.yml` and `just smoke-test` to run it locally) — that's the production-realistic verification; reach for it before pushing rather than waiting for the dietpi deploy.
 
 ### Test Commands
 
@@ -635,6 +637,10 @@ bd close <id>         # Complete work
 - Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+
+### Branch + commit naming
+
+Branches: `fewd-<id>/<short-slug>` (e.g. `fewd-82e/mcp-host-allowlist`). Commits: conventional-commits prefix scoped to the bead — `fix(fewd-82e): ...`, `docs(fewd-2y6.3): ...`, `chore(beads): close fewd-82e after PR #34 merge`. Match the style of recent `git log` if uncertain.
 
 ### Bead closure: post-merge, not inside the fix PR
 
