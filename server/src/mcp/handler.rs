@@ -109,7 +109,7 @@ impl FewdMcp {
         {
             Ok(v) => v,
             Err(DislikeResolveError::UnknownPerson(msg)) => return Ok(tool_user_error(msg)),
-            Err(DislikeResolveError::Internal(err)) => return Err(err),
+            Err(DislikeResolveError::Internal(detail)) => return Err(internal_error(detail)),
         };
 
         let filters = SearchFilters {
@@ -150,12 +150,14 @@ impl FewdMcp {
             return Ok(Vec::new());
         }
 
-        let lookups = MealLookups::load(&self.db)
-            .await
-            .map_err(|e| DislikeResolveError::Internal(db_error(e)))?;
-        let people = PersonService::get_all(&self.db)
-            .await
-            .map_err(|e| DislikeResolveError::Internal(db_error(e)))?;
+        let lookups = MealLookups::load(&self.db).await.map_err(|err| {
+            tracing::error!(?err, "MCP tool: MealLookups::load failed");
+            DislikeResolveError::Internal(format!("MealLookups::load failed: {err}"))
+        })?;
+        let people = PersonService::get_all(&self.db).await.map_err(|err| {
+            tracing::error!(?err, "MCP tool: PersonService::get_all failed");
+            DislikeResolveError::Internal(format!("PersonService::get_all failed: {err}"))
+        })?;
         let people_by_id: HashMap<&str, &person::Model> =
             people.iter().map(|p| (p.id.as_str(), p)).collect();
 
@@ -463,19 +465,28 @@ fn authenticated_name(context: &RequestContext<RoleServer>) -> Result<String, Mc
 fn tool_json_result<T: Serialize>(value: &T) -> Result<CallToolResult, McpError> {
     let json = serde_json::to_string_pretty(value).map_err(|err| {
         tracing::error!(?err, "MCP tool: failed to serialize result");
-        McpError::internal_error(format!("failed to serialize result: {err}"), None)
+        // Wire message stays opaque; serde Display can echo struct field
+        // names back to the LLM client. Details land in tracing only.
+        McpError::internal_error("failed to serialize result", None)
     })?;
     Ok(CallToolResult::success(vec![Content::text(json)]))
 }
 
+// `db_error` and `internal_error` deliberately return a fixed wire message.
+// SeaORM's `DbErr` Display embeds SQLite/SQLx detail (column names,
+// constraint names, occasionally parameter values), and `internal_error`
+// callers pass formatted internal state. Logging the verbose detail via
+// `tracing` keeps it on the operator side; the JSON-RPC client sees only
+// the opaque label. Use `tool_user_error` for messages that *should*
+// reach the LLM (input validation, unknown references).
 fn db_error(err: sea_orm::DbErr) -> McpError {
     tracing::error!(?err, "MCP tool: database error");
-    McpError::internal_error(format!("database error: {err}"), None)
+    McpError::internal_error("database error", None)
 }
 
-fn internal_error(msg: String) -> McpError {
-    tracing::error!(%msg, "MCP tool: internal error");
-    McpError::internal_error(msg, None)
+fn internal_error(detail: String) -> McpError {
+    tracing::error!(%detail, "MCP tool: internal error");
+    McpError::internal_error("internal server error", None)
 }
 
 /// Build a tool-level error result so the actionable message reaches the
@@ -557,8 +568,10 @@ pub(super) enum DislikeResolveError {
     /// Carries the user-facing message; gets surfaced via `tool_user_error`.
     UnknownPerson(String),
     /// Server-side problem (TOCTOU race, malformed `dislikes` JSON, DB
-    /// error). Surface as `McpError` so it logs server-side.
-    Internal(McpError),
+    /// error). Carries the operator-facing diagnostic string; the call
+    /// site wraps it via `internal_error()` so the wire stays opaque
+    /// while the detail still reaches tracing.
+    Internal(String),
 }
 
 /// Pure helper extracted from `FewdMcp::resolve_dislikes_for_persons` so the
@@ -583,15 +596,15 @@ fn flatten_disliked_substrings(
             ))
         })?;
         let person = people_by_id.get(id).ok_or_else(|| {
-            DislikeResolveError::Internal(internal_error(format!(
+            DislikeResolveError::Internal(format!(
                 "person id '{id}' resolved by MealLookups is no longer active; retry the tool call"
-            )))
+            ))
         })?;
         let dislikes: Vec<String> = serde_json::from_str(&person.dislikes).map_err(|err| {
-            DislikeResolveError::Internal(internal_error(format!(
+            DislikeResolveError::Internal(format!(
                 "person '{}' has malformed dislikes JSON: {err}",
                 person.name
-            )))
+            ))
         })?;
         for d in dislikes {
             let normalized = d.trim().to_lowercase();
@@ -708,14 +721,19 @@ mod tests {
 
         let err =
             flatten_disliked_substrings(&["Broken".to_string()], &lookups, &by_id).unwrap_err();
-        let DislikeResolveError::Internal(mcp_err) = err else {
+        let DislikeResolveError::Internal(detail) = err else {
             panic!("expected Internal, got {err:?}");
         };
-        let msg = format!("{mcp_err:?}");
-        assert!(msg.contains("Broken"), "error must name the person: {msg}");
+        // Detail is the operator-facing diagnostic that gets logged;
+        // the wire-side McpError stays opaque (see
+        // `internal_error_wire_message_omits_caller_supplied_detail`).
         assert!(
-            msg.contains("malformed dislikes JSON"),
-            "error must describe the failure mode: {msg}"
+            detail.contains("Broken"),
+            "diagnostic must name the person: {detail}"
+        );
+        assert!(
+            detail.contains("malformed dislikes JSON"),
+            "diagnostic must describe the failure mode: {detail}"
         );
     }
 
@@ -731,17 +749,16 @@ mod tests {
 
         let err =
             flatten_disliked_substrings(&["Alice".to_string()], &lookups, &by_id).unwrap_err();
-        let DislikeResolveError::Internal(mcp_err) = err else {
+        let DislikeResolveError::Internal(detail) = err else {
             panic!("expected Internal, got {err:?}");
         };
-        let msg = format!("{mcp_err:?}");
         assert!(
-            msg.contains("p1"),
-            "error must include the orphan id: {msg}"
+            detail.contains("p1"),
+            "diagnostic must include the orphan id: {detail}"
         );
         assert!(
-            msg.contains("retry"),
-            "error must hint that a retry is appropriate: {msg}"
+            detail.contains("retry"),
+            "diagnostic must hint that a retry is appropriate: {detail}"
         );
     }
 
@@ -1152,5 +1169,65 @@ mod tests {
         let params = LenientParameters::<CreateRecipeInput>::extract(args);
         let result = mcp.create_recipe(params).await;
         assert_tool_user_error(result, &["create_recipe", "source"]);
+    }
+
+    // ─── Error-helper redaction (fewd-2y6.4) ────────────────────────
+    //
+    // Pins the contract that protocol-level error helpers must NOT
+    // echo internal detail (DbErr Display, formatted internal state,
+    // serde error text) onto the wire. Verbose detail belongs in
+    // tracing only.
+
+    #[test]
+    fn db_error_wire_message_omits_dberr_display_text() {
+        let err = sea_orm::DbErr::Custom("schema:column 'people.dislikes'".to_string());
+        let mcp_err = db_error(err);
+        let wire = mcp_err.message.as_ref();
+        assert!(
+            !wire.contains("people.dislikes"),
+            "wire message must not echo DbErr text: {wire}"
+        );
+        assert!(
+            !wire.contains("schema:"),
+            "wire message must not echo schema marker: {wire}"
+        );
+        assert_eq!(wire, "database error");
+    }
+
+    #[test]
+    fn internal_error_wire_message_omits_caller_supplied_detail() {
+        let mcp_err = internal_error("constraint violation on people.email_unique".to_string());
+        let wire = mcp_err.message.as_ref();
+        assert!(
+            !wire.contains("people.email_unique"),
+            "wire message must not echo internal detail: {wire}"
+        );
+        assert!(
+            !wire.contains("constraint"),
+            "wire message must not echo internal detail: {wire}"
+        );
+        assert_eq!(wire, "internal server error");
+    }
+
+    #[test]
+    fn tool_json_result_serialize_failure_redacts_serde_text() {
+        // serde_json's stock failure modes (NaN, non-string keys, etc.)
+        // get coerced to `null`/string in recent versions, so use a
+        // custom Serialize that returns Err with identifiable text.
+        struct AlwaysFails;
+        impl Serialize for AlwaysFails {
+            fn serialize<S: serde::Serializer>(&self, _s: S) -> Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("schema-detail: column 'foo'"))
+            }
+        }
+
+        let result = tool_json_result(&AlwaysFails);
+        let mcp_err = result.expect_err("AlwaysFails must fail to serialize");
+        let wire = mcp_err.message.as_ref();
+        assert!(
+            !wire.contains("schema-detail") && !wire.contains("column"),
+            "wire message must not echo serde detail: {wire}"
+        );
+        assert_eq!(wire, "failed to serialize result");
     }
 }
