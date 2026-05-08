@@ -54,6 +54,10 @@ pub enum InputError {
         start_date: String,
         end_date: String,
     },
+    DateRangeTooWide {
+        days: i64,
+        max_days: i64,
+    },
 }
 
 impl std::fmt::Display for InputError {
@@ -82,6 +86,10 @@ impl std::fmt::Display for InputError {
             } => write!(
                 f,
                 "end_date ('{end_date}') must be on or after start_date ('{start_date}'). Swap them or pick a forward range."
+            ),
+            Self::DateRangeTooWide { days, max_days } => write!(
+                f,
+                "date range spans {days} days, exceeding the {max_days}-day per-call cap. Narrow start_date / end_date and call again — wider sweeps would fan out into a multi-megabyte response."
             ),
         }
     }

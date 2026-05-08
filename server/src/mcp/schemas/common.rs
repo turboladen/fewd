@@ -15,6 +15,15 @@ use super::errors::InputError;
 
 // ─── Input schemas shared across tools ───────────────────────────
 
+/// Upper bound on `(end_date - start_date)` for any tool that accepts a
+/// [`DateRangeParams`]. With four meal slots × four people, a 366-day
+/// span is already ~1.5× the per-call result cap (`MAX_LIST_RESULTS`),
+/// so anything wider trips the result cap on `list_meals` anyway —
+/// rejecting earlier in `validate()` keeps the failure mode legible
+/// ("narrow the date range") instead of producing a misleading
+/// "{N} rows exceed cap" message.
+pub const MAX_DATE_RANGE_DAYS: i64 = 366;
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct EmptyParams {}
 
@@ -48,6 +57,13 @@ impl DateRangeParams {
             return Err(InputError::ReversedDateRange {
                 start_date: self.start_date.clone(),
                 end_date: self.end_date.clone(),
+            });
+        }
+        let span = (end - start).num_days();
+        if span > MAX_DATE_RANGE_DAYS {
+            return Err(InputError::DateRangeTooWide {
+                days: span,
+                max_days: MAX_DATE_RANGE_DAYS,
             });
         }
         Ok(())
@@ -372,5 +388,69 @@ mod tests {
         let err = p.validate().unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("end_date"));
+    }
+
+    // ─── Date-range span cap (fewd-2y6.5) ────────────────────────
+    //
+    // Boundary check: the cap is inclusive, so exactly MAX_DATE_RANGE_DAYS
+    // is allowed and one more is rejected. Fence-post errors here would
+    // reject exactly-one-year queries which are a common case.
+
+    #[test]
+    fn date_range_params_accepts_exactly_max_span() {
+        let start = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let end = start
+            .checked_add_signed(chrono::Duration::days(MAX_DATE_RANGE_DAYS))
+            .unwrap();
+        let p = DateRangeParams {
+            start_date: start.format("%Y-%m-%d").to_string(),
+            end_date: end.format("%Y-%m-%d").to_string(),
+        };
+        assert!(
+            p.validate().is_ok(),
+            "exact MAX_DATE_RANGE_DAYS span must be allowed (boundary)"
+        );
+    }
+
+    #[test]
+    fn date_range_params_rejects_one_day_over_max_span() {
+        let start = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let end = start
+            .checked_add_signed(chrono::Duration::days(MAX_DATE_RANGE_DAYS + 1))
+            .unwrap();
+        let p = DateRangeParams {
+            start_date: start.format("%Y-%m-%d").to_string(),
+            end_date: end.format("%Y-%m-%d").to_string(),
+        };
+        let err = p.validate().unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            matches!(err, InputError::DateRangeTooWide { days, max_days }
+                if days == MAX_DATE_RANGE_DAYS + 1 && max_days == MAX_DATE_RANGE_DAYS),
+            "expected DateRangeTooWide with exact span / max, got {err:?}"
+        );
+        // The Display message must be actionable for the LLM — name the
+        // overflow, the cap, and the recovery.
+        assert!(msg.contains(&format!("{}", MAX_DATE_RANGE_DAYS + 1)));
+        assert!(msg.contains(&format!("{MAX_DATE_RANGE_DAYS}")));
+        assert!(
+            msg.to_lowercase().contains("narrow"),
+            "message should hint at narrowing: {msg}"
+        );
+    }
+
+    #[test]
+    fn date_range_params_rejects_extreme_span() {
+        // Pin the originally-described scenario from the bead: an
+        // LLM-hallucinated wide range that would otherwise fan out into
+        // a multi-megabyte response.
+        let p = DateRangeParams {
+            start_date: "0001-01-01".into(),
+            end_date: "9999-12-31".into(),
+        };
+        assert!(matches!(
+            p.validate().unwrap_err(),
+            InputError::DateRangeTooWide { .. }
+        ));
     }
 }
