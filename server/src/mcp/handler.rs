@@ -451,14 +451,25 @@ impl ServerHandler for FewdMcp {
 // ─── Helpers ────────────────────────────────────────────────────
 
 fn authenticated_name(context: &RequestContext<RoleServer>) -> Result<String, McpError> {
+    // Both failure modes signal an auth-middleware misconfiguration
+    // (the bearer middleware in `mcp::mod` is supposed to populate
+    // both extensions). The wire messages are already opaque
+    // constants — the `tracing::error!` calls add the server-side
+    // signal so the misconfiguration doesn't fail silently.
     let parts = context
         .extensions
         .get::<axum::http::request::Parts>()
-        .ok_or_else(|| McpError::internal_error("missing http request parts", None))?;
+        .ok_or_else(|| {
+            tracing::error!("MCP auth: missing http request parts in tool context");
+            McpError::internal_error("missing http request parts", None)
+        })?;
     let person = parts
         .extensions
         .get::<AuthenticatedPerson>()
-        .ok_or_else(|| McpError::internal_error("missing authenticated person", None))?;
+        .ok_or_else(|| {
+            tracing::error!("MCP auth: missing AuthenticatedPerson extension");
+            McpError::internal_error("missing authenticated person", None)
+        })?;
     Ok(person.0.name.clone())
 }
 
