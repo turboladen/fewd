@@ -248,7 +248,7 @@ impl FewdMcp {
         if let Some(err) = enforce_list_cap(
             "list_people",
             people.len(),
-            "Households should be well under the cap; this almost always indicates seeded test data. Deactivate stale records to bring the active count down.",
+            "list_people has no per-call filter — the only path to a smaller result set is reducing the active-person count via the web UI.",
         ) {
             return Ok(err);
         }
@@ -558,6 +558,13 @@ fn tool_user_error(message: impl Into<String>) -> CallToolResult {
 /// surface to the client when over cap; returns `None` when under cap
 /// so the caller can proceed. The `narrow_hint` should name concrete
 /// filters (or discovery tools) the LLM can use to recover.
+///
+/// The cap fires *after* the service layer materializes its `Vec` —
+/// acceptable at household scale (the rejection-path allocation is
+/// negligible against the cap's 500-row ceiling). If a future entity
+/// grows past ~10k rows in the wild, push the limit down into the
+/// service-layer SQL (`.limit(MAX_LIST_RESULTS + 1)`) so we never
+/// allocate the rejected rows in the first place.
 fn enforce_list_cap(tool: &str, count: usize, narrow_hint: &str) -> Option<CallToolResult> {
     if count > MAX_LIST_RESULTS {
         Some(tool_user_error(format!(
