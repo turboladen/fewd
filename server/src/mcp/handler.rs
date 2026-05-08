@@ -479,6 +479,12 @@ fn tool_json_result<T: Serialize>(value: &T) -> Result<CallToolResult, McpError>
 // `tracing` keeps it on the operator side; the JSON-RPC client sees only
 // the opaque label. Use `tool_user_error` for messages that *should*
 // reach the LLM (input validation, unknown references).
+//
+// Some call sites (e.g. `resolve_dislikes_for_persons`) also emit a
+// structured `tracing::error!(?err, …)` before formatting the
+// diagnostic into a String — that's a feature, not a duplicate-bug:
+// the call site captures full Debug fidelity and the helper logs the
+// flattened diagnostic as a uniform backstop.
 fn db_error(err: sea_orm::DbErr) -> McpError {
     tracing::error!(?err, "MCP tool: database error");
     McpError::internal_error("database error", None)
@@ -570,7 +576,9 @@ pub(super) enum DislikeResolveError {
     /// Server-side problem (TOCTOU race, malformed `dislikes` JSON, DB
     /// error). Carries the operator-facing diagnostic string; the call
     /// site wraps it via `internal_error()` so the wire stays opaque
-    /// while the detail still reaches tracing.
+    /// while the detail still reaches tracing. Keep the variant a plain
+    /// `String` — the wrap into `McpError` happens at the protocol-layer
+    /// call site only, never inside this helper.
     Internal(String),
 }
 
@@ -1192,6 +1200,9 @@ mod tests {
             "wire message must not echo schema marker: {wire}"
         );
         assert_eq!(wire, "database error");
+        // Pin the second JSON-RPC error channel: `data` must stay None
+        // so a future contributor can't reintroduce a leak via that field.
+        assert!(mcp_err.data.is_none(), "data must not carry detail");
     }
 
     #[test]
@@ -1207,6 +1218,7 @@ mod tests {
             "wire message must not echo internal detail: {wire}"
         );
         assert_eq!(wire, "internal server error");
+        assert!(mcp_err.data.is_none(), "data must not carry detail");
     }
 
     #[test]
@@ -1229,5 +1241,6 @@ mod tests {
             "wire message must not echo serde detail: {wire}"
         );
         assert_eq!(wire, "failed to serialize result");
+        assert!(mcp_err.data.is_none(), "data must not carry detail");
     }
 }
