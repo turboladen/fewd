@@ -277,6 +277,18 @@ impl FewdMcp {
             return Ok(e);
         }
         let people = PersonService::get_all(&self.db).await.map_err(db_error)?;
+        // Symmetric with `list_people` so the cap can't be bypassed by
+        // routing through this tool. The `read_resource` path for
+        // `fewd://family/overview` is intentionally not capped: it's
+        // user-initiated attachment (paperclip UI) and not addressable
+        // by the LLM autonomously, so the bypass vector doesn't apply.
+        if let Some(err) = enforce_list_cap(
+            "get_family_overview",
+            people.len(),
+            "get_family_overview has no per-call filter — the only path to a smaller result set is reducing the active-person count via the web UI.",
+        ) {
+            return Ok(err);
+        }
         let markdown = render_family_overview(&people).map_err(internal_error)?;
         Ok(CallToolResult::success(vec![Content::text(markdown)]))
     }
