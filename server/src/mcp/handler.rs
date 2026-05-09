@@ -487,6 +487,13 @@ impl ServerHandler for FewdMcp {
                 None,
             ));
         }
+        // Intentionally NOT capped via `enforce_list_cap` — see the
+        // matching note in `get_family_overview`. MCP resources are
+        // application-controlled (host-mediated user attachment) per
+        // the spec's resource semantics, so the LLM-bypass concern
+        // that drove the cap on `list_people` / `get_family_overview`
+        // doesn't apply here. A user explicitly attaching the family
+        // overview wants the whole thing.
         let people = PersonService::get_all(&self.db).await.map_err(db_error)?;
         let markdown = render_family_overview(&people).map_err(internal_error)?;
         Ok(ReadResourceResult::new(vec![ResourceContents::text(
