@@ -270,4 +270,154 @@ mod tests {
             rmcp_defaults,
         );
     }
+
+    // ─── Auth middleware (fewd-2y6.6) ───────────────────────────────
+    //
+    // The end-to-end smoke test plan exercises these cells manually
+    // against a release binary. Pinning them as integration tests
+    // here gives us a regression guard against:
+    //   - flipping the auth scheme back to name-bearer
+    //   - dropping the empty-token / missing-header path
+    //   - accidentally accepting a revoked token
+    // Each test mounts only the auth middleware on a stub handler so
+    // we don't need rmcp's StreamableHttpService spun up.
+
+    use crate::dto::CreatePersonDto;
+    use crate::services::mcp_token_service::McpTokenService;
+    use crate::services::person_service::PersonService;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use axum::middleware;
+    use axum::routing::any;
+    use axum::Router;
+    use migration::MigratorTrait;
+    use sea_orm::Database;
+    use tower::ServiceExt;
+
+    /// Builds a Router whose only route returns 200 OK if the request
+    /// reached it. Wraps that route with the auth middleware so we can
+    /// observe whether the middleware short-circuits or lets the call
+    /// through.
+    async fn build_test_router() -> (Router, sea_orm::DatabaseConnection) {
+        let db = Database::connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite connects");
+        migration::Migrator::up(&db, None)
+            .await
+            .expect("migrations run on empty DB");
+        let app = Router::new()
+            .route("/", any(|| async { StatusCode::OK }))
+            .layer(middleware::from_fn_with_state(
+                db.clone(),
+                super::require_family_bearer,
+            ))
+            .with_state(db.clone());
+        (app, db)
+    }
+
+    async fn seed_alice(db: &sea_orm::DatabaseConnection) -> String {
+        let alice = PersonService::create(
+            db,
+            CreatePersonDto {
+                name: "Alice".into(),
+                birthdate: "1990-01-01".into(),
+                dietary_goals: None,
+                dislikes: vec![],
+                favorites: vec![],
+                notes: None,
+                drink_preferences: None,
+                drink_dislikes: None,
+            },
+        )
+        .await
+        .expect("create alice");
+        alice.id
+    }
+
+    async fn call(app: &Router, header: Option<&str>) -> StatusCode {
+        let mut req = Request::builder().uri("/").method("GET");
+        if let Some(value) = header {
+            req = req.header("authorization", value);
+        }
+        app.clone()
+            .oneshot(req.body(Body::empty()).unwrap())
+            .await
+            .expect("router responds")
+            .status()
+    }
+
+    #[tokio::test]
+    async fn auth_rejects_request_with_no_authorization_header() {
+        let (app, _db) = build_test_router().await;
+        assert_eq!(call(&app, None).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn auth_rejects_empty_bearer_token() {
+        let (app, _db) = build_test_router().await;
+        assert_eq!(
+            call(&app, Some("Bearer ")).await,
+            StatusCode::UNAUTHORIZED,
+            "whitespace-only bearer must not pass"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_rejects_garbage_token() {
+        let (app, db) = build_test_router().await;
+        // Seed Alice but provision NO token — confirms a name-shaped
+        // bearer no longer authenticates (regression guard against a
+        // revert to name-bearer).
+        let _id = seed_alice(&db).await;
+        assert_eq!(
+            call(&app, Some("Bearer Alice")).await,
+            StatusCode::UNAUTHORIZED,
+            "name-shaped bearer must not pass under token auth"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_accepts_valid_provisioned_token() {
+        let (app, db) = build_test_router().await;
+        let id = seed_alice(&db).await;
+        let issued = McpTokenService::provision(&db, &id).await.unwrap();
+        assert_eq!(
+            call(&app, Some(&format!("Bearer {}", issued.plaintext))).await,
+            StatusCode::OK,
+            "valid token must reach the handler"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_rejects_revoked_token() {
+        let (app, db) = build_test_router().await;
+        let id = seed_alice(&db).await;
+        let issued = McpTokenService::provision(&db, &id).await.unwrap();
+        // Confirm the token works first.
+        assert_eq!(
+            call(&app, Some(&format!("Bearer {}", issued.plaintext))).await,
+            StatusCode::OK
+        );
+        // Revoke; same plaintext now must 401.
+        McpTokenService::revoke(&db, &id).await.unwrap();
+        assert_eq!(
+            call(&app, Some(&format!("Bearer {}", issued.plaintext))).await,
+            StatusCode::UNAUTHORIZED,
+            "revoked token must not authenticate"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_rejects_token_after_rotation() {
+        let (app, db) = build_test_router().await;
+        let id = seed_alice(&db).await;
+        let first = McpTokenService::provision(&db, &id).await.unwrap();
+        let _second = McpTokenService::provision(&db, &id).await.unwrap();
+        // The original plaintext is gone after rotation.
+        assert_eq!(
+            call(&app, Some(&format!("Bearer {}", first.plaintext))).await,
+            StatusCode::UNAUTHORIZED,
+            "rotated-out token must stop authenticating"
+        );
+    }
 }

@@ -15,10 +15,12 @@
 //!   plaintext or hashes.
 //! - The fingerprint (first 8 plaintext chars) is stored cleartext on
 //!   purpose. It identifies which token a UI row represents without
-//!   leaking secret entropy — 24 effective bits (8 base64url chars × 6
-//!   bits — minus a tiny bias from the URL alphabet) is fine for human
-//!   "is this the one starting with abc12345?" without weakening the
-//!   210+ bits of entropy in the unfingerprinted suffix.
+//!   meaningfully weakening secret entropy — 8 base64url chars × 6
+//!   bits = 48 bits revealed, leaving ~208 bits of entropy in the
+//!   unfingerprinted suffix (256 total − 48 fingerprint). That's far
+//!   beyond brute-force feasibility, and "is this the one starting
+//!   with abc12345?" is real UX value when the operator is rotating
+//!   tokens under time pressure.
 
 use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
@@ -46,17 +48,22 @@ pub struct ProvisionedToken {
     pub fingerprint: String,
 }
 
-/// Failure modes returned by [`provision`] and [`revoke`].
+/// Failure modes returned by [`McpTokenService::provision`] and
+/// [`McpTokenService::revoke`].
 #[derive(Debug)]
 pub enum TokenError {
     /// `id` matched no row in `people`. Distinct from a soft-delete; the
     /// caller is expected to translate this into 404 at the HTTP layer.
     NotFound,
     /// SeaORM / SQLite failure — bubble through the standard error
-    /// pipeline. Argon2 hashing failures also collapse here because they
-    /// indicate a process-level problem (OOM, RNG exhaustion), not a
-    /// client-correctable input.
+    /// pipeline.
     Database(DbErr),
+    /// Argon2 hash production failed. Distinct from `Database` so an
+    /// operator debugging a broken provision call can tell the
+    /// difference between "DB rejected the write" and "the hash itself
+    /// couldn't be computed" (typically RNG exhaustion or memory
+    /// pressure during `m_cost` allocation).
+    Hashing(argon2::password_hash::Error),
 }
 
 impl From<DbErr> for TokenError {
@@ -84,12 +91,13 @@ impl McpTokenService {
         let fingerprint = fingerprint_of(&plaintext);
         let hash = hash_plaintext(&plaintext).map_err(|err| {
             tracing::error!(?err, "MCP token: argon2 hashing failed");
-            TokenError::Database(DbErr::Custom("token hash failed".to_string()))
+            TokenError::Hashing(err)
         })?;
 
         let mut active: person::ActiveModel = person.into();
         active.mcp_token_hash = Set(Some(hash));
         active.mcp_token_fingerprint = Set(Some(fingerprint.clone()));
+        active.updated_at = Set(chrono::Utc::now());
         active.update(db).await?;
 
         Ok(ProvisionedToken {
@@ -155,6 +163,7 @@ impl McpTokenService {
         let mut active: person::ActiveModel = person.into();
         active.mcp_token_hash = Set(None);
         active.mcp_token_fingerprint = Set(None);
+        active.updated_at = Set(chrono::Utc::now());
         active.update(db).await?;
         Ok(())
     }
@@ -374,5 +383,62 @@ mod tests {
     fn fingerprint_of_takes_first_8_chars() {
         assert_eq!(fingerprint_of("ABCDEFGH_extra"), "ABCDEFGH");
         assert_eq!(fingerprint_of("short"), "short"); // edge: shorter than 8
+    }
+
+    /// Pin the hash-doesn't-leak contract. The Person entity carries
+    /// `#[serde(skip_serializing)]` on `mcp_token_hash`, but a future
+    /// refactor (renaming the column, switching to a manual `Serialize`
+    /// impl, adding a debug-dump endpoint) could silently break the
+    /// invariant. This test serializes a Person whose hash would be
+    /// caught if the attribute were removed, and asserts the hash does
+    /// not appear in the JSON. Runs without an HTTP harness — every
+    /// `Json<person::Model>` route in `routes/` shares this serialize
+    /// path, so pinning the type-level contract pins them all.
+    #[tokio::test]
+    async fn person_serialization_omits_mcp_token_hash() {
+        let db = setup_db().await;
+        let alice = insert_person(&db, "p_alice", "Alice").await;
+        let issued = McpTokenService::provision(&db, &alice.id).await.unwrap();
+
+        // Reload — provision returned the in-memory ActiveModel result;
+        // we want the round-tripped row that GET /api/people would
+        // serialize.
+        let stored = person::Entity::find_by_id(alice.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Sanity: the hash IS present on the model itself...
+        assert!(
+            stored.mcp_token_hash.is_some(),
+            "hash must be present on the loaded model"
+        );
+
+        // ...but must NOT appear in the JSON-serialized form that any
+        // GET endpoint returning Json<person::Model> would emit.
+        let json = serde_json::to_string(&stored).expect("serialize");
+        assert!(
+            !json.contains("mcp_token_hash"),
+            "field name 'mcp_token_hash' must be skipped on serialize: {json}"
+        );
+        assert!(
+            !json.contains(stored.mcp_token_hash.as_deref().unwrap()),
+            "hash value must not leak through any other field: {json}"
+        );
+        assert!(
+            !json.contains("$argon2id$"),
+            "argon2id PHC string must not leak through any other field: {json}"
+        );
+
+        // Fingerprint is intentionally serialized (UI identification).
+        assert!(
+            json.contains("mcp_token_fingerprint"),
+            "fingerprint field must be present in serialization: {json}"
+        );
+        assert!(
+            json.contains(&issued.fingerprint),
+            "fingerprint value must be visible in serialization: {json}"
+        );
     }
 }

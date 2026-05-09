@@ -317,6 +317,10 @@ function McpTokensSection() {
   const [revealed, setRevealed] = useState<
     { personId: string; personName: string; plaintext: string } | null
   >(null)
+  // Two-step inline confirmation matches FamilyManager's delete pattern —
+  // first click sets confirmingRevokeId, second click runs the mutation.
+  // Avoids native window.confirm (visually inconsistent with the app).
+  const [confirmingRevokeId, setConfirmingRevokeId] = useState<string | null>(null)
 
   const handleProvision = (personId: string, personName: string) => {
     provision.mutate(personId, {
@@ -330,16 +334,15 @@ function McpTokensSection() {
   }
 
   const handleRevoke = (personId: string, personName: string) => {
-    if (
-      !confirm(
-        `Revoke MCP token for ${personName}? Their existing client config will stop working.`,
-      )
-    ) {
-      return
-    }
     revoke.mutate(personId, {
-      onSuccess: () => toast(`Revoked MCP token for ${personName}`),
-      onError: (err) => toast(`Failed to revoke token: ${String(err)}`),
+      onSuccess: () => {
+        toast(`Revoked MCP token for ${personName}`)
+        setConfirmingRevokeId(null)
+      },
+      onError: (err) => {
+        toast(`Failed to revoke token: ${String(err)}`)
+        setConfirmingRevokeId(null)
+      },
     })
   }
 
@@ -435,14 +438,38 @@ function McpTokensSection() {
                   {hasToken ? 'Rotate' : 'Provision'}
                 </button>
                 {hasToken && (
-                  <button
-                    type='button'
-                    onClick={() => handleRevoke(person.id, person.name)}
-                    disabled={isPending}
-                    className='btn-xs btn-ghost text-red-600 hover:bg-red-50'
-                  >
-                    Revoke
-                  </button>
+                  confirmingRevokeId === person.id
+                    ? (
+                      <span className='flex gap-1 items-center'>
+                        <span className='text-red-600'>Revoke?</span>
+                        <button
+                          type='button'
+                          onClick={() => handleRevoke(person.id, person.name)}
+                          disabled={isPending}
+                          className='text-red-700 font-semibold hover:underline'
+                        >
+                          Yes
+                        </button>
+                        <button
+                          type='button'
+                          onClick={() => setConfirmingRevokeId(null)}
+                          disabled={isPending}
+                          className='text-stone-500 hover:underline'
+                        >
+                          No
+                        </button>
+                      </span>
+                    )
+                    : (
+                      <button
+                        type='button'
+                        onClick={() => setConfirmingRevokeId(person.id)}
+                        disabled={isPending}
+                        className='btn-xs btn-ghost text-red-600 hover:bg-red-50'
+                      >
+                        Revoke
+                      </button>
+                    )
                 )}
               </div>
             </li>

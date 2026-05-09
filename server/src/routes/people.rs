@@ -83,6 +83,9 @@ pub async fn provision_mcp_token(
         })),
         Err(TokenError::NotFound) => Err(AppError::NotFound(format!("person '{id}' not found"))),
         Err(TokenError::Database(err)) => Err(AppError::Database(err)),
+        Err(TokenError::Hashing(err)) => Err(AppError::Internal(format!(
+            "argon2 hashing failed during token provision: {err}"
+        ))),
     }
 }
 
@@ -96,5 +99,12 @@ pub async fn revoke_mcp_token(
         Ok(()) => Ok(StatusCode::NO_CONTENT),
         Err(TokenError::NotFound) => Err(AppError::NotFound(format!("person '{id}' not found"))),
         Err(TokenError::Database(err)) => Err(AppError::Database(err)),
+        // `revoke` doesn't call argon2, so this arm is unreachable today.
+        // Keeping it explicit (rather than `_ => …`) so a future change
+        // that introduces hashing here gets routed correctly instead of
+        // being silently swallowed by a wildcard.
+        Err(TokenError::Hashing(err)) => Err(AppError::Internal(format!(
+            "unexpected hashing error from revoke: {err}"
+        ))),
     }
 }
