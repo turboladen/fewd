@@ -30,6 +30,14 @@ async fn main() {
 
     let state = AppState { db };
 
+    // CORS is scoped to the `/api` + SPA subtree only — explicitly NOT
+    // applied to `/mcp`. The MCP transport (Streamable HTTP via
+    // mcp-remote / Claude Desktop) does not run in a browser context,
+    // so it doesn't need CORS preflights. Including `/mcp` in the
+    // CORS allowlist would let a malicious page fetched in the browser
+    // probe the local MCP server cross-origin (the threat model docs
+    // call out LAN-only deployment, but defense-in-depth is cheap
+    // here). See fewd-2y6.7.
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::list([
             "http://localhost:5173".parse().unwrap(), // Vite dev server
@@ -46,18 +54,18 @@ async fn main() {
         .allow_headers(AllowHeaders::list([
             header::CONTENT_TYPE,
             header::ACCEPT,
-            // MCP clients attach bearer tokens; browser-origin flows preflight.
             header::AUTHORIZATION,
-            // rmcp Streamable HTTP clients echo the session id on follow-up requests.
-            "mcp-session-id".parse().unwrap(),
         ]));
 
-    let app = Router::new()
+    let api_and_spa = Router::new()
         .nest("/api", routes::api_routes())
-        .nest_service("/mcp", mcp::router(state.db.clone()))
         .fallback(serve_spa)
+        .layer(cors);
+
+    let app = Router::new()
+        .nest_service("/mcp", mcp::router(state.db.clone()))
+        .merge(api_and_spa)
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024)) // 10 MB
-        .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
