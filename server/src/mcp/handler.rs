@@ -31,6 +31,15 @@ use super::AuthenticatedPerson;
 
 pub const FAMILY_OVERVIEW_URI: &str = "fewd://family/overview";
 
+/// Per-call upper bound on the row count any list-returning tool will
+/// surface. Defense-in-depth against an LLM-driven wide query
+/// (hallucinated wildcard, imported public-recipe corpus) producing a
+/// multi-megabyte response. Date-range-bounded tools still need this
+/// because the date cap (`MAX_DATE_RANGE_DAYS`) doesn't bound rows
+/// directly — at four meal slots × four people, 366 days can land
+/// around 5–6k servings.
+pub const MAX_LIST_RESULTS: usize = 500;
+
 #[derive(Clone)]
 pub struct FewdMcp {
     db: Arc<DatabaseConnection>,
@@ -78,6 +87,13 @@ impl FewdMcp {
         let recipes = RecipeService::get_curated(&self.db)
             .await
             .map_err(db_error)?;
+        if let Some(err) = enforce_list_cap(
+            "list_curated_recipes",
+            recipes.len(),
+            "Most likely cause: an unusually large favorites set (favorites are never truncated by the curated-shortlist policy). Mark fewer recipes as favorites or call search_recipes with a narrower filter for targeted lookups.",
+        ) {
+            return Ok(err);
+        }
         let out = recipes
             .iter()
             .map(recipe_to_brief)
@@ -125,6 +141,13 @@ impl FewdMcp {
         let recipes = RecipeService::search_filtered(&self.db, filters)
             .await
             .map_err(db_error)?;
+        if let Some(err) = enforce_list_cap(
+            "search_recipes",
+            recipes.len(),
+            "Add another filter (tags, max_total_time_minutes, min_rating, is_favorite, unmade_since_days) or tighten the existing query to narrow the result set.",
+        ) {
+            return Ok(err);
+        }
         let out = recipes
             .iter()
             .map(recipe_to_brief)
@@ -222,6 +245,13 @@ impl FewdMcp {
             return Ok(e);
         }
         let people = PersonService::get_all(&self.db).await.map_err(db_error)?;
+        if let Some(err) = enforce_list_cap(
+            "list_people",
+            people.len(),
+            "list_people has no per-call filter — the only path to a smaller result set is reducing the active-person count via the web UI.",
+        ) {
+            return Ok(err);
+        }
         let out = people
             .iter()
             .map(person_to_prefs)
@@ -247,6 +277,18 @@ impl FewdMcp {
             return Ok(e);
         }
         let people = PersonService::get_all(&self.db).await.map_err(db_error)?;
+        // Symmetric with `list_people` so the cap can't be bypassed by
+        // routing through this tool. The `read_resource` path for
+        // `fewd://family/overview` is intentionally not capped: it's
+        // user-initiated attachment (paperclip UI) and not addressable
+        // by the LLM autonomously, so the bypass vector doesn't apply.
+        if let Some(err) = enforce_list_cap(
+            "get_family_overview",
+            people.len(),
+            "get_family_overview has no per-call filter — the only path to a smaller result set is reducing the active-person count via the web UI.",
+        ) {
+            return Ok(err);
+        }
         let markdown = render_family_overview(&people).map_err(internal_error)?;
         Ok(CallToolResult::success(vec![Content::text(markdown)]))
     }
@@ -275,6 +317,13 @@ impl FewdMcp {
         )
         .await
         .map_err(db_error)?;
+        if let Some(err) = enforce_list_cap(
+            "list_meals",
+            meals.len(),
+            "Narrow start_date / end_date to a smaller window — even within the date-range cap, a busy household can produce thousands of meal rows.",
+        ) {
+            return Ok(err);
+        }
 
         let lookups = MealLookups::load(&self.db).await.map_err(db_error)?;
         let out = meals
@@ -438,6 +487,13 @@ impl ServerHandler for FewdMcp {
                 None,
             ));
         }
+        // Intentionally NOT capped via `enforce_list_cap` — see the
+        // matching note in `get_family_overview`. MCP resources are
+        // application-controlled (host-mediated user attachment) per
+        // the spec's resource semantics, so the LLM-bypass concern
+        // that drove the cap on `list_people` / `get_family_overview`
+        // doesn't apply here. A user explicitly attaching the family
+        // overview wants the whole thing.
         let people = PersonService::get_all(&self.db).await.map_err(db_error)?;
         let markdown = render_family_overview(&people).map_err(internal_error)?;
         Ok(ReadResourceResult::new(vec![ResourceContents::text(
@@ -514,6 +570,28 @@ fn internal_error(detail: String) -> McpError {
 /// dropped, so they're reserved for transport / internal failures.
 fn tool_user_error(message: impl Into<String>) -> CallToolResult {
     CallToolResult::error(vec![Content::text(message.into())])
+}
+
+/// Reject a list-returning tool call when the pre-conversion row count
+/// exceeds [`MAX_LIST_RESULTS`]. Returns `Some(CallToolResult)` to
+/// surface to the client when over cap; returns `None` when under cap
+/// so the caller can proceed. The `narrow_hint` should name concrete
+/// filters (or discovery tools) the LLM can use to recover.
+///
+/// The cap fires *after* the service layer materializes its `Vec` —
+/// acceptable at household scale (the rejection-path allocation is
+/// negligible against the cap's 500-row ceiling). If a future entity
+/// grows past ~10k rows in the wild, push the limit down into the
+/// service-layer SQL (`.limit(MAX_LIST_RESULTS + 1)`) so we never
+/// allocate the rejected rows in the first place.
+fn enforce_list_cap(tool: &str, count: usize, narrow_hint: &str) -> Option<CallToolResult> {
+    if count > MAX_LIST_RESULTS {
+        Some(tool_user_error(format!(
+            "{tool} returned {count} rows, exceeding the {MAX_LIST_RESULTS}-row per-call cap. {narrow_hint}"
+        )))
+    } else {
+        None
+    }
 }
 
 /// Parameter wrapper that defers deserialize errors to the handler so they
@@ -848,6 +926,14 @@ mod tests {
                 }
                 .to_string(),
                 vec!["start_date", "end_date", "2026-04-30", "2026-04-26"],
+            ),
+            (
+                InputError::DateRangeTooWide {
+                    days: 1500,
+                    max_days: 366,
+                }
+                .to_string(),
+                vec!["1500", "366", "Narrow"],
             ),
         ];
 
@@ -1230,6 +1316,61 @@ mod tests {
         );
         assert_eq!(wire, "internal server error");
         assert!(mcp_err.data.is_none(), "data must not carry detail");
+    }
+
+    // ─── List-result cap (fewd-2y6.5) ───────────────────────────────
+
+    #[test]
+    fn enforce_list_cap_passes_through_under_cap() {
+        assert!(enforce_list_cap("list_people", 0, "hint").is_none());
+        assert!(enforce_list_cap("list_people", MAX_LIST_RESULTS, "hint").is_none());
+    }
+
+    #[test]
+    fn enforce_list_cap_rejects_over_cap_with_actionable_message() {
+        let result = enforce_list_cap(
+            "search_recipes",
+            MAX_LIST_RESULTS + 1,
+            "Add another filter or tighten the existing query.",
+        )
+        .expect("over-cap must produce a result");
+        assert_eq!(
+            result.is_error,
+            Some(true),
+            "must be a tool-level error (is_error: true)"
+        );
+        let serialized = serde_json::to_string(&result).expect("serializes");
+        assert!(
+            serialized.contains("search_recipes"),
+            "must name the tool: {serialized}"
+        );
+        assert!(
+            serialized.contains(&format!("{}", MAX_LIST_RESULTS + 1)),
+            "must echo the actual row count: {serialized}"
+        );
+        assert!(
+            serialized.contains(&format!("{MAX_LIST_RESULTS}")),
+            "must echo the cap: {serialized}"
+        );
+        assert!(
+            serialized.contains("Add another filter"),
+            "must surface the narrowing hint: {serialized}"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_meals_too_wide_date_range_returns_tool_level_error() {
+        // The bead's worst-case scenario: an LLM-hallucinated range that
+        // would otherwise fan out into a multi-megabyte response. The
+        // input cap fires before the service-layer query runs.
+        let mcp = setup_test_mcp().await;
+        let result = mcp
+            .list_meals(LenientParameters::for_test(DateRangeParams {
+                start_date: "0001-01-01".into(),
+                end_date: "9999-12-31".into(),
+            }))
+            .await;
+        assert_tool_user_error(result, &["366", "Narrow"]);
     }
 
     #[test]
