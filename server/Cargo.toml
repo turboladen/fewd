@@ -55,6 +55,11 @@ url = "2"
 # Misc
 hostname = "0.4.2"
 
+# MCP per-person token auth (fewd-2y6.6)
+argon2 = "0.5"
+base64 = "0.22"
+rand = "0.8"
+
 # MCP (Model Context Protocol) server — exposes domain to AI assistants
 rmcp = { version = "1.5", features = [
     "server",

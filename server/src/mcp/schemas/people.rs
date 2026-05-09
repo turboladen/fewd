@@ -105,6 +105,8 @@ mod tests {
             is_active: true,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            mcp_token_hash: None,
+            mcp_token_fingerprint: None,
         }
     }
 

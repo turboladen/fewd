@@ -37,6 +37,8 @@ pub async fn seed_if_empty(db: &DatabaseConnection) -> Result<(), DbErr> {
             is_active: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
+            mcp_token_hash: Set(None),
+            mcp_token_fingerprint: Set(None),
         };
 
         person.insert(db).await?;

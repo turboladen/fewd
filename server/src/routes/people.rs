@@ -1,10 +1,12 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
+use serde::Serialize;
 
 use crate::dto::{CreatePersonDto, UpdatePersonDto};
 use crate::entities::person;
 use crate::error::AppError;
+use crate::services::mcp_token_service::{McpTokenService, TokenError};
 use crate::services::person_service::PersonService;
 use crate::AppState;
 
@@ -54,4 +56,45 @@ pub async fn remove(
         .await
         .map(|_| StatusCode::NO_CONTENT)
         .map_err(AppError::from)
+}
+
+/// Body returned from a successful `provision_mcp_token`. The plaintext
+/// is shown in the UI exactly once and then discarded — it is the only
+/// thing the operator needs to put into their `mcp-remote` config. The
+/// fingerprint is also persisted on the row so the UI can identify
+/// which token is active without re-revealing the secret.
+#[derive(Serialize)]
+pub struct ProvisionMcpTokenResponse {
+    pub token: String,
+    pub fingerprint: String,
+}
+
+/// `POST /api/people/:id/mcp-token` — issue (or rotate) an MCP bearer
+/// token for the named person. Replaces any prior token. The plaintext
+/// is returned exactly once.
+pub async fn provision_mcp_token(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<ProvisionMcpTokenResponse>, AppError> {
+    match McpTokenService::provision(&state.db, &id).await {
+        Ok(issued) => Ok(Json(ProvisionMcpTokenResponse {
+            token: issued.plaintext,
+            fingerprint: issued.fingerprint,
+        })),
+        Err(TokenError::NotFound) => Err(AppError::NotFound(format!("person '{id}' not found"))),
+        Err(TokenError::Database(err)) => Err(AppError::Database(err)),
+    }
+}
+
+/// `DELETE /api/people/:id/mcp-token` — null out the hash + fingerprint
+/// columns so any previously-issued plaintext stops authenticating.
+pub async fn revoke_mcp_token(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    match McpTokenService::revoke(&state.db, &id).await {
+        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Err(TokenError::NotFound) => Err(AppError::NotFound(format!("person '{id}' not found"))),
+        Err(TokenError::Database(err)) => Err(AppError::Database(err)),
+    }
 }

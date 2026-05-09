@@ -133,21 +133,23 @@ The MCP endpoint is mounted at `/mcp` on the same port as the web UI. Transport 
 
 ### Authentication and threat model
 
-fewd uses a deliberately light "family-name bearer" scheme to stay out of your way on your LAN. Every MCP request must send:
+fewd uses a per-person opaque-token bearer scheme. Every MCP request must send:
 
 ```
-Authorization: Bearer <family-member-name>
+Authorization: Bearer <mcp-token>
 ```
 
-The name is matched case-insensitively against active `Person` rows. Unknown names get a `401`. There's no OAuth, no API keys, no per-user tokens.
+Tokens are 256-bit random secrets, base64url-encoded for transport. They're hashed at rest with argon2id and compared in constant time. Unknown or revoked tokens get a `401`. The plaintext is shown to you exactly once at provision time and never stored — the server keeps only the hash plus an 8-character fingerprint for UI identification.
+
+**Provision a token.** Open the web UI Settings panel, find the family member you want to give MCP access to, and click _Provision token_. Copy the displayed string into your client config (see _Enable in Claude Desktop_ below) before closing the dialog — there is no recovery path. Re-provisioning rotates the token; the previous one stops working immediately.
+
+**Revoke a token.** From the same Settings row, _Revoke_ nulls out the hash and fingerprint. Any client still presenting the old plaintext gets a `401` on its next call.
 
 **Be explicit about what this is and isn't:**
 
-- **`/mcp` is LAN-only by design.** The server binds `0.0.0.0`, but the security model assumes only people on your local network can reach it. **Do not expose `fewd-server` to the public internet without putting a real auth layer (reverse proxy with mTLS, HTTP basic auth, OAuth, etc.) in front of it.** Family-name bearer alone is not safe on the open internet.
-- **Names are identifiers, not secrets.** They appear in `list_people`, `get_family_overview`, the shopping list briefs, and the meal plan. Anyone who can reach `/mcp` and knows or guesses a household member's first name can authenticate as them.
-- **Any authenticated family member can read and write anything.** There is no per-user authorization. A 9-year-old who knows a parent's name can read every recipe, schedule meals on anyone's behalf, and create new recipes. Audit logging at the database layer is also not in place — writes are not attributed to the authenticator.
-
-If your deployment ever leaves the household LAN, replace this with real auth before turning the server on. Two follow-ups are tracked in the project's beads tracker (inspect with `bd show <id>` from the project root): `fewd-2y6.6` for per-person opaque tokens and `fewd-2y6.8` for a typed `AuthenticatedPerson` extractor that forces every write tool to consult the authenticator at compile time.
+- **Tokens are real credentials.** Treat the plaintext like a password — paste it into a config file, don't share it in chat, and don't commit it to a repo.
+- **`/mcp` LAN-only is now a defense-in-depth recommendation, not a hard requirement.** The token verification is independently strong, but the server still binds `0.0.0.0` with no rate-limiting, no audit trail, and no telemetry on revocation events. **For internet-facing exposure, put a fronting proxy with mTLS or an additional auth layer in front of `/mcp`.** Tokens alone aren't a substitute for hardening at the deployment layer.
+- **Any authenticated family member can read and write anything.** There is no per-user authorization. Anyone with a valid token can read every recipe, schedule meals on anyone's behalf, and create new recipes. Audit logging at the database layer is not in place — writes aren't attributed to the authenticator. Issue `fewd-2y6.8` (typed `AuthenticatedPerson` extractor that forces every write tool to consult the authenticator at compile time) tracks the next step.
 
 ### Enable in Claude Desktop
 
@@ -171,7 +173,7 @@ Claude Desktop's settings → Developer → Edit Config opens `claude_desktop_co
         "http-only"
       ],
       "env": {
-        "FEWD_BEARER": "Bearer Alice"
+        "FEWD_BEARER": "Bearer <paste-the-token-from-Settings-here>"
       }
     }
   }
@@ -179,7 +181,7 @@ Claude Desktop's settings → Developer → Edit Config opens `claude_desktop_co
 ```
 
 - Replace `<fewd-host>` with the hostname (or IP) of whatever machine is running `fewd-server` — usually the same Raspberry Pi / home server you configured via `just setup-remote`, or `localhost` if you're running it on the same machine as Claude Desktop.
-- Replace `Alice` with an active family member's name.
+- Replace `<paste-the-token-from-Settings-here>` with the plaintext shown when you provisioned the token in the web Settings panel. (Lost it? Re-provision — the old one is gone.)
 - The `--header "Authorization:${FEWD_BEARER}"` + `env.FEWD_BEARER` split is intentional: it dodges a Windows-specific quoting bug in the launchers where spaces inside `args` get mangled ([upstream note](https://github.com/geelen/mcp-remote#custom-headers-authentication)).
 - `--transport http-only` pins the bridge to Streamable HTTP. Without it, `mcp-remote` tries the deprecated HTTP+SSE transport as a fallback — fewd only speaks Streamable HTTP.
 

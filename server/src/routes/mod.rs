@@ -23,6 +23,10 @@ pub fn api_routes() -> Router<AppState> {
                 .put(people::update)
                 .delete(people::remove),
         )
+        .route(
+            "/people/{id}/mcp-token",
+            post(people::provision_mcp_token).delete(people::revoke_mcp_token),
+        )
         // Recipes
         .route("/recipes", get(recipes::list).post(recipes::create))
         .route("/recipes/search", get(recipes::search))

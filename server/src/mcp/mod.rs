@@ -2,34 +2,31 @@
 //!
 //! Mounted into the main Axum router at `/mcp` via [`router`]. The transport
 //! is Streamable HTTP (single endpoint, POST for JSON-RPC, GET for SSE).
-//! Access is gated by a light "family-member bearer" auth layer: the client
-//! sends `Authorization: Bearer <name>`, the middleware resolves that to an
-//! active [`Person`](crate::entities::person::Model) row (case-insensitive),
-//! and the resolved row rides the request into tool handlers as an
-//! [`AuthenticatedPerson`] extension.
+//! Access is gated by a per-person opaque-token auth layer: the client
+//! sends `Authorization: Bearer <token>`, the middleware
+//! constant-time-verifies the token's argon2id hash against active
+//! [`Person`](crate::entities::person::Model) rows, and the resolved row
+//! rides the request into tool handlers as an [`AuthenticatedPerson`]
+//! extension. Tokens are issued from the web Settings UI (one per
+//! person; rotation is just re-provisioning).
 //!
 //! # Threat model
 //!
-//! Three facts every contributor extending this surface should be holding
+//! Two facts every contributor extending this surface should be holding
 //! explicitly. The README has the user-facing version of the same; this is
 //! the contributor-facing version, kept here so it surfaces during code
 //! review of any change to `/mcp`.
 //!
-//! 1. **`/mcp` is LAN-only by design.** The server binds `0.0.0.0` but the
-//!    security model assumes only people on the operator's LAN can reach
-//!    the port. Do not add features that assume internet exposure
-//!    (rate-limited public APIs, shareable tokens) without first replacing
-//!    this auth scheme. Issue `fewd-2y6.6` tracks per-person opaque
-//!    tokens for that follow-up.
+//! 1. **`/mcp` was historically LAN-only by necessity; tokens make that a
+//!    defense-in-depth recommendation, not a hard requirement.** Per-person
+//!    opaque tokens (256 bits, argon2id-hashed at rest, constant-time
+//!    verified) can stand on their own as authentication. Still: the
+//!    server binds `0.0.0.0`, has no rate-limiting, and exposes no
+//!    revocation telemetry, so internet-facing exposure remains unwise
+//!    without a fronting proxy. Treat LAN scoping as a sensible default,
+//!    not a security boundary the auth layer requires.
 //!
-//! 2. **The bearer "token" has no entropy.** Family member names appear in
-//!    `list_people`, `get_family_overview`, shopping briefs, and meal
-//!    plans — they are identifiers, not secrets. A network observer or
-//!    anyone with access to a meal-plan summary learns every valid token
-//!    on the server. Treat the bearer like a username pickbox, not a
-//!    credential.
-//!
-//! 3. **Any authenticated family member can do anything.** There is no
+//! 2. **Any authenticated family member can do anything.** There is no
 //!    per-user authorization. [`AuthenticatedPerson`] is plumbed through
 //!    the request extensions and made visible to tool handlers, but only
 //!    `whoami` reads it today. `create_meal` does not check that the
@@ -59,7 +56,7 @@ use sea_orm::DatabaseConnection;
 use serde_json::json;
 
 use crate::entities::person;
-use crate::services::person_service::PersonService;
+use crate::services::mcp_token_service::McpTokenService;
 
 use self::handler::FewdMcp;
 
@@ -142,12 +139,14 @@ fn merge_allowed_hosts(defaults: Vec<String>, env_value: Option<&str>) -> Vec<St
     hosts
 }
 
-/// Resolve `Authorization: Bearer <name>` to an active `Person`.
+/// Resolve `Authorization: Bearer <opaque-token>` to an active `Person`.
 ///
 /// Header parsing (scheme case, whitespace handling, malformed headers) is
 /// delegated to `axum_extra`'s `TypedHeader<Authorization<Bearer>>`
-/// extractor, which follows RFC 7235. Application-level concerns — empty
-/// tokens, unknown family members, DB errors — are handled below.
+/// extractor, which follows RFC 7235. Token verification (constant-time
+/// argon2id) lives in [`McpTokenService::verify`]. The middleware never
+/// logs the presented token — even on lookup failure — to avoid leaking
+/// it through `journalctl` or shipped log files.
 async fn require_family_bearer(
     State(db): State<DatabaseConnection>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
@@ -155,22 +154,22 @@ async fn require_family_bearer(
     next: Next,
 ) -> Response {
     let Some(TypedHeader(auth)) = bearer else {
-        return unauthorized("missing Authorization: Bearer <family-member-name>");
+        return unauthorized("missing Authorization: Bearer <mcp-token>");
     };
 
-    let name = auth.token().trim();
-    if name.is_empty() {
-        return unauthorized("missing Authorization: Bearer <family-member-name>");
+    let token = auth.token().trim();
+    if token.is_empty() {
+        return unauthorized("missing Authorization: Bearer <mcp-token>");
     }
 
-    match PersonService::find_active_by_name(&db, name).await {
+    match McpTokenService::verify(&db, token).await {
         Ok(Some(person)) => {
             req.extensions_mut().insert(AuthenticatedPerson(person));
             next.run(req).await
         }
-        Ok(None) => unauthorized("unknown family member"),
+        Ok(None) => unauthorized("invalid or revoked token"),
         Err(err) => {
-            tracing::error!(?err, "MCP auth: person lookup failed");
+            tracing::error!(?err, "MCP auth: token lookup failed");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "auth lookup failed")
         }
     }
