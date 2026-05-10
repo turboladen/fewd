@@ -9,6 +9,8 @@ import {
   useDeletePerson,
   usePeople,
   usePerson,
+  useProvisionMcpToken,
+  useRevokeMcpToken,
   useUpdatePerson,
 } from './usePeople'
 
@@ -183,6 +185,89 @@ describe('useDeletePerson', () => {
 
     expect(fetch).toHaveBeenCalledWith(
       '/api/people/p1',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['people'] })
+  })
+})
+
+describe('useProvisionMcpToken', () => {
+  it('POSTs to /api/people/:id/mcp-token, returns the token + fingerprint, and invalidates ["people"]', async () => {
+    const issued = {
+      token: 'OKDFZY7l3XLmHpXh_-UJBX0ubN6WtsVKjOFsHn8UZBQ',
+      fingerprint: 'OKDFZY7l',
+    }
+    mockJson('POST', '/api/people/p1/mcp-token', issued)
+    const { Wrapper, client } = createQueryWrapper()
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
+
+    const { result } = renderHook(() => useProvisionMcpToken(), { wrapper: Wrapper })
+    act(() => {
+      result.current.mutate('p1')
+    })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(result.current.data).toEqual(issued)
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/people/p1/mcp-token',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    // Without the invalidation, SettingsPanel's per-row "starts with
+    // abc12345…" label would stay stale until the next manual refetch.
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['people'] })
+  })
+
+  it('sends the JSON Content-Type so the request is non-CORS-simple (anti-CSRF guard)', async () => {
+    mockJson('POST', '/api/people/p1/mcp-token', {
+      token: 't',
+      fingerprint: 'fp',
+    })
+    const { Wrapper } = createQueryWrapper()
+
+    const { result } = renderHook(() => useProvisionMcpToken(), { wrapper: Wrapper })
+    act(() => {
+      result.current.mutate('p1')
+    })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    const [, init] = vi.mocked(fetch).mock.calls.find(
+      ([url, opts]) =>
+        typeof url === 'string'
+        && url.endsWith('/api/people/p1/mcp-token')
+        && opts?.method === 'POST',
+    )!
+    const headers = (init?.headers ?? {}) as Record<string, string>
+    expect(headers['Content-Type']).toBe('application/json')
+  })
+
+  it('surfaces ApiError on non-2xx responses', async () => {
+    mockJson('POST', '/api/people/p1/mcp-token', { message: 'inactive' }, { status: 400 })
+    const { Wrapper } = createQueryWrapper()
+
+    const { result } = renderHook(() => useProvisionMcpToken(), { wrapper: Wrapper })
+    act(() => {
+      result.current.mutate('p1')
+    })
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(result.current.error).toBeInstanceOf(ApiError)
+    expect((result.current.error as ApiError).status).toBe(400)
+  })
+})
+
+describe('useRevokeMcpToken', () => {
+  it('sends DELETE to /api/people/:id/mcp-token, expects 204, and invalidates ["people"]', async () => {
+    mockJson('DELETE', '/api/people/p1/mcp-token', null, { status: 204 })
+    const { Wrapper, client } = createQueryWrapper()
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
+
+    const { result } = renderHook(() => useRevokeMcpToken(), { wrapper: Wrapper })
+    act(() => {
+      result.current.mutate('p1')
+    })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/people/p1/mcp-token',
       expect.objectContaining({ method: 'DELETE' }),
     )
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['people'] })

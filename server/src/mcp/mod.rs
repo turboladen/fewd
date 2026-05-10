@@ -106,7 +106,7 @@ pub fn router(db: DatabaseConnection) -> Router {
 
     Router::new()
         .fallback_service(streamable)
-        .layer(middleware::from_fn_with_state(db, require_family_bearer))
+        .layer(middleware::from_fn_with_state(db, require_mcp_token))
 }
 
 /// Build the MCP host allowlist by appending operator-supplied hostnames from
@@ -147,7 +147,7 @@ fn merge_allowed_hosts(defaults: Vec<String>, env_value: Option<&str>) -> Vec<St
 /// argon2id) lives in [`McpTokenService::verify`]. The middleware never
 /// logs the presented token — even on lookup failure — to avoid leaking
 /// it through `journalctl` or shipped log files.
-async fn require_family_bearer(
+async fn require_mcp_token(
     State(db): State<DatabaseConnection>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     mut req: Request<Body>,
@@ -309,7 +309,7 @@ mod tests {
             .route("/", any(|| async { StatusCode::OK }))
             .layer(middleware::from_fn_with_state(
                 db.clone(),
-                super::require_family_bearer,
+                super::require_mcp_token,
             ))
             .with_state(db.clone());
         (app, db)

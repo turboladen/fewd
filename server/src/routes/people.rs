@@ -1,7 +1,7 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::dto::{CreatePersonDto, UpdatePersonDto};
 use crate::entities::person;
@@ -69,12 +69,25 @@ pub struct ProvisionMcpTokenResponse {
     pub fingerprint: String,
 }
 
+/// Empty request body for [`provision_mcp_token`]. The body has no
+/// fields; its only purpose is to require `Content-Type:
+/// application/json` on the request, which bumps it out of CORS-simple
+/// territory and forces a preflight. Without this, a malicious page
+/// could issue a cross-site `<form method="POST">` to this route and
+/// silently rotate a victim's MCP token (DoS — the attacker can't
+/// read the response, but the victim's existing client config stops
+/// working). DELETE is non-simple by method and already preflighted,
+/// so the revoke endpoint doesn't need this guard.
+#[derive(Deserialize)]
+pub struct ProvisionMcpTokenRequest {}
+
 /// `POST /api/people/:id/mcp-token` — issue (or rotate) an MCP bearer
 /// token for the named person. Replaces any prior token. The plaintext
 /// is returned exactly once.
 pub async fn provision_mcp_token(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Json(_): Json<ProvisionMcpTokenRequest>,
 ) -> Result<Json<ProvisionMcpTokenResponse>, AppError> {
     match McpTokenService::provision(&state.db, &id).await {
         Ok(issued) => Ok(Json(ProvisionMcpTokenResponse {
@@ -82,6 +95,9 @@ pub async fn provision_mcp_token(
             fingerprint: issued.fingerprint,
         })),
         Err(TokenError::NotFound) => Err(AppError::NotFound(format!("person '{id}' not found"))),
+        Err(TokenError::Inactive) => Err(AppError::BadRequest(format!(
+            "person '{id}' is inactive — reactivate them via the Family tab before provisioning a token"
+        ))),
         Err(TokenError::Database(err)) => Err(AppError::Database(err)),
         Err(TokenError::Hashing(err)) => Err(AppError::Internal(format!(
             "argon2 hashing failed during token provision: {err}"
@@ -99,10 +115,14 @@ pub async fn revoke_mcp_token(
         Ok(()) => Ok(StatusCode::NO_CONTENT),
         Err(TokenError::NotFound) => Err(AppError::NotFound(format!("person '{id}' not found"))),
         Err(TokenError::Database(err)) => Err(AppError::Database(err)),
-        // `revoke` doesn't call argon2, so this arm is unreachable today.
-        // Keeping it explicit (rather than `_ => …`) so a future change
-        // that introduces hashing here gets routed correctly instead of
-        // being silently swallowed by a wildcard.
+        // `revoke` deliberately allows operating on inactive rows
+        // (idempotent no-op) and doesn't call argon2, so neither arm
+        // fires today. Keeping them explicit (rather than `_ => …`)
+        // so a future change that triggers either path gets routed
+        // correctly instead of being silently swallowed.
+        Err(TokenError::Inactive) => Err(AppError::Internal(
+            "unexpected Inactive error from revoke".to_string(),
+        )),
         Err(TokenError::Hashing(err)) => Err(AppError::Internal(format!(
             "unexpected hashing error from revoke: {err}"
         ))),

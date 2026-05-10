@@ -18,6 +18,7 @@ export function makePerson(overrides: Partial<Person> = {}): Person {
     is_active: true,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
+    mcp_token_fingerprint: null,
     ...overrides,
   }
 }

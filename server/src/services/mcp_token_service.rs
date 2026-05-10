@@ -55,6 +55,13 @@ pub enum TokenError {
     /// `id` matched no row in `people`. Distinct from a soft-delete; the
     /// caller is expected to translate this into 404 at the HTTP layer.
     NotFound,
+    /// `id` matched a row but `is_active = false`. Returned only from
+    /// `provision` — `verify` filters inactive people upstream so an
+    /// inactive token wouldn't authenticate anyway, and issuing one
+    /// would silently mislead the operator. `revoke` allows operating
+    /// on inactive rows because clearing a non-functional token is
+    /// idempotent and harmless.
+    Inactive,
     /// SeaORM / SQLite failure — bubble through the standard error
     /// pipeline.
     Database(DbErr),
@@ -86,6 +93,12 @@ impl McpTokenService {
             .one(db)
             .await?
             .ok_or(TokenError::NotFound)?;
+        if !person.is_active {
+            // verify() filters inactive rows, so a token issued here
+            // would never authenticate. Reject up front rather than
+            // silently producing a non-functional plaintext.
+            return Err(TokenError::Inactive);
+        }
 
         let plaintext = generate_plaintext();
         let fingerprint = fingerprint_of(&plaintext);
@@ -352,6 +365,38 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, TokenError::NotFound));
+    }
+
+    #[tokio::test]
+    async fn provision_rejects_inactive_person_with_distinct_error() {
+        // verify() filters inactive rows, so a token issued for an
+        // inactive person would never authenticate. Rejecting at
+        // provision time prevents the silent "non-functional token"
+        // anti-pattern.
+        let db = setup_db().await;
+        let alice = insert_person(&db, "p_alice", "Alice").await;
+
+        // Deactivate.
+        let mut active: person::ActiveModel = alice.clone().into();
+        active.is_active = Set(false);
+        active.update(&db).await.unwrap();
+
+        let err = McpTokenService::provision(&db, &alice.id)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, TokenError::Inactive),
+            "inactive person must trip the Inactive variant, got {err:?}"
+        );
+
+        // Confirm no token was written either.
+        let stored = person::Entity::find_by_id(alice.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(stored.mcp_token_hash.is_none());
+        assert!(stored.mcp_token_fingerprint.is_none());
     }
 
     #[tokio::test]
