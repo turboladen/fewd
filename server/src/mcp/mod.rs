@@ -64,7 +64,7 @@ mod handler;
 mod lookups;
 mod schemas;
 
-/// A family member resolved from the `Authorization: Bearer <name>` header.
+/// A family member resolved from the `Authorization: Bearer <token>` header.
 /// Inserted into the HTTP request extensions by the auth middleware; tool
 /// handlers read it via the rmcp `RequestContext::extensions`.
 #[derive(Clone, Debug)]
