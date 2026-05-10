@@ -384,7 +384,11 @@ function McpTokensSection({
       <p className='text-xs text-stone-500 mb-3'>
         Each family member needs their own bearer token to authenticate to <code>/mcp</code>{' '}
         from Claude Desktop or other MCP clients. Tokens are shown once at provision time — paste
-        into your client config before closing this dialog.
+        into your client config before closing this dialog. The value below is the token by itself;
+        some clients (e.g. <code>mcp-remote</code>) want the full <code>Bearer &lt;token&gt;</code>
+        {' '}
+        string while others add the <code>Bearer</code>{' '}
+        prefix themselves — check your client's docs.
       </p>
 
       {revealed && (
