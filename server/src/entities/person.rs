@@ -32,8 +32,9 @@ pub struct Model {
     /// First 8 base64url chars of the plaintext token. Stored cleartext
     /// because it intentionally identifies which token this is — in the
     /// Settings UI ("Token starts with abc12345…") and in operator logs
-    /// when revoking a leaked token. The remaining ~210 bits of entropy
-    /// in the unfingerprinted suffix keep this safe to store cleartext.
+    /// when revoking a leaked token. 8 chars × 6 bits = 48 bits exposed,
+    /// leaving ~208 bits of entropy in the unfingerprinted suffix
+    /// (256 total − 48 fingerprint), well beyond brute-force feasibility.
     #[sea_orm(column_type = "Text")]
     pub mcp_token_fingerprint: Option<String>,
 }

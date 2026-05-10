@@ -28,6 +28,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [showCostCalc, setShowCostCalc] = useState(false)
   const [inputPrice, setInputPrice] = useState('')
   const [outputPrice, setOutputPrice] = useState('')
+  // Lifted from McpTokensSection so the parent's Escape handler can
+  // dismiss the inline revoke-confirm step BEFORE closing the whole
+  // panel (matches FamilyManager.tsx's deepest-modal-first pattern).
+  const [confirmingRevokeId, setConfirmingRevokeId] = useState<string | null>(null)
 
   // The GET endpoint returns a masked key (e.g. "sk-ant-a...XXXX").
   // Only pre-fill when the user hasn't started typing yet.
@@ -42,14 +46,21 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     if (outputPriceQuery.data) setOutputPrice(outputPriceQuery.data)
   }, [outputPriceQuery.data])
 
-  // Close on Escape
+  // Close on Escape — but if an inline confirm is open (e.g. revoke),
+  // dismiss that step first instead of the whole panel. Mirrors the
+  // FamilyManager.tsx deepest-modal-first ordering.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key !== 'Escape') return
+      if (confirmingRevokeId) {
+        setConfirmingRevokeId(null)
+        return
+      }
+      onClose()
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  }, [onClose, confirmingRevokeId])
 
   const handleSaveKey = () => {
     if (!apiKeyInput) return
@@ -300,7 +311,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* MCP Tokens (fewd-2y6.6) */}
-        <McpTokensSection />
+        <McpTokensSection
+          confirmingRevokeId={confirmingRevokeId}
+          setConfirmingRevokeId={setConfirmingRevokeId}
+        />
       </div>
     </div>
   )
@@ -309,7 +323,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 /// One-time reveal of a freshly-provisioned MCP token. The plaintext
 /// only exists in this component's state; once the user closes the
 /// reveal, it's discarded — the server only retains the hash.
-function McpTokensSection() {
+function McpTokensSection({
+  confirmingRevokeId,
+  setConfirmingRevokeId,
+}: {
+  confirmingRevokeId: string | null
+  setConfirmingRevokeId: (id: string | null) => void
+}) {
   const peopleQuery = usePeople()
   const provision = useProvisionMcpToken()
   const revoke = useRevokeMcpToken()
@@ -319,8 +339,8 @@ function McpTokensSection() {
   >(null)
   // Two-step inline confirmation matches FamilyManager's delete pattern —
   // first click sets confirmingRevokeId, second click runs the mutation.
-  // Avoids native window.confirm (visually inconsistent with the app).
-  const [confirmingRevokeId, setConfirmingRevokeId] = useState<string | null>(null)
+  // State is lifted to the parent so the panel-level Escape handler can
+  // dismiss this confirm step before closing the entire panel.
 
   const handleProvision = (personId: string, personName: string) => {
     provision.mutate(personId, {
