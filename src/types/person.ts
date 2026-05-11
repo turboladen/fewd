@@ -11,6 +11,16 @@ export interface Person {
   is_active: boolean
   created_at: string
   updated_at: string
+  // First 8 chars of the plaintext MCP bearer token, persisted server-side
+  // for UI identification ("Token starts with abc12345…"). Null when no
+  // token is currently provisioned. The hash itself never crosses the
+  // wire — it's #[serde(skip_serializing)] on the entity.
+  mcp_token_fingerprint: string | null
+}
+
+export interface ProvisionMcpTokenResponse {
+  token: string
+  fingerprint: string
 }
 
 export interface CreatePersonDto {

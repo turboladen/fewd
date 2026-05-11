@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { usePeople, useProvisionMcpToken, useRevokeMcpToken } from '../hooks/usePeople'
 import {
   useAvailableModels,
   useSetSetting,
@@ -27,6 +28,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [showCostCalc, setShowCostCalc] = useState(false)
   const [inputPrice, setInputPrice] = useState('')
   const [outputPrice, setOutputPrice] = useState('')
+  // Lifted from McpTokensSection so the parent's Escape handler can
+  // dismiss the inline revoke-confirm step BEFORE closing the whole
+  // panel (matches FamilyManager.tsx's deepest-modal-first pattern).
+  const [confirmingRevokeId, setConfirmingRevokeId] = useState<string | null>(null)
 
   // The GET endpoint returns a masked key (e.g. "sk-ant-a...XXXX").
   // Only pre-fill when the user hasn't started typing yet.
@@ -41,14 +46,21 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     if (outputPriceQuery.data) setOutputPrice(outputPriceQuery.data)
   }, [outputPriceQuery.data])
 
-  // Close on Escape
+  // Close on Escape — but if an inline confirm is open (e.g. revoke),
+  // dismiss that step first instead of the whole panel. Mirrors the
+  // FamilyManager.tsx deepest-modal-first ordering.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key !== 'Escape') return
+      if (confirmingRevokeId) {
+        setConfirmingRevokeId(null)
+        return
+      }
+      onClose()
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  }, [onClose, confirmingRevokeId])
 
   const handleSaveKey = () => {
     if (!apiKeyInput) return
@@ -297,7 +309,197 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             </div>
           )}
         </div>
+
+        {/* MCP Tokens (fewd-2y6.6) */}
+        <McpTokensSection
+          confirmingRevokeId={confirmingRevokeId}
+          setConfirmingRevokeId={setConfirmingRevokeId}
+        />
       </div>
+    </div>
+  )
+}
+
+/// One-time reveal of a freshly-provisioned MCP token. The plaintext
+/// only exists in this component's state; once the user closes the
+/// reveal, it's discarded — the server only retains the hash.
+function McpTokensSection({
+  confirmingRevokeId,
+  setConfirmingRevokeId,
+}: {
+  confirmingRevokeId: string | null
+  setConfirmingRevokeId: (id: string | null) => void
+}) {
+  const peopleQuery = usePeople()
+  const provision = useProvisionMcpToken()
+  const revoke = useRevokeMcpToken()
+  const { toast } = useToast()
+  const [revealed, setRevealed] = useState<
+    { personId: string; personName: string; plaintext: string } | null
+  >(null)
+  // Two-step inline confirmation matches FamilyManager's delete pattern —
+  // first click sets confirmingRevokeId, second click runs the mutation.
+  // State is lifted to the parent so the panel-level Escape handler can
+  // dismiss this confirm step before closing the entire panel.
+
+  const handleProvision = (personId: string, personName: string) => {
+    provision.mutate(personId, {
+      onSuccess: (data) => {
+        setRevealed({ personId, personName, plaintext: data.token })
+      },
+      onError: (err) => {
+        toast(`Failed to provision token: ${String(err)}`)
+      },
+    })
+  }
+
+  const handleRevoke = (personId: string, personName: string) => {
+    revoke.mutate(personId, {
+      onSuccess: () => {
+        toast(`Revoked MCP token for ${personName}`)
+        setConfirmingRevokeId(null)
+      },
+      onError: (err) => {
+        toast(`Failed to revoke token: ${String(err)}`)
+        setConfirmingRevokeId(null)
+      },
+    })
+  }
+
+  const handleCopy = async () => {
+    if (!revealed) return
+    try {
+      await navigator.clipboard.writeText(revealed.plaintext)
+      toast('Token copied to clipboard')
+    } catch {
+      toast('Copy failed — select the text manually')
+    }
+  }
+
+  const activePeople = peopleQuery.data?.filter((p) => p.is_active) ?? []
+
+  return (
+    <div className='pt-3 mt-3 border-t border-stone-200'>
+      <h3 className='text-sm font-medium text-stone-700 mb-2'>MCP tokens</h3>
+      <p className='text-xs text-stone-500 mb-3'>
+        Each family member needs their own bearer token to authenticate to <code>/mcp</code>{' '}
+        from Claude Desktop or other MCP clients. Tokens are shown once at provision time — paste
+        into your client config before closing this dialog. The value below is the token by itself;
+        some clients (e.g. <code>mcp-remote</code>) want the full <code>Bearer &lt;token&gt;</code>
+        {' '}
+        string while others add the <code>Bearer</code>{' '}
+        prefix themselves — check your client's docs.
+      </p>
+
+      {revealed && (
+        <div className='mb-3 panel-warning p-3 rounded-md'>
+          <p className='text-xs font-medium text-stone-700 mb-1'>
+            Token for <strong>{revealed.personName}</strong> — copy now, shown only once:
+          </p>
+          <div className='flex gap-2 items-center'>
+            <code className='flex-1 text-xs bg-white px-2 py-1 rounded border border-stone-300 break-all font-mono'>
+              {revealed.plaintext}
+            </code>
+            <button
+              type='button'
+              onClick={handleCopy}
+              className='btn-xs btn-primary whitespace-nowrap'
+            >
+              Copy
+            </button>
+            <button
+              type='button'
+              onClick={() => setRevealed(null)}
+              className='btn-xs btn-ghost'
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
+      {peopleQuery.isLoading && (
+        <p className='text-xs text-stone-400 italic'>Loading family members…</p>
+      )}
+      {peopleQuery.isError && (
+        <p className='text-xs text-red-600'>
+          Failed to load family members: {String(peopleQuery.error)}
+        </p>
+      )}
+      {peopleQuery.isSuccess && activePeople.length === 0 && (
+        <p className='text-xs text-stone-400 italic'>
+          No active family members yet — add one in the Family tab first.
+        </p>
+      )}
+
+      <ul className='space-y-2'>
+        {activePeople.map((person) => {
+          const hasToken = !!person.mcp_token_fingerprint
+          const isPending = (provision.isPending && provision.variables === person.id)
+            || (revoke.isPending && revoke.variables === person.id)
+          return (
+            <li
+              key={person.id}
+              className='flex items-center justify-between gap-2 text-xs'
+            >
+              <div className='flex-1 min-w-0'>
+                <span className='font-medium text-stone-700'>{person.name}</span> {hasToken
+                  ? (
+                    <span className='text-stone-500'>
+                      starts with <code className='font-mono'>{person.mcp_token_fingerprint}…</code>
+                    </span>
+                  )
+                  : <span className='text-stone-400 italic'>no token</span>}
+              </div>
+              <div className='flex gap-1'>
+                <button
+                  type='button'
+                  onClick={() => handleProvision(person.id, person.name)}
+                  disabled={isPending}
+                  className='btn-xs btn-outline'
+                  title={hasToken ? 'Rotate the token' : 'Provision a token'}
+                >
+                  {hasToken ? 'Rotate' : 'Provision'}
+                </button>
+                {hasToken && (
+                  confirmingRevokeId === person.id
+                    ? (
+                      <span className='flex gap-1 items-center'>
+                        <span className='text-red-600'>Revoke?</span>
+                        <button
+                          type='button'
+                          onClick={() => handleRevoke(person.id, person.name)}
+                          disabled={isPending}
+                          className='text-red-700 font-semibold hover:underline'
+                        >
+                          Yes
+                        </button>
+                        <button
+                          type='button'
+                          onClick={() => setConfirmingRevokeId(null)}
+                          disabled={isPending}
+                          className='text-stone-500 hover:underline'
+                        >
+                          No
+                        </button>
+                      </span>
+                    )
+                    : (
+                      <button
+                        type='button'
+                        onClick={() => setConfirmingRevokeId(person.id)}
+                        disabled={isPending}
+                        className='btn-xs btn-ghost text-red-600 hover:bg-red-50'
+                      >
+                        Revoke
+                      </button>
+                    )
+                )}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }

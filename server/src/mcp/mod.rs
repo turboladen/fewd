@@ -2,34 +2,31 @@
 //!
 //! Mounted into the main Axum router at `/mcp` via [`router`]. The transport
 //! is Streamable HTTP (single endpoint, POST for JSON-RPC, GET for SSE).
-//! Access is gated by a light "family-member bearer" auth layer: the client
-//! sends `Authorization: Bearer <name>`, the middleware resolves that to an
-//! active [`Person`](crate::entities::person::Model) row (case-insensitive),
-//! and the resolved row rides the request into tool handlers as an
-//! [`AuthenticatedPerson`] extension.
+//! Access is gated by a per-person opaque-token auth layer: the client
+//! sends `Authorization: Bearer <token>`, the middleware
+//! constant-time-verifies the token's argon2id hash against active
+//! [`Person`](crate::entities::person::Model) rows, and the resolved row
+//! rides the request into tool handlers as an [`AuthenticatedPerson`]
+//! extension. Tokens are issued from the web Settings UI (one per
+//! person; rotation is just re-provisioning).
 //!
 //! # Threat model
 //!
-//! Three facts every contributor extending this surface should be holding
+//! Two facts every contributor extending this surface should be holding
 //! explicitly. The README has the user-facing version of the same; this is
 //! the contributor-facing version, kept here so it surfaces during code
 //! review of any change to `/mcp`.
 //!
-//! 1. **`/mcp` is LAN-only by design.** The server binds `0.0.0.0` but the
-//!    security model assumes only people on the operator's LAN can reach
-//!    the port. Do not add features that assume internet exposure
-//!    (rate-limited public APIs, shareable tokens) without first replacing
-//!    this auth scheme. Issue `fewd-2y6.6` tracks per-person opaque
-//!    tokens for that follow-up.
+//! 1. **`/mcp` was historically LAN-only by necessity; tokens make that a
+//!    defense-in-depth recommendation, not a hard requirement.** Per-person
+//!    opaque tokens (256 bits, argon2id-hashed at rest, constant-time
+//!    verified) can stand on their own as authentication. Still: the
+//!    server binds `0.0.0.0`, has no rate-limiting, and exposes no
+//!    revocation telemetry, so internet-facing exposure remains unwise
+//!    without a fronting proxy. Treat LAN scoping as a sensible default,
+//!    not a security boundary the auth layer requires.
 //!
-//! 2. **The bearer "token" has no entropy.** Family member names appear in
-//!    `list_people`, `get_family_overview`, shopping briefs, and meal
-//!    plans — they are identifiers, not secrets. A network observer or
-//!    anyone with access to a meal-plan summary learns every valid token
-//!    on the server. Treat the bearer like a username pickbox, not a
-//!    credential.
-//!
-//! 3. **Any authenticated family member can do anything.** There is no
+//! 2. **Any authenticated family member can do anything.** There is no
 //!    per-user authorization. [`AuthenticatedPerson`] is plumbed through
 //!    the request extensions and made visible to tool handlers, but only
 //!    `whoami` reads it today. `create_meal` does not check that the
@@ -59,7 +56,7 @@ use sea_orm::DatabaseConnection;
 use serde_json::json;
 
 use crate::entities::person;
-use crate::services::person_service::PersonService;
+use crate::services::mcp_token_service::McpTokenService;
 
 use self::handler::FewdMcp;
 
@@ -67,7 +64,7 @@ mod handler;
 mod lookups;
 mod schemas;
 
-/// A family member resolved from the `Authorization: Bearer <name>` header.
+/// A family member resolved from the `Authorization: Bearer <token>` header.
 /// Inserted into the HTTP request extensions by the auth middleware; tool
 /// handlers read it via the rmcp `RequestContext::extensions`.
 #[derive(Clone, Debug)]
@@ -109,7 +106,7 @@ pub fn router(db: DatabaseConnection) -> Router {
 
     Router::new()
         .fallback_service(streamable)
-        .layer(middleware::from_fn_with_state(db, require_family_bearer))
+        .layer(middleware::from_fn_with_state(db, require_mcp_token))
 }
 
 /// Build the MCP host allowlist by appending operator-supplied hostnames from
@@ -142,35 +139,37 @@ fn merge_allowed_hosts(defaults: Vec<String>, env_value: Option<&str>) -> Vec<St
     hosts
 }
 
-/// Resolve `Authorization: Bearer <name>` to an active `Person`.
+/// Resolve `Authorization: Bearer <opaque-token>` to an active `Person`.
 ///
 /// Header parsing (scheme case, whitespace handling, malformed headers) is
 /// delegated to `axum_extra`'s `TypedHeader<Authorization<Bearer>>`
-/// extractor, which follows RFC 7235. Application-level concerns — empty
-/// tokens, unknown family members, DB errors — are handled below.
-async fn require_family_bearer(
+/// extractor, which follows RFC 7235. Token verification (constant-time
+/// argon2id) lives in [`McpTokenService::verify`]. The middleware never
+/// logs the presented token — even on lookup failure — to avoid leaking
+/// it through `journalctl` or shipped log files.
+async fn require_mcp_token(
     State(db): State<DatabaseConnection>,
     bearer: Option<TypedHeader<Authorization<Bearer>>>,
     mut req: Request<Body>,
     next: Next,
 ) -> Response {
     let Some(TypedHeader(auth)) = bearer else {
-        return unauthorized("missing Authorization: Bearer <family-member-name>");
+        return unauthorized("missing Authorization: Bearer <mcp-token>");
     };
 
-    let name = auth.token().trim();
-    if name.is_empty() {
-        return unauthorized("missing Authorization: Bearer <family-member-name>");
+    let token = auth.token().trim();
+    if token.is_empty() {
+        return unauthorized("missing Authorization: Bearer <mcp-token>");
     }
 
-    match PersonService::find_active_by_name(&db, name).await {
+    match McpTokenService::verify(&db, token).await {
         Ok(Some(person)) => {
             req.extensions_mut().insert(AuthenticatedPerson(person));
             next.run(req).await
         }
-        Ok(None) => unauthorized("unknown family member"),
+        Ok(None) => unauthorized("invalid or revoked token"),
         Err(err) => {
-            tracing::error!(?err, "MCP auth: person lookup failed");
+            tracing::error!(?err, "MCP auth: token lookup failed");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "auth lookup failed")
         }
     }
@@ -269,6 +268,156 @@ mod tests {
         assert_eq!(
             merge_allowed_hosts(rmcp_defaults.clone(), None),
             rmcp_defaults,
+        );
+    }
+
+    // ─── Auth middleware (fewd-2y6.6) ───────────────────────────────
+    //
+    // The end-to-end smoke test plan exercises these cells manually
+    // against a release binary. Pinning them as integration tests
+    // here gives us a regression guard against:
+    //   - flipping the auth scheme back to name-bearer
+    //   - dropping the empty-token / missing-header path
+    //   - accidentally accepting a revoked token
+    // Each test mounts only the auth middleware on a stub handler so
+    // we don't need rmcp's StreamableHttpService spun up.
+
+    use crate::dto::CreatePersonDto;
+    use crate::services::mcp_token_service::McpTokenService;
+    use crate::services::person_service::PersonService;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use axum::middleware;
+    use axum::routing::any;
+    use axum::Router;
+    use migration::MigratorTrait;
+    use sea_orm::Database;
+    use tower::ServiceExt;
+
+    /// Builds a Router whose only route returns 200 OK if the request
+    /// reached it. Wraps that route with the auth middleware so we can
+    /// observe whether the middleware short-circuits or lets the call
+    /// through.
+    async fn build_test_router() -> (Router, sea_orm::DatabaseConnection) {
+        let db = Database::connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite connects");
+        migration::Migrator::up(&db, None)
+            .await
+            .expect("migrations run on empty DB");
+        let app = Router::new()
+            .route("/", any(|| async { StatusCode::OK }))
+            .layer(middleware::from_fn_with_state(
+                db.clone(),
+                super::require_mcp_token,
+            ))
+            .with_state(db.clone());
+        (app, db)
+    }
+
+    async fn seed_alice(db: &sea_orm::DatabaseConnection) -> String {
+        let alice = PersonService::create(
+            db,
+            CreatePersonDto {
+                name: "Alice".into(),
+                birthdate: "1990-01-01".into(),
+                dietary_goals: None,
+                dislikes: vec![],
+                favorites: vec![],
+                notes: None,
+                drink_preferences: None,
+                drink_dislikes: None,
+            },
+        )
+        .await
+        .expect("create alice");
+        alice.id
+    }
+
+    async fn call(app: &Router, header: Option<&str>) -> StatusCode {
+        let mut req = Request::builder().uri("/").method("GET");
+        if let Some(value) = header {
+            req = req.header("authorization", value);
+        }
+        app.clone()
+            .oneshot(req.body(Body::empty()).unwrap())
+            .await
+            .expect("router responds")
+            .status()
+    }
+
+    #[tokio::test]
+    async fn auth_rejects_request_with_no_authorization_header() {
+        let (app, _db) = build_test_router().await;
+        assert_eq!(call(&app, None).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn auth_rejects_empty_bearer_token() {
+        let (app, _db) = build_test_router().await;
+        assert_eq!(
+            call(&app, Some("Bearer ")).await,
+            StatusCode::UNAUTHORIZED,
+            "whitespace-only bearer must not pass"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_rejects_garbage_token() {
+        let (app, db) = build_test_router().await;
+        // Seed Alice but provision NO token — confirms a name-shaped
+        // bearer no longer authenticates (regression guard against a
+        // revert to name-bearer).
+        let _id = seed_alice(&db).await;
+        assert_eq!(
+            call(&app, Some("Bearer Alice")).await,
+            StatusCode::UNAUTHORIZED,
+            "name-shaped bearer must not pass under token auth"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_accepts_valid_provisioned_token() {
+        let (app, db) = build_test_router().await;
+        let id = seed_alice(&db).await;
+        let issued = McpTokenService::provision(&db, &id).await.unwrap();
+        assert_eq!(
+            call(&app, Some(&format!("Bearer {}", issued.plaintext))).await,
+            StatusCode::OK,
+            "valid token must reach the handler"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_rejects_revoked_token() {
+        let (app, db) = build_test_router().await;
+        let id = seed_alice(&db).await;
+        let issued = McpTokenService::provision(&db, &id).await.unwrap();
+        // Confirm the token works first.
+        assert_eq!(
+            call(&app, Some(&format!("Bearer {}", issued.plaintext))).await,
+            StatusCode::OK
+        );
+        // Revoke; same plaintext now must 401.
+        McpTokenService::revoke(&db, &id).await.unwrap();
+        assert_eq!(
+            call(&app, Some(&format!("Bearer {}", issued.plaintext))).await,
+            StatusCode::UNAUTHORIZED,
+            "revoked token must not authenticate"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_rejects_token_after_rotation() {
+        let (app, db) = build_test_router().await;
+        let id = seed_alice(&db).await;
+        let first = McpTokenService::provision(&db, &id).await.unwrap();
+        let _second = McpTokenService::provision(&db, &id).await.unwrap();
+        // The original plaintext is gone after rotation.
+        assert_eq!(
+            call(&app, Some(&format!("Bearer {}", first.plaintext))).await,
+            StatusCode::UNAUTHORIZED,
+            "rotated-out token must stop authenticating"
         );
     }
 }

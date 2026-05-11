@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import type { CreatePersonDto, Person, UpdatePersonDto } from '../types/person'
+import type {
+  CreatePersonDto,
+  Person,
+  ProvisionMcpTokenResponse,
+  UpdatePersonDto,
+} from '../types/person'
 
 export function usePeople() {
   return useQuery({
@@ -45,6 +50,31 @@ export function useDeletePerson() {
 
   return useMutation({
     mutationFn: (id: string) => api.delete('/people/' + id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['people'] })
+    },
+  })
+}
+
+export function useProvisionMcpToken() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<ProvisionMcpTokenResponse>('/people/' + id + '/mcp-token', {}),
+    onSuccess: () => {
+      // The fingerprint on the Person row changes; refetch so the
+      // Settings UI's per-row "Token: …" label updates.
+      queryClient.invalidateQueries({ queryKey: ['people'] })
+    },
+  })
+}
+
+export function useRevokeMcpToken() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => api.delete('/people/' + id + '/mcp-token'),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['people'] })
     },
