@@ -87,17 +87,29 @@ impl McpTokenService {
     /// fingerprint, and return the plaintext for one-time display.
     /// Replaces any previously-issued token on the same row (rotation).
     ///
-    /// Atomic: load + compute + update run inside a transaction that
-    /// acquires SQLite's RESERVED lock before the SELECT (see
+    /// Atomic: load + update run inside a transaction that acquires
+    /// SQLite's RESERVED lock before the SELECT (see
     /// [`begin_locked_for_person`]). Without that escalation, two
     /// concurrent provision() calls on the same person could both
     /// load the same snapshot and both return 200 OK, with only one
     /// of the two plaintexts surviving the second write — the other
     /// client would walk away with a token that doesn't authenticate.
+    ///
+    /// Hashing happens *before* the transaction starts so the DB-wide
+    /// RESERVED lock isn't held across argon2's ~10-50ms compute. The
+    /// hash is discarded on `NotFound`/`Inactive`, which is cheaper
+    /// than blocking every other writer through every provision call.
     pub async fn provision(
         db: &DatabaseConnection,
         person_id: &str,
     ) -> Result<ProvisionedToken, TokenError> {
+        let plaintext = generate_plaintext();
+        let fingerprint = fingerprint_of(&plaintext);
+        let hash = hash_plaintext(&plaintext).map_err(|err| {
+            tracing::error!(?err, "MCP token: argon2 hashing failed");
+            TokenError::Hashing(err)
+        })?;
+
         let txn = begin_locked_for_person(db, person_id).await?;
 
         let person = person::Entity::find_by_id(person_id.to_string())
@@ -110,13 +122,6 @@ impl McpTokenService {
             // silently producing a non-functional plaintext.
             return Err(TokenError::Inactive);
         }
-
-        let plaintext = generate_plaintext();
-        let fingerprint = fingerprint_of(&plaintext);
-        let hash = hash_plaintext(&plaintext).map_err(|err| {
-            tracing::error!(?err, "MCP token: argon2 hashing failed");
-            TokenError::Hashing(err)
-        })?;
 
         let mut active: person::ActiveModel = person.into();
         active.mcp_token_hash = Set(Some(hash));
@@ -205,14 +210,24 @@ impl McpTokenService {
     }
 }
 
-/// Begin a transaction and immediately escalate it to RESERVED-lock
-/// semantics for the row identified by `person_id`. SeaORM's default
-/// `db.begin()` issues `BEGIN DEFERRED`, which only acquires SQLite's
-/// write lock at the first UPDATE — too late to serialize a
-/// load+compute+update sequence against a concurrent writer. The
-/// no-op `UPDATE … SET id = id` here forces SQLite to take RESERVED
-/// before the caller's SELECT, closing the TOCTOU window. SeaORM has
-/// no first-class way to issue `BEGIN IMMEDIATE` (see
+/// Begin a transaction and immediately escalate it to SQLite's
+/// RESERVED-lock state so the caller's subsequent SELECT is serialized
+/// against any concurrent writer. SeaORM's default `db.begin()` issues
+/// `BEGIN DEFERRED`, which only acquires the write lock at the first
+/// UPDATE — too late to serialize a load+update sequence against a
+/// concurrent writer. The no-op `UPDATE … SET id = id WHERE id = ?`
+/// here forces SQLite to take RESERVED before the caller's SELECT,
+/// closing the TOCTOU window.
+///
+/// Note on lock granularity: SQLite's RESERVED lock is **database-wide**,
+/// not row-level — once held, every other writer (any table, any row)
+/// blocks until we commit. The `WHERE id = ?` filter just keeps the
+/// statement cheap and intent-clear; it doesn't narrow the lock. For
+/// this codebase's traffic this is a fine trade-off, but it's worth
+/// knowing that holding the transaction across slow work would block
+/// unrelated writers too.
+///
+/// SeaORM has no first-class way to issue `BEGIN IMMEDIATE` (see
 /// `set_transaction_config` for SQLite, which just logs and ignores
 /// `IsolationLevel`), so this no-op write is the idiomatic substitute.
 async fn begin_locked_for_person(
