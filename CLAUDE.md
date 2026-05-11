@@ -312,6 +312,18 @@ mod tests {
 - Third-party libraries
 - Styling
 
+**vitest doesn't run tsc.** Type errors in test code (e.g. factories missing newly-required fields, drifted prop types) pass silently in `bun run test`. Run `bunx tsc --noEmit` explicitly, or rely on the production build (`bun run build` chains tsc) to catch these. When expanding a shared type, sweep `src/test/factories.ts` for affected factories.
+
+### MCP integration tests via `tower::oneshot`
+
+- rmcp's `StreamableHttpService` enforces a Host allowlist; tests must set `Host: localhost` (in defaults) or get 400 "missing Host header".
+- rmcp's `initialize` is handled by `ServerHandler::get_info(&self)` — a plain `&self` method that never reads `RequestContext::extensions`. Tests asserting auth-context flow through to tools must drive the full sequence: `initialize` → capture `mcp-session-id` response header → `notifications/initialized` (202 expected) → `tools/call`. See `server/tests/mcp_auth_plumbing_test.rs` for the pattern.
+- `RequestContext<RoleServer>` can't be constructed in unit tests (requires framework-internal `Peer<R>`) — exercise tools via full HTTP transport, or through wrapper helpers like `mcp::handler::authenticated_person`.
+
+### Regression test for `#[serde(skip_serializing)]` fields
+
+Fields like `Person.mcp_token_hash` that must never leave the server: pin with `serde_json::to_string(&model)` and assert the result does NOT contain the field name or value — covers every `Json<T>` route in `routes/*.rs` without an HTTP harness. See `mcp_token_service::tests::person_serialization_omits_mcp_token_hash` for the pattern.
+
 ### When tests are not enough
 
 Default for ordinary runtime/route/service/handler changes is **just `cargo test`** — skip release builds. The rule below applies only to the three listed scenarios.
@@ -585,6 +597,10 @@ Invariants the type system does not enforce but production code assumes. Violate
 
 Both invariants are enforced at the MCP boundary by `canonical_meal_type` and `default_order_index` in `server/src/mcp/schemas/meals.rs`. Any new write path (HTTP routes, future tools, direct SQL migrations) must do the same normalization or the meal will not render in the planner. See `fewd-2pf` for the follow-up work to make this compile-enforced via a `MealType` enum.
 
+### CSRF protection on state-changing POST routes
+
+State-changing POST routes (rotation, provisioning, anything that mutates server state without a JSON body in the normal client flow) must take a `Json<T>` body extractor — even an empty `#[derive(Deserialize)] struct Empty {}`. HTML form posts are CORS-simple and bypass preflight without a body type; requiring `Content-Type: application/json` forces preflight, which the locked-down CORS allowlist then rejects from non-allowed origins. DELETE is non-simple by method so it's already preflighted. See `routes::people::provision_mcp_token` for an example.
+
 ### Database path
 
 `just dev` runs `cargo run --bin fewd-server` from the workspace root, so `DATABASE_PATH`'s default (`./data/fewd.db`) resolves to `project-root/data/fewd.db`. Don't introduce `cd server` in any run command — it'll create a parallel DB at `server/data/fewd.db` that silently drifts out of sync with the one the UI reads from.
@@ -647,6 +663,8 @@ Branches: `fewd-<id>/<short-slug>` (e.g. `fewd-82e/mcp-host-allowlist`). Commits
 Closing a bead is a separate `chore(beads): close <id> after PR #<N> merge` commit on `main`, AFTER the fix PR is merged. Do NOT flip `status: closed` inside the fix PR — it makes `bd ready` / `bd list` inaccurate while the PR is in review. Precedent: `bc8e6f4`, `5411cc6`, `6320a91`, `734f724`. Documented at length in `.github/copilot-instructions.md`; surfaced here because Copilot reviews repeatedly suggest the wrong pattern and Claude has made the mistake too.
 
 `.beads/issues.jsonl` contains BOTH issue rows AND `bd remember` memory rows (`{"_type":"memory",...}`) — both written by `bd export`. Don't "clean up" the memory rows; `bd memories` reads them back and removing them just gets re-added on the next sync.
+
+`bd export` reorders memory rows non-deterministically on every commit (HashMap iteration order). The churn is normal — never revert it. Copilot has flagged this as "cleanup" on multiple PRs across the fewd-2y6 series; it isn't, and reverting would require manually editing the file (the exact anti-pattern the "don't clean up" rule above guards against). Cross-reference earlier PR replies (#35, #37, #39) if it surfaces again, or file upstream against `bd` for a stable sort if it becomes a real review-noise burden.
 
 ## Session Completion
 
