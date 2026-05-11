@@ -513,10 +513,15 @@ impl ServerHandler for FewdMcp {
 /// findable by `git grep authenticated_person` instead of being
 /// scattered across tool bodies.
 ///
-/// Returns a tracing-logged opaque `McpError` when the bearer middleware
-/// failed to plumb the context. Both failure modes are operator bugs in
-/// the middleware setup, not client-correctable input — the wire
-/// message stays opaque per the redaction contract from fewd-2y6.4.
+/// Returns a tracing-logged `McpError` when the bearer middleware
+/// failed to plumb the context. Both failure modes are operator bugs
+/// in the middleware setup, not client-correctable input. The wire
+/// strings (`"missing http request parts"` / `"missing authenticated
+/// person"`) are fixed non-sensitive constants that intentionally
+/// surface the failure mode in-band as operator-debuggable signal —
+/// the redaction contract from fewd-2y6.4 is specifically about
+/// *variable* detail (DbErr Display, formatted internal state); these
+/// constants don't fit that concern.
 ///
 /// Today only `whoami` consumes this. The structural problem the
 /// existence of this helper addresses (vs. "no per-user state at all"):
