@@ -506,12 +506,27 @@ impl ServerHandler for FewdMcp {
 
 // ─── Helpers ────────────────────────────────────────────────────
 
-fn authenticated_name(context: &RequestContext<RoleServer>) -> Result<String, McpError> {
-    // Both failure modes signal an auth-middleware misconfiguration
-    // (the bearer middleware in `mcp::mod` is supposed to populate
-    // both extensions). The wire messages are already opaque
-    // constants — the `tracing::error!` calls add the server-side
-    // signal so the misconfiguration doesn't fail silently.
+/// Canonical extraction site for the authenticated identity. Any tool
+/// that wants to read who's making the call MUST go through this helper
+/// (don't reach into `context.extensions` directly) — it's the only way
+/// to make a future "self-only" or role-based authorization check
+/// findable by `git grep authenticated_person` instead of being
+/// scattered across tool bodies.
+///
+/// Returns a tracing-logged opaque `McpError` when the bearer middleware
+/// failed to plumb the context. Both failure modes are operator bugs in
+/// the middleware setup, not client-correctable input — the wire
+/// message stays opaque per the redaction contract from fewd-2y6.4.
+///
+/// Today only `whoami` consumes this. The structural problem the
+/// existence of this helper addresses (vs. "no per-user state at all"):
+/// when self-only checks need to land, they go through this exact site,
+/// so adding one new check is one new call site rather than a sweep of
+/// every tool. Integration coverage at `server/tests/mcp_auth_plumbing_test.rs`
+/// pins the end-to-end plumbing.
+pub(super) fn authenticated_person(
+    context: &RequestContext<RoleServer>,
+) -> Result<&AuthenticatedPerson, McpError> {
     let parts = context
         .extensions
         .get::<axum::http::request::Parts>()
@@ -519,14 +534,21 @@ fn authenticated_name(context: &RequestContext<RoleServer>) -> Result<String, Mc
             tracing::error!("MCP auth: missing http request parts in tool context");
             McpError::internal_error("missing http request parts", None)
         })?;
-    let person = parts
+    parts
         .extensions
         .get::<AuthenticatedPerson>()
         .ok_or_else(|| {
             tracing::error!("MCP auth: missing AuthenticatedPerson extension");
             McpError::internal_error("missing authenticated person", None)
-        })?;
-    Ok(person.0.name.clone())
+        })
+}
+
+/// Thin wrapper around [`authenticated_person`] for the common case
+/// where the caller only needs the family member's display name (e.g.
+/// `whoami`). Single extraction site means there's one place to change
+/// if the auth surface ever exposes additional fields.
+fn authenticated_name(context: &RequestContext<RoleServer>) -> Result<String, McpError> {
+    authenticated_person(context).map(|p| p.0.name.clone())
 }
 
 fn tool_json_result<T: Serialize>(value: &T) -> Result<CallToolResult, McpError> {
