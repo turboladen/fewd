@@ -29,7 +29,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use rand::RngCore;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection,
+    DatabaseTransaction, DbErr, EntityTrait, QueryFilter, Set, Statement, TransactionTrait,
 };
 
 use crate::entities::person;
@@ -85,12 +86,34 @@ impl McpTokenService {
     /// Issue a fresh token for `person_id`, persist its argon2 hash +
     /// fingerprint, and return the plaintext for one-time display.
     /// Replaces any previously-issued token on the same row (rotation).
+    ///
+    /// Atomic: load + update run inside a transaction that acquires
+    /// SQLite's RESERVED lock before the SELECT (see
+    /// [`begin_locked_for_person`]). Without that escalation, two
+    /// concurrent provision() calls on the same person could both
+    /// load the same snapshot and both return 200 OK, with only one
+    /// of the two plaintexts surviving the second write — the other
+    /// client would walk away with a token that doesn't authenticate.
+    ///
+    /// Hashing happens *before* the transaction starts so the DB-wide
+    /// RESERVED lock isn't held across argon2's ~10-50ms compute. The
+    /// hash is discarded on `NotFound`/`Inactive`, which is cheaper
+    /// than blocking every other writer through every provision call.
     pub async fn provision(
         db: &DatabaseConnection,
         person_id: &str,
     ) -> Result<ProvisionedToken, TokenError> {
+        let plaintext = generate_plaintext();
+        let fingerprint = fingerprint_of(&plaintext);
+        let hash = hash_plaintext(&plaintext).map_err(|err| {
+            tracing::error!(?err, "MCP token: argon2 hashing failed");
+            TokenError::Hashing(err)
+        })?;
+
+        let txn = begin_locked_for_person(db, person_id).await?;
+
         let person = person::Entity::find_by_id(person_id.to_string())
-            .one(db)
+            .one(&txn)
             .await?
             .ok_or(TokenError::NotFound)?;
         if !person.is_active {
@@ -100,18 +123,13 @@ impl McpTokenService {
             return Err(TokenError::Inactive);
         }
 
-        let plaintext = generate_plaintext();
-        let fingerprint = fingerprint_of(&plaintext);
-        let hash = hash_plaintext(&plaintext).map_err(|err| {
-            tracing::error!(?err, "MCP token: argon2 hashing failed");
-            TokenError::Hashing(err)
-        })?;
-
         let mut active: person::ActiveModel = person.into();
         active.mcp_token_hash = Set(Some(hash));
         active.mcp_token_fingerprint = Set(Some(fingerprint.clone()));
         active.updated_at = Set(chrono::Utc::now());
-        active.update(db).await?;
+        active.update(&txn).await?;
+
+        txn.commit().await?;
 
         Ok(ProvisionedToken {
             plaintext,
@@ -167,9 +185,17 @@ impl McpTokenService {
     /// Null out the hash + fingerprint columns for `person_id`. After
     /// revoke, `verify` will reject any token previously issued for this
     /// row, including the plaintext the user copied at provision time.
+    ///
+    /// Atomic: wrapped in the same RESERVED-lock transaction as
+    /// `provision`. Revoke-vs-revoke races are benign (idempotent), but
+    /// revoke racing against a concurrent provision could otherwise leave
+    /// the provisioning client with a plaintext that doesn't authenticate
+    /// (last write wins, but neither response signaled the conflict).
     pub async fn revoke(db: &DatabaseConnection, person_id: &str) -> Result<(), TokenError> {
+        let txn = begin_locked_for_person(db, person_id).await?;
+
         let person = person::Entity::find_by_id(person_id.to_string())
-            .one(db)
+            .one(&txn)
             .await?
             .ok_or(TokenError::NotFound)?;
 
@@ -177,9 +203,45 @@ impl McpTokenService {
         active.mcp_token_hash = Set(None);
         active.mcp_token_fingerprint = Set(None);
         active.updated_at = Set(chrono::Utc::now());
-        active.update(db).await?;
+        active.update(&txn).await?;
+
+        txn.commit().await?;
         Ok(())
     }
+}
+
+/// Begin a transaction and immediately escalate it to SQLite's
+/// RESERVED-lock state so the caller's subsequent SELECT is serialized
+/// against any concurrent writer. SeaORM's default `db.begin()` issues
+/// `BEGIN DEFERRED`, which only acquires the write lock at the first
+/// UPDATE — too late to serialize a load+update sequence against a
+/// concurrent writer. The no-op `UPDATE … SET id = id WHERE id = ?`
+/// here forces SQLite to take RESERVED before the caller's SELECT,
+/// closing the TOCTOU window.
+///
+/// Note on lock granularity: SQLite's RESERVED lock is **database-wide**,
+/// not row-level — once held, every other writer (any table, any row)
+/// blocks until we commit. The `WHERE id = ?` filter just keeps the
+/// statement cheap and intent-clear; it doesn't narrow the lock. For
+/// this codebase's traffic this is a fine trade-off, but it's worth
+/// knowing that holding the transaction across slow work would block
+/// unrelated writers too.
+///
+/// SeaORM has no first-class way to issue `BEGIN IMMEDIATE` (see
+/// `set_transaction_config` for SQLite, which just logs and ignores
+/// `IsolationLevel`), so this no-op write is the idiomatic substitute.
+async fn begin_locked_for_person(
+    db: &DatabaseConnection,
+    person_id: &str,
+) -> Result<DatabaseTransaction, DbErr> {
+    let txn = db.begin().await?;
+    txn.execute(Statement::from_sql_and_values(
+        DatabaseBackend::Sqlite,
+        "UPDATE people SET id = id WHERE id = ?",
+        [person_id.into()],
+    ))
+    .await?;
+    Ok(txn)
 }
 
 fn generate_plaintext() -> String {
@@ -484,6 +546,81 @@ mod tests {
         assert!(
             json.contains(&issued.fingerprint),
             "fingerprint value must be visible in serialization: {json}"
+        );
+    }
+
+    /// Two concurrent provision() calls must leave exactly one of the two
+    /// returned plaintexts authenticating against the persisted row. Without
+    /// the transaction wrapper, both responses returned 200 OK but only the
+    /// surviving write's plaintext would validate — the other client walked
+    /// away with a stranded token.
+    ///
+    /// Caveat: in-memory SQLite uses one connection, so this test cannot
+    /// reproduce true write contention. What it pins is the *consistency*
+    /// invariant (response ↔ persisted state), which the fix preserves and
+    /// any future refactor must preserve too.
+    #[tokio::test]
+    async fn concurrent_provision_does_not_strand_either_token() {
+        let db = setup_db().await;
+        let alice = insert_person(&db, "p_alice", "Alice").await;
+
+        let (a, b) = tokio::join!(
+            McpTokenService::provision(&db, &alice.id),
+            McpTokenService::provision(&db, &alice.id),
+        );
+        let a = a.expect("first provision");
+        let b = b.expect("second provision");
+
+        let valid_a = McpTokenService::verify(&db, &a.plaintext)
+            .await
+            .expect("verify a")
+            .is_some();
+        let valid_b = McpTokenService::verify(&db, &b.plaintext)
+            .await
+            .expect("verify b")
+            .is_some();
+
+        let valid_count = [valid_a, valid_b].iter().filter(|x| **x).count();
+        assert_eq!(
+            valid_count, 1,
+            "exactly one of two concurrently-provisioned tokens should validate \
+             (valid_a={valid_a}, valid_b={valid_b})"
+        );
+    }
+
+    /// A concurrent provision() and revoke() must leave the persisted row in
+    /// a state consistent with provision's response. Either provision committed
+    /// last (plaintext validates AND token is persisted) or revoke committed
+    /// last (plaintext does NOT validate AND token is NOT persisted). The bug
+    /// before the fix: these two facts could disagree, leaving the caller
+    /// holding a plaintext the server had silently revoked.
+    #[tokio::test]
+    async fn concurrent_provision_and_revoke_leave_consistent_state() {
+        let db = setup_db().await;
+        let alice = insert_person(&db, "p_alice", "Alice").await;
+
+        let (prov, rev) = tokio::join!(
+            McpTokenService::provision(&db, &alice.id),
+            McpTokenService::revoke(&db, &alice.id),
+        );
+        let prov = prov.expect("provision");
+        rev.expect("revoke");
+
+        let prov_validates = McpTokenService::verify(&db, &prov.plaintext)
+            .await
+            .expect("verify")
+            .is_some();
+        let stored = person::Entity::find_by_id(alice.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("alice still exists");
+        let token_persisted = stored.mcp_token_hash.is_some();
+
+        assert_eq!(
+            prov_validates, token_persisted,
+            "provision plaintext validity and persisted token presence must agree: \
+             prov_validates={prov_validates}, token_persisted={token_persisted}"
         );
     }
 }
