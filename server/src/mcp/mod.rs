@@ -27,14 +27,18 @@
 //!    not a security boundary the auth layer requires.
 //!
 //! 2. **Any authenticated family member can do anything.** There is no
-//!    per-user authorization. [`AuthenticatedPerson`] is plumbed through
-//!    the request extensions and made visible to tool handlers, but only
-//!    `whoami` reads it today. `create_meal` does not check that the
-//!    serving's person matches the caller; `create_recipe` does not
-//!    record the author. Adding a "self-only" or role-based rule means
-//!    enforcing it at every write site, not just one. Issue `fewd-2y6.8`
-//!    tracks promoting `AuthenticatedPerson` to a typed extractor so the
-//!    type system catches missed sites.
+//!    per-user authorization today. [`AuthenticatedPerson`] is plumbed
+//!    through the request extensions and made visible to tool handlers,
+//!    but only `whoami` reads it. When per-user checks become necessary
+//!    ("only the caller can revoke their own meals", "only adults can
+//!    set drink preferences"), the canonical extraction site is
+//!    `handler::authenticated_person` — go through that helper at
+//!    every check, never reach into `context.extensions` directly. That
+//!    convention makes any authorization decision findable via
+//!    `git grep authenticated_person`. The integration test at
+//!    `server/tests/mcp_auth_plumbing_test.rs` pins that the helper
+//!    receives the right identity end-to-end so a middleware refactor
+//!    can't silently break the read path.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -66,7 +70,11 @@ mod schemas;
 
 /// A family member resolved from the `Authorization: Bearer <token>` header.
 /// Inserted into the HTTP request extensions by the auth middleware; tool
-/// handlers read it via the rmcp `RequestContext::extensions`.
+/// handlers read it via `handler::authenticated_person` — that's the
+/// canonical extraction site, and the only place that should reach into
+/// the request extensions to pull this out. Going through the helper
+/// keeps any future per-user authorization check findable via `git grep
+/// authenticated_person` instead of scattered across tool bodies.
 #[derive(Clone, Debug)]
 pub struct AuthenticatedPerson(pub person::Model);
 
