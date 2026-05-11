@@ -32,7 +32,7 @@
 //!    but only `whoami` reads it. When per-user checks become necessary
 //!    ("only the caller can revoke their own meals", "only adults can
 //!    set drink preferences"), the canonical extraction site is
-//!    [`handler::authenticated_person`] — go through that helper at
+//!    `handler::authenticated_person` — go through that helper at
 //!    every check, never reach into `context.extensions` directly. That
 //!    convention makes any authorization decision findable via
 //!    `git grep authenticated_person`. The integration test at
@@ -70,7 +70,7 @@ mod schemas;
 
 /// A family member resolved from the `Authorization: Bearer <token>` header.
 /// Inserted into the HTTP request extensions by the auth middleware; tool
-/// handlers read it via [`handler::authenticated_person`] — that's the
+/// handlers read it via `handler::authenticated_person` — that's the
 /// canonical extraction site, and the only place that should reach into
 /// the request extensions to pull this out. Going through the helper
 /// keeps any future per-user authorization check findable via `git grep
