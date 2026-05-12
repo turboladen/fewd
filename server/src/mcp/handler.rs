@@ -55,7 +55,7 @@ impl FewdMcp {
     /// requiring any data in the DB.
     #[tool(
         name = "whoami",
-        description = "Return the name of the authenticated family member. Useful for verifying your MCP bearer-token configuration.",
+        description = "Verify your MCP bearer-token configuration is wired correctly — call this when a tool returns auth errors or when first connecting. Returns the authenticated family member's name.",
         input_schema = rmcp::handler::server::common::schema_for_type::<EmptyParams>()
     )]
     async fn whoami(
@@ -74,7 +74,7 @@ impl FewdMcp {
 
     #[tool(
         name = "list_curated_recipes",
-        description = "Return a bounded shortlist (≤30 unless the family has more than 30 favorites — favorites are never truncated) of likely-relevant recipes: every is_favorite first, then most-recently-made, then top-rated, deduped. Use this as the default starting point for meal-planning — it keeps tool payloads small. For everything else use `search_recipes` with at least one filter; the full archive is intentionally not exposed (the web UI is for human browsing).",
+        description = "Use as the default starting point for meal-planning when the user hasn't named a specific dish or ingredient — returns the family's likely-relevant shortlist (every favorite first, then most-recently-made, then top-rated, deduped, ≤30 unless favorites exceed that). For targeted lookups by ingredient, tag, time, rating, or person preference, call `search_recipes` instead. The full archive is intentionally not exposed — the web UI is for human browsing.",
         input_schema = rmcp::handler::server::common::schema_for_type::<EmptyParams>()
     )]
     async fn list_curated_recipes(
@@ -104,7 +104,7 @@ impl FewdMcp {
 
     #[tool(
         name = "search_recipes",
-        description = "Search recipes by one or more filters. Bare calls (no filters / `query='*'`) are rejected — call `list_curated_recipes` for an unfiltered shortlist. Filters: `query` (case-insensitive substring on name); `tags` (case-insensitive exact match, multiple tags = AND); `max_total_time_minutes` (assumes recipe total_time is in minutes — recipes authored in hours won't match, known limitation); `min_rating`; `is_favorite`; `unmade_since_days`; `excludes_for_persons` (named family members whose dislikes exclude matching recipes — substring match on ingredient names, e.g. 'olive oil' is excluded when a person dislikes 'olive'); `includes_ingredient_substrings` (recipes must contain ALL listed substrings in some ingredient name — case-insensitive, multiple values AND together, possibly across different ingredients; use for 'what can I make with spam?' / 'recipes that use leftover rice' / combine with `tags=[\"dinner\"]` for 'dinner recipes with spam'). Returns brief rows — use `get_recipe` with the slug for full details. Unknown person names return an actionable error pointing at `list_people`.",
+        description = "Find specific recipes when the user names an ingredient, tag, time constraint, rating, or person preference — call BEFORE `create_meal` (to find a slug to schedule) or `create_recipe` (to avoid creating a near-duplicate). Bare calls (no filters / `query='*'`) are rejected — call `list_curated_recipes` for an unfiltered shortlist. Filters: `query` (case-insensitive substring on name); `tags` (case-insensitive exact match, multiple tags = AND); `max_total_time_minutes` (assumes recipe total_time is in minutes — recipes authored in hours won't match, known limitation); `min_rating`; `is_favorite`; `unmade_since_days`; `excludes_for_persons` (named family members whose dislikes exclude matching recipes — substring match on ingredient names, e.g. 'olive oil' is excluded when a person dislikes 'olive'); `includes_ingredient_substrings` (recipes must contain ALL listed substrings in some ingredient name — case-insensitive, multiple values AND together, possibly across different ingredients; use for 'what can I make with spam?' / 'recipes that use leftover rice' / combine with `tags=[\"dinner\"]` for 'dinner recipes with spam'). Returns brief rows — use `get_recipe` with the slug for full details. Unknown person names return an actionable error pointing at `list_people`.",
         input_schema = rmcp::handler::server::common::schema_for_type::<SearchRecipesParams>()
     )]
     async fn search_recipes(
@@ -190,7 +190,7 @@ impl FewdMcp {
 
     #[tool(
         name = "get_recipe",
-        description = "Fetch the full record for one recipe by slug: ingredients (with amounts and units), instructions, nutrition, prep/cook time, and any parent recipe it was adapted from.",
+        description = "Read the full recipe — call AFTER `search_recipes` or `list_curated_recipes` returned a slug worth inspecting (when the user wants ingredients, instructions, nutrition, or prep time). Returns ingredients (with amounts and units), instructions, nutrition, prep/cook time, and any parent recipe it was adapted from.",
         input_schema = rmcp::handler::server::common::schema_for_type::<GetRecipeParams>()
     )]
     async fn get_recipe(
@@ -235,7 +235,7 @@ impl FewdMcp {
 
     #[tool(
         name = "list_people",
-        description = "List all active family members with their dietary goals, dislikes, favorites, and notes. Use their `name` (case-insensitive) as the identifier when creating meals.",
+        description = "Look up active family members' canonical names — call BEFORE `create_meal` (to assign servings), `search_recipes`'s `excludes_for_persons`, or any other tool that takes a person name, so the names match exactly. Returns each member's dietary goals, dislikes, favorites, and notes; the `name` field (case-insensitive) is the identifier.",
         input_schema = rmcp::handler::server::common::schema_for_type::<EmptyParams>()
     )]
     async fn list_people(
@@ -267,7 +267,7 @@ impl FewdMcp {
     /// tool is the only way to let Claude read the overview autonomously.
     #[tool(
         name = "get_family_overview",
-        description = "Return a human-readable Markdown overview of every active family member — dietary goals, dislikes, favorites, notes — in a single block. Use this to ground meal-planning replies without calling list_people and stitching fields together. Equivalent to the fewd://family/overview resource.",
+        description = "Ground a meal-planning conversation by reading every family member's diet, dislikes, favorites, and notes in one block — call this FIRST in any planning session before `list_curated_recipes` / `search_recipes`. Returns a human-readable Markdown summary (use `list_people` instead when you need structured fields per member). Equivalent to the `fewd://family/overview` resource.",
         input_schema = rmcp::handler::server::common::schema_for_type::<EmptyParams>()
     )]
     async fn get_family_overview(
@@ -296,7 +296,7 @@ impl FewdMcp {
 
     #[tool(
         name = "list_meals",
-        description = "List all scheduled meals within an inclusive date range. Each meal lists the assigned servings — who's eating which recipe (or ad-hoc items), how many servings, and optional notes.",
+        description = "Check what's already scheduled BEFORE `create_meal` — surfaces existing meals so you don't double-book a dinner slot, and lets you spot week-over-week patterns ('we had pasta twice last week, switch it up'). Returns all meals in an inclusive date range with each serving's person, recipe (or ad-hoc items), serving count, and per-serving notes.",
         input_schema = rmcp::handler::server::common::schema_for_type::<DateRangeParams>()
     )]
     async fn list_meals(
@@ -337,7 +337,7 @@ impl FewdMcp {
 
     #[tool(
         name = "get_shopping_list",
-        description = "Generate a consolidated grocery list for the given date range: ingredients are aggregated across meals and scaled by person-servings, with unit conversion where compatible. Each item shows the per-meal sources so the user can trace back which recipe contributed what.",
+        description = "Produce the week's grocery list AFTER scheduling meals with `create_meal` — call when the user says 'what do I need to buy?' or after a planning session ends. Aggregates ingredients across all scheduled meals in the date range, scaled by person-servings, with unit conversion where compatible. Each item carries per-meal sources so 'why is there extra flour?' is traceable back to the contributing recipes.",
         input_schema = rmcp::handler::server::common::schema_for_type::<DateRangeParams>()
     )]
     async fn get_shopping_list(
@@ -361,7 +361,7 @@ impl FewdMcp {
 
     #[tool(
         name = "create_recipe",
-        description = "Create a new recipe. The slug is auto-generated from the name (with a numeric suffix on collisions). Returns the full created recipe. Before calling this, prefer `search_recipes` to avoid duplicates — the LLM should check whether a similar recipe already exists.",
+        description = "Add a new recipe when the user describes one not already in the catalog — call `search_recipes` FIRST to check for duplicates (the LLM should resolve 'this is the same as carbonara, edit that one' rather than create a near-twin). The slug is auto-generated from the name (with a numeric suffix on collisions). Returns the full created recipe.",
         input_schema = rmcp::handler::server::common::schema_for_type::<CreateRecipeInput>()
     )]
     async fn create_recipe(
@@ -411,7 +411,7 @@ impl FewdMcp {
 
     #[tool(
         name = "create_meal",
-        description = "Schedule a meal on a specific date. Each serving assigns one family member to either an existing recipe (by slug) or an ad-hoc ingredient list. Unknown names or slugs return a clear error so the caller can retry with corrected values. Returns the created meal with slugs/names resolved.",
+        description = "Schedule a planned meal — call AFTER `list_meals` (to confirm the slot is empty) and `search_recipes` / `get_recipe` (to find the slug). Each serving assigns one family member to either an existing recipe (by slug) or an ad-hoc ingredient list. Unknown names or slugs return a clear error so the caller can retry with corrected values. Returns the created meal with slugs/names resolved.",
         input_schema = rmcp::handler::server::common::schema_for_type::<CreateMealInput>()
     )]
     async fn create_meal(
@@ -448,16 +448,21 @@ impl ServerHandler for FewdMcp {
         ServerInfo::new(capabilities)
             .with_server_info(Implementation::new("fewd-mcp", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-                "fewd MCP: plan dinners and generate shopping lists. \
-                 Start with `get_family_overview` (or the fewd://family/overview resource) \
-                 to see everyone's diets/dislikes, then `list_curated_recipes` for the \
-                 family's likely-relevant shortlist — or `search_recipes` with filters \
-                 (tags, max time, min rating, excludes_for_persons, …) when you need \
-                 something specific. Use `create_recipe` to add a new one. \
-                 Schedule meals with `create_meal` (one call per dinner slot, by date and \
-                 family-member name). When the week's planned, `get_shopping_list` over \
-                 the date range produces the consolidated grocery list. All date inputs \
-                 are YYYY-MM-DD.",
+                "fewd MCP: plan dinners and generate shopping lists. Canonical workflow: \
+                 (1) DISCOVER family context — `get_family_overview` (or the \
+                 `fewd://family/overview` resource) for diets/dislikes/favorites; \
+                 `list_people` for structured fields. \
+                 (2) PLAN recipes — `list_curated_recipes` for the family shortlist; \
+                 `search_recipes` with filters (tags, max time, ingredient, \
+                 excludes_for_persons, …) for targeted lookups; `get_recipe` for full \
+                 details on a slug; `create_recipe` only when nothing matches. \
+                 (3) CHECK existing schedule — `list_meals` over the target date range \
+                 to see what's already booked and avoid duplicates. \
+                 (4) SCHEDULE meals — `create_meal` per date+slot, assigning family \
+                 members by name to recipes by slug (or ad-hoc items). \
+                 (5) SHOP — `get_shopping_list` over the date range produces the \
+                 consolidated grocery list. \
+                 All date inputs are YYYY-MM-DD.",
             )
     }
 
@@ -1424,5 +1429,55 @@ mod tests {
         );
         assert_eq!(wire, "failed to serialize result");
         assert!(mcp_err.data.is_none(), "data must not carry detail");
+    }
+
+    // ─── Tool-description discoverability (fewd-tqx) ────────────────
+    //
+    // MCP clients like Claude Desktop use embedding-similarity tool_search
+    // to load only the top-K matches against the user's query — descriptions
+    // act as a retrieval index, not just docs. Lead with task intent
+    // ("Check what's scheduled BEFORE…", "Produce the grocery list AFTER…")
+    // so the high-signal tokens land where the embedding sees them. Live
+    // 2026-05-09 evidence: `list_meals` and `get_shopping_list` failed to
+    // rank into Claude Desktop's top-5 because their descriptions led with
+    // "Returns…" / "Generate a consolidated…" instead of intent verbs.
+
+    #[test]
+    fn every_tool_description_leads_with_intent_verb() {
+        // Allowlist is intentionally small: each entry is one tool's
+        // first word. Adding a tool means picking a verb from this set
+        // (or extending it with intent — never with mechanics like
+        // "Return", "Generate", "List", "Fetch").
+        const INTENT_VERB_ALLOWLIST: &[&str] = &[
+            "Verify",   // whoami
+            "Use",      // list_curated_recipes
+            "Find",     // search_recipes
+            "Read",     // get_recipe
+            "Look",     // list_people
+            "Ground",   // get_family_overview
+            "Check",    // list_meals
+            "Produce",  // get_shopping_list
+            "Add",      // create_recipe
+            "Schedule", // create_meal
+        ];
+
+        let router = FewdMcp::tool_router();
+        let tools = router.list_all();
+        assert!(
+            !tools.is_empty(),
+            "tool_router must expose at least one tool"
+        );
+        for tool in &tools {
+            let description = tool.description.as_deref().unwrap_or("");
+            let first_word = description.split_whitespace().next().unwrap_or("");
+            assert!(
+                INTENT_VERB_ALLOWLIST.contains(&first_word),
+                "{}: description must lead with a task-intent verb (one of {:?}), got {first_word:?}. \
+                 See fewd-tqx — descriptions act as a retrieval index for MCP tool_search; \
+                 leading with mechanics ('Returns…', 'Generates…') sinks the tool's rank in \
+                 embedding-similarity selection. Full description: {description:?}",
+                tool.name, INTENT_VERB_ALLOWLIST,
+            );
+        }
     }
 }
