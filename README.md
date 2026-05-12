@@ -198,7 +198,7 @@ For local development — exploring tool surfaces, eyeballing JSON-RPC frames, s
 **Setup:**
 
 1. Provision a token for any active family member in the web UI (Settings → _Provision token_). Copy the plaintext.
-2. In a fresh terminal: `npx @modelcontextprotocol/inspector` — the UI boots at `http://localhost:6274`.
+2. In a fresh terminal: `bunx @modelcontextprotocol/inspector` — the UI boots at `http://localhost:6274`.
 3. In the Inspector UI, set:
    - **Transport type:** Streamable HTTP
    - **URL:** `http://localhost:3000/mcp` (matches `just dev`)
