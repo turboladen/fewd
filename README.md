@@ -116,16 +116,16 @@ The MCP endpoint is mounted at `/mcp` on the same port as the web UI. Transport 
 
 ### Tools
 
-| Tool                                                   | Purpose                                                                                                                                                                                                                                                         |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `list_curated_recipes`, `search_recipes`, `get_recipe` | Discover existing recipes. `list_curated_recipes` returns a ≤30-row favorites/recent/top-rated shortlist; `search_recipes` requires at least one filter (query, tags, max_total_time_minutes, min_rating, is_favorite, unmade_since_days, excludes_for_persons) |
-| `list_people`                                          | Active family members with dietary goals, dislikes, favorites                                                                                                                                                                                                   |
-| `get_family_overview`                                  | Markdown summary of all active family members in one block (tool mirror of the resource)                                                                                                                                                                        |
-| `list_meals(start_date, end_date)`                     | Meals already scheduled in a range                                                                                                                                                                                                                              |
-| `get_shopping_list(start_date, end_date)`              | Aggregated ingredient list with unit conversion                                                                                                                                                                                                                 |
-| `create_recipe(...)`                                   | Add a new recipe. Slug is auto-generated from the name                                                                                                                                                                                                          |
-| `create_meal(...)`                                     | Schedule a meal — assigns people (by name) to a recipe (by slug) or an ad-hoc ingredient list                                                                                                                                                                   |
-| `whoami`                                               | Returns the authenticated family member's name. Useful for verifying your client config                                                                                                                                                                         |
+| Tool                                                   | Purpose                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_curated_recipes`, `search_recipes`, `get_recipe` | Discover existing recipes. `list_curated_recipes` returns a ≤30-row favorites/recent/top-rated shortlist; `search_recipes` requires at least one filter (query, tags, max_total_time_minutes, min_rating, is_favorite, unmade_since_days, excludes_for_persons, includes_ingredient_substrings) |
+| `list_people`                                          | Active family members with dietary goals, dislikes, favorites                                                                                                                                                                                                                                   |
+| `get_family_overview`                                  | Markdown summary of all active family members in one block (tool mirror of the resource)                                                                                                                                                                                                        |
+| `list_meals(start_date, end_date)`                     | Meals already scheduled in a range                                                                                                                                                                                                                                                              |
+| `get_shopping_list(start_date, end_date)`              | Aggregated ingredient list with unit conversion                                                                                                                                                                                                                                                 |
+| `create_recipe(...)`                                   | Add a new recipe. Slug is auto-generated from the name                                                                                                                                                                                                                                          |
+| `create_meal(...)`                                     | Schedule a meal — assigns people (by name) to a recipe (by slug) or an ad-hoc ingredient list                                                                                                                                                                                                   |
+| `whoami`                                               | Returns the authenticated family member's name. Useful for verifying your client config                                                                                                                                                                                                         |
 
 ### Resource
 
@@ -191,6 +191,24 @@ Fully quit and relaunch Claude Desktop. You should see fewd's tools in the MCP i
 
 **Troubleshooting `Forbidden: Host header is not allowed` (HTTP 403)** — the MCP transport ships with DNS-rebinding protection that allowlists the `Host` header, defaulting to `localhost`/`127.0.0.1`/`::1` only. When Claude Desktop reaches the server at, say, `http://dietpi.local:3000/mcp`, the `Host` header is `dietpi.local:3000` and the server rejects it. Set `MCP_ALLOWED_HOSTS` to whatever address the client uses — that may be an mDNS/DNS name (`dietpi.local`, `homeserver`) **or** a raw IP literal (`192.168.1.42`, `[fe80::1]`). For systemd deployments that's an `Environment=` line in `deploy/fewd.service`. Multiple entries go comma-separated; a bare entry matches any port, `entry:port` matches one port.
 
+### Inspect and test with MCP Inspector
+
+For local development — exploring tool surfaces, eyeballing JSON-RPC frames, sanity-checking a change before opening a PR — the official [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is the right tool. It's a hosted web UI that speaks Streamable HTTP and lets you call tools by hand. **It is not a substitute for the automated test suite** (see `server/tests/service_tests.rs` and `server/tests/mcp_auth_plumbing_test.rs`); reach for it when you want to poke at a running server or diagnose a failing test, not to verify a PR.
+
+**Setup:**
+
+1. Provision a token for any active family member in the web UI (Settings → _Provision token_). Copy the plaintext.
+2. In a fresh terminal: `npx @modelcontextprotocol/inspector` — the UI boots at `http://localhost:6274`.
+3. In the Inspector UI, set:
+   - **Transport type:** Streamable HTTP
+   - **URL:** `http://localhost:3000/mcp` (matches `just dev`)
+   - **Authentication:** Bearer Token → paste the plaintext from step 1
+4. Click **Connect**. The tools list populates from the server.
+
+From there: pick a tool, fill the params pane, click **Run**, inspect the response. The Inspector's History panel shows every JSON-RPC frame on the wire — handy when comparing against `mcp_auth_plumbing_test.rs`.
+
+See [`docs/mcp-testing.md`](docs/mcp-testing.md) for a catalog of copy-pasteable tool+params combos covering happy paths, error paths, and edge cases for every tool.
+
 ### Scope of v1
 
 Currently exposed: recipes + people (read) and recipes + meals (write). **Not** exposed: cocktails / bar inventory, meal templates, updates, deletes, AI enhancement endpoints (the web UI still uses those). The MCP server is intended for meal-planning conversations, not administration.
@@ -245,6 +263,7 @@ fewd/
 - **REQUIREMENTS.md** — Full specifications and data models
 - **IMPLEMENTATION_PLAN.md** — Build guide for upcoming features
 - **CLAUDE.md** — Development guide for AI assistants
+- **docs/mcp-testing.md** — Copy-pasteable tool+params combos for exploratory MCP testing via Inspector
 
 ## License
 

@@ -3470,6 +3470,38 @@ mod recipe_discovery {
     }
 
     #[tokio::test]
+    async fn search_filtered_includes_no_match_returns_empty_not_error() {
+        // Substring that appears in zero ingredient names must surface as
+        // an empty Vec, not an error. The bead is explicit: "substring
+        // matching zero ingredients in the catalog is a valid 'no results'
+        // answer." A future refactor that errors instead would silently
+        // break LLM recovery — the client would see a Tool failure for
+        // what is actually a successful empty search.
+        let db = setup_db().await;
+        RecipeService::create(&db, recipe_with("Apple", vec!["apple"], vec![], None))
+            .await
+            .unwrap();
+        RecipeService::create(&db, recipe_with("Banana", vec!["banana"], vec![], None))
+            .await
+            .unwrap();
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                included_ingredient_substrings: vec!["zzzzzz".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("no-match search must return Ok, not Err");
+        assert!(
+            out.is_empty(),
+            "no-match search must return an empty Vec, got: {:?}",
+            names(&out)
+        );
+    }
+
+    #[tokio::test]
     async fn search_filtered_includes_empty_vec_is_noop() {
         // Bead-required: empty Vec on this axis must not change behavior.
         // Pair it with another filter so the call passes is_empty().
