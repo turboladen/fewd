@@ -93,6 +93,17 @@ pub struct SearchRecipesParams {
     /// pointing at `list_people`.
     #[serde(default)]
     pub excludes_for_persons: Option<Vec<String>>,
+    /// Restrict results to recipes that contain ALL of these substrings in
+    /// some ingredient name (case-insensitive substring match). Multiple
+    /// values AND together — `["spam","cheese"]` means "recipes with both
+    /// spam AND cheese," possibly in different ingredients. Composes with
+    /// every other filter. Mirror of `excludes_for_persons` (which removes
+    /// ingredients); use this when the user names an ingredient they want
+    /// to USE. "olive" matches "olive oil" and "pitted olives" alike —
+    /// this is lower-stakes than the exclude side (extra hits are easier
+    /// to mentally filter than missing hits).
+    #[serde(default)]
+    pub includes_ingredient_substrings: Option<Vec<String>>,
 }
 
 impl SearchRecipesParams {
@@ -122,10 +133,15 @@ impl SearchRecipesParams {
             .excludes_for_persons
             .as_ref()
             .is_some_and(|v| v.iter().any(|n| !n.trim().is_empty()));
+        let includes_provides_filter = self
+            .includes_ingredient_substrings
+            .as_ref()
+            .is_some_and(|v| v.iter().any(|s| !s.trim().is_empty()));
 
         if q_provides_filter
             || tags_provides_filter
             || excludes_provides_filter
+            || includes_provides_filter
             || self.max_total_time_minutes.is_some()
             || self.min_rating.is_some()
             || self.is_favorite.is_some()
@@ -135,7 +151,8 @@ impl SearchRecipesParams {
         } else {
             Err("search_recipes requires at least one filter \
                  (query, tags, max_total_time_minutes, min_rating, is_favorite, \
-                 unmade_since_days, or excludes_for_persons). \
+                 unmade_since_days, excludes_for_persons, or \
+                 includes_ingredient_substrings). \
                  For an unfiltered shortlist call list_curated_recipes.")
         }
     }
@@ -161,6 +178,24 @@ impl SearchRecipesParams {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Lowercased, whitespace-trimmed include substrings — empties dropped,
+    /// duplicates removed. The service-layer SQL only lowercases the
+    /// ingredient (haystack), so the caller must pre-lowercase substrings.
+    pub fn normalized_included_substrings(&self) -> Vec<String> {
+        let Some(v) = self.includes_ingredient_substrings.as_ref() else {
+            return Vec::new();
+        };
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut out: Vec<String> = Vec::new();
+        for s in v {
+            let normalized = s.trim().to_lowercase();
+            if !normalized.is_empty() && seen.insert(normalized.clone()) {
+                out.push(normalized);
+            }
+        }
+        out
     }
 }
 
@@ -395,6 +430,61 @@ mod tests {
             ..Default::default()
         };
         assert!(p.validate_has_filter().is_err());
+    }
+
+    #[test]
+    fn search_params_validate_rejects_only_empty_string_includes_ingredient_substrings() {
+        let p = SearchRecipesParams {
+            includes_ingredient_substrings: Some(vec!["".into(), "  ".into()]),
+            ..Default::default()
+        };
+        assert!(p.validate_has_filter().is_err());
+    }
+
+    #[test]
+    fn search_params_validate_accepts_only_includes_ingredient_substrings() {
+        // Bead-required: a bare call with only this filter must pass —
+        // it's the whole reason the filter exists.
+        let p = SearchRecipesParams {
+            includes_ingredient_substrings: Some(vec!["spam".into()]),
+            ..Default::default()
+        };
+        assert!(p.validate_has_filter().is_ok());
+    }
+
+    #[test]
+    fn search_params_validate_error_lists_includes_ingredient_substrings() {
+        // Regression: the actionable error must enumerate every filter
+        // the tool accepts, otherwise the LLM can't recover by adding
+        // the new filter from the error message alone.
+        let err = SearchRecipesParams::default()
+            .validate_has_filter()
+            .unwrap_err();
+        assert!(
+            err.contains("includes_ingredient_substrings"),
+            "error must list the new filter: {err}"
+        );
+    }
+
+    #[test]
+    fn search_params_normalized_included_substrings_lowercases_trims_and_dedupes() {
+        let p = SearchRecipesParams {
+            includes_ingredient_substrings: Some(vec![
+                "Spam".into(),
+                "  CHEESE  ".into(),
+                "spam".into(), // duplicate after normalization
+                "".into(),
+                "   ".into(),
+            ]),
+            ..Default::default()
+        };
+        assert_eq!(p.normalized_included_substrings(), vec!["spam", "cheese"]);
+    }
+
+    #[test]
+    fn search_params_normalized_included_substrings_none_yields_empty() {
+        let p = SearchRecipesParams::default();
+        assert!(p.normalized_included_substrings().is_empty());
     }
 
     #[test]

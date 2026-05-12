@@ -32,6 +32,12 @@ pub struct SearchFilters {
     /// contains ANY listed substring (case-insensitive). Already-flattened
     /// across all `excludes_for_persons` resolved in the handler.
     pub excluded_ingredient_substrings: Vec<String>,
+    /// Lowercased substrings — recipe matches only if EVERY substring
+    /// appears in SOME ingredient name (case-insensitive). Multiple
+    /// substrings AND together; each substring may match a different
+    /// ingredient. Empty Vec is a no-op (treated as "no filter on this
+    /// axis").
+    pub included_ingredient_substrings: Vec<String>,
 }
 
 impl SearchFilters {
@@ -47,6 +53,7 @@ impl SearchFilters {
             && self.is_favorite.is_none()
             && self.unmade_since_days.is_none()
             && self.excluded_ingredient_substrings.is_empty()
+            && self.included_ingredient_substrings.is_empty()
     }
 }
 
@@ -363,6 +370,18 @@ impl RecipeService {
             // otherwise over-match. instr() does true substring matching.
             q = q.filter(Expr::cust_with_values(
                 "NOT EXISTS (SELECT 1 FROM json_each(\"recipes\".\"ingredients\") AS ie WHERE instr(LOWER(json_extract(ie.value, '$.name')), ?) > 0)",
+                [substring.clone()],
+            ));
+        }
+
+        for substring in &filters.included_ingredient_substrings {
+            // Mirror of the exclude loop above (drops the `NOT`); see that
+            // comment for the `instr` vs `LIKE` rationale. One EXISTS per
+            // substring (chained `.filter()` calls AND together) matches
+            // the bead-specified semantics: every substring must appear
+            // in SOME ingredient name, possibly a different one each.
+            q = q.filter(Expr::cust_with_values(
+                "EXISTS (SELECT 1 FROM json_each(\"recipes\".\"ingredients\") AS ie WHERE instr(LOWER(json_extract(ie.value, '$.name')), ?) > 0)",
                 [substring.clone()],
             ));
         }

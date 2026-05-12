@@ -3202,4 +3202,301 @@ mod recipe_discovery {
         .unwrap();
         assert_eq!(names(&out), vec!["Beef Stew"]);
     }
+
+    // ── includes_ingredient_substrings (fewd-e7o) ───────────────────
+    //
+    // Symmetric twin of the exclude tests above. Where the exclude
+    // filter says "recipe matches iff NO ingredient name contains the
+    // substring," the include filter says "recipe matches iff some
+    // ingredient name contains the substring." Multi-substring composes
+    // as AND on both sides — different teaching shape per side (see the
+    // multi_substring_and_semantics test).
+
+    #[tokio::test]
+    async fn search_filtered_includes_substring_matches_name_field() {
+        let db = setup_db().await;
+        RecipeService::create(&db, recipe_with("Olive Salad", vec!["olive"], vec![], None))
+            .await
+            .unwrap();
+        // 'olive oil' matches by substring — the bead-documented
+        // false-positive case, but lower-stakes for include.
+        RecipeService::create(
+            &db,
+            recipe_with("Pasta Aglio", vec!["olive oil", "garlic"], vec![], None),
+        )
+        .await
+        .unwrap();
+        RecipeService::create(
+            &db,
+            recipe_with("Beef Stew", vec!["beef", "carrot"], vec![], None),
+        )
+        .await
+        .unwrap();
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                included_ingredient_substrings: vec!["olive".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out), vec!["Olive Salad", "Pasta Aglio"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_includes_only_match_ingredient_name_not_other_fields() {
+        let db = setup_db().await;
+        // "olives" appears only in `prep` / `unit` / `notes` — NOT in any
+        // ingredient name. Including "olives" must NOT match this recipe.
+        let dto = CreateRecipeDto {
+            name: "Decoy".to_string(),
+            description: None,
+            source: "test".to_string(),
+            source_url: None,
+            parent_recipe_id: None,
+            prep_time: None,
+            cook_time: None,
+            total_time: None,
+            servings: 4,
+            portion_size: None,
+            instructions: String::new(),
+            ingredients: vec![IngredientDto {
+                name: "tomato".to_string(),
+                prep: Some("chopped, with olives on the side".to_string()),
+                amount: IngredientAmountDto::Single { value: 2.0 },
+                unit: "olives".to_string(), // bizarre but legal
+                notes: Some("olives optional".to_string()),
+                or_alternative: None,
+            }],
+            nutrition_per_serving: None,
+            tags: vec![],
+            notes: None,
+            icon: None,
+        };
+        RecipeService::create(&db, dto).await.unwrap();
+        // Control: a recipe that DOES have "olives" in an ingredient name
+        // so we know the filter is doing real work, not just rejecting
+        // every recipe.
+        RecipeService::create(&db, recipe_with("Real", vec!["olives"], vec![], None))
+            .await
+            .unwrap();
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                included_ingredient_substrings: vec!["olives".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            names(&out),
+            vec!["Real"],
+            "includes_ingredient_substrings must match the name field only — prep/unit/notes don't trigger"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_filtered_includes_multi_substring_and_semantics() {
+        // Bead-required: ["spam","cheese"] means "recipes with both
+        // spam AND cheese," possibly in different ingredients.
+        let db = setup_db().await;
+        RecipeService::create(&db, recipe_with("Spam Only", vec!["spam"], vec![], None))
+            .await
+            .unwrap();
+        RecipeService::create(
+            &db,
+            recipe_with("Cheese Only", vec!["cheese"], vec![], None),
+        )
+        .await
+        .unwrap();
+        RecipeService::create(
+            &db,
+            recipe_with("Spam And Cheese", vec!["spam", "cheese"], vec![], None),
+        )
+        .await
+        .unwrap();
+        RecipeService::create(&db, recipe_with("Neither", vec!["tofu"], vec![], None))
+            .await
+            .unwrap();
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                included_ingredient_substrings: vec!["spam".to_string(), "cheese".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out), vec!["Spam And Cheese"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_includes_combined_with_excludes_no_contradiction() {
+        // include "spam" AND exclude "tofu" — recipes need spam AND not tofu.
+        let db = setup_db().await;
+        RecipeService::create(&db, recipe_with("Spam Only", vec!["spam"], vec![], None))
+            .await
+            .unwrap();
+        RecipeService::create(&db, recipe_with("Tofu Only", vec!["tofu"], vec![], None))
+            .await
+            .unwrap();
+        RecipeService::create(
+            &db,
+            recipe_with("Spam And Tofu", vec!["spam", "tofu"], vec![], None),
+        )
+        .await
+        .unwrap();
+        RecipeService::create(&db, recipe_with("Neither", vec!["carrot"], vec![], None))
+            .await
+            .unwrap();
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                included_ingredient_substrings: vec!["spam".to_string()],
+                excluded_ingredient_substrings: vec!["tofu".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out), vec!["Spam Only"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_includes_treats_percent_and_underscore_as_literal_chars() {
+        // Mirror of the exclude-side wildcard-trap regression: include
+        // "%" / "_" must match only literal percent / underscore in
+        // ingredient names, never act as SQL wildcards.
+        let db = setup_db().await;
+        RecipeService::create(
+            &db,
+            recipe_with(
+                "Marinade",
+                vec!["100% Pure Olive Oil", "a_b mix", "garlic"],
+                vec![],
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        RecipeService::create(&db, recipe_with("Plain", vec!["garlic"], vec![], None))
+            .await
+            .unwrap();
+
+        // "%" is a literal substring of "100% Pure Olive Oil" → match.
+        let out_percent = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                included_ingredient_substrings: vec!["%".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            names(&out_percent),
+            vec!["Marinade"],
+            "include '%' must match only the literal '%' in 'Marinade'; LIKE wildcards would have matched 'Plain' too"
+        );
+
+        // "_" is a literal substring of "a_b mix" → match.
+        let out_underscore = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                included_ingredient_substrings: vec!["_".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            names(&out_underscore),
+            vec!["Marinade"],
+            "include '_' must match only the literal '_' in 'a_b mix'; LIKE wildcards would have matched any 1+ char name"
+        );
+
+        // "%%" is not a literal substring of any ingredient → no match.
+        let out_double_percent = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                included_ingredient_substrings: vec!["%%".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            names(&out_double_percent),
+            Vec::<&str>::new(),
+            "include '%%' is not a literal substring of any name; nothing must match"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_filtered_includes_match_title_case_ingredient_names() {
+        // Stored ingredients capitalized as users type them ("Olive Oil");
+        // include substring is pre-lowercased by the handler. SQL's
+        // LOWER(json_extract(...)) makes the match case-insensitive.
+        let db = setup_db().await;
+        RecipeService::create(
+            &db,
+            recipe_with("Pasta Aglio", vec!["Olive Oil", "Garlic"], vec![], None),
+        )
+        .await
+        .unwrap();
+        RecipeService::create(
+            &db,
+            recipe_with("Beef Stew", vec!["Beef", "Carrot"], vec![], None),
+        )
+        .await
+        .unwrap();
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                included_ingredient_substrings: vec!["olive".to_string()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out), vec!["Pasta Aglio"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_includes_empty_vec_is_noop() {
+        // Bead-required: empty Vec on this axis must not change behavior.
+        // Pair it with another filter so the call passes is_empty().
+        let db = setup_db().await;
+        RecipeService::create(
+            &db,
+            recipe_with("Apple", vec!["apple"], vec!["fruit"], None),
+        )
+        .await
+        .unwrap();
+        RecipeService::create(
+            &db,
+            recipe_with("Banana", vec!["banana"], vec!["fruit"], None),
+        )
+        .await
+        .unwrap();
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                tags: vec!["fruit".to_string()],
+                included_ingredient_substrings: vec![],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(names(&out), vec!["Apple", "Banana"]);
+    }
 }
