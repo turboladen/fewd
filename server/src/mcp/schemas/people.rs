@@ -55,12 +55,22 @@ pub fn person_to_prefs(person: &person::Model) -> Result<PersonWithPrefs, String
 /// omitted field — or an explicit JSON `null` — leaves the column
 /// unchanged.
 ///
-/// There is intentionally NO way to clear a nullable text field (`notes`,
-/// `drink_preferences`, `drink_dislikes`) back to NULL via this tool. The
-/// codebase's universal partial-update convention (every `service::update`
-/// across person, recipe, meal, drink-recipe, meal-template) only supports
-/// "set", not "clear"; the web UI is the path for clearing. Encoded here so
-/// a single MCP entry point can't fork the convention.
+/// **Clear semantics differ by field shape**:
+///
+/// - `notes` (free-form string column): cannot be cleared back to NULL via
+///   this tool. The codebase's universal partial-update convention (every
+///   `service::update` across person, recipe, meal, drink-recipe,
+///   meal-template) only supports "set", not "clear"; the web UI is the
+///   path for clearing. A single MCP entry point shouldn't fork the
+///   convention.
+/// - The four list fields (`dislikes`, `favorites`, `drink_preferences`,
+///   `drink_dislikes`): passing `[]` REPLACES the existing list with an
+///   empty array. That's the same write path as setting them to any other
+///   list — `Some(vec![])` flows through `update_person_input_to_dto` →
+///   `Set(to_json(&vec![]))` → `"[]"` in the DB. Reasonable for the
+///   "clean-up bad data" use case; deliberate that we don't coalesce
+///   empty arrays to "no-op" because that would silently drop a
+///   legitimate write.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UpdatePersonInput {
     pub name: String,

@@ -21,6 +21,7 @@ use crate::services::recipe_service::{RecipeService, SearchFilters};
 use crate::services::shopping_service::ShoppingService;
 
 use super::lookups::MealLookups;
+use super::schemas::errors::ResolveError;
 use super::schemas::{
     create_meal_input_to_dto, create_recipe_input_to_dto, meal_to_brief, person_to_prefs,
     recipe_to_brief, recipe_to_full, render_family_overview, shopping_item_from_dto,
@@ -263,7 +264,7 @@ impl FewdMcp {
 
     #[tool(
         name = "update_person",
-        description = "Record what you've learned about a family member's preferences this session so future conversations inherit it — call AFTER `list_people` or `get_family_overview` to grab the canonical `name`. Updates any subset of `notes`, `dislikes`, `favorites`, `drink_preferences`, `drink_dislikes`; omitted (or null) fields are left unchanged. There is no way to clear a field back to null via this tool — use the web UI for that. Identification is case-insensitive on `name`. Authorization: any authenticated family member may update any other member (single-household trust model). Changes are visible to subsequent `list_people` / `get_family_overview` calls immediately.",
+        description = "Record what you've learned about a family member's preferences this session so future conversations inherit it — call AFTER `list_people` or `get_family_overview` to grab the canonical `name`. Updates any subset of `notes`, `dislikes`, `favorites`, `drink_preferences`, `drink_dislikes`; omitted (or null) fields are left unchanged. For the list fields, passing an explicit empty array (`[]`) REPLACES the existing list with empty — that's the only path to clearing one via this tool. `notes` (a free-form string) cannot be cleared back to null at all; use the web UI for that. Identification is case-insensitive on `name`. Authorization: any authenticated family member may update any other member (single-household trust model). Changes are visible to subsequent `list_people` / `get_family_overview` calls immediately.",
         input_schema = rmcp::handler::server::common::schema_for_type::<UpdatePersonInput>()
     )]
     async fn update_person(
@@ -278,20 +279,18 @@ impl FewdMcp {
         // `list_people` and `create_meal` use, and it intentionally
         // collapses "no match" and "ambiguous match" both to `Ok(None)`
         // (the ambiguous case is logged separately via `tracing::warn!`
-        // for the operator). Surface a single actionable error pointing
-        // at `list_people` — matching the existing pattern in
-        // `create_meal`'s person-resolution path so the LLM's recovery
-        // route is identical across tools.
-        let original_name = input.name.clone();
+        // for the operator). Reuse `ResolveError::UnknownPerson`'s
+        // canonical message so the LLM's recovery path is identical
+        // to `create_meal`'s person-resolution failure.
         let person = match PersonService::find_active_by_name(&self.db, &input.name)
             .await
             .map_err(db_error)?
         {
             Some(p) => p,
             None => {
-                return Ok(tool_user_error(format!(
-                    "update_person: no active family member named '{original_name}'. Call list_people for valid names."
-                )));
+                return Ok(tool_user_error(
+                    ResolveError::UnknownPerson(input.name).to_string(),
+                ));
             }
         };
         let dto = update_person_input_to_dto(input);
@@ -1391,6 +1390,83 @@ mod tests {
             }))
             .await;
         assert_tool_user_error(result, &["Phantom", "list_people"]);
+    }
+
+    #[tokio::test]
+    async fn update_person_explicit_empty_array_clears_the_list_field() {
+        // Pins the documented clear-semantics for list fields: passing
+        // `[]` REPLACES with empty (the only path to clearing via MCP).
+        // Distinct from "omit the field" — that leaves the row unchanged.
+        // A regression that coalesced `Some(vec![])` to `None` would
+        // silently drop a legitimate write; this test catches that.
+        let mcp = setup_test_mcp().await;
+        seed_person(&mcp, "Cleo").await;
+
+        let result = mcp
+            .update_person(LenientParameters::for_test(UpdatePersonInput {
+                name: "Cleo".into(),
+                notes: None,
+                dislikes: Some(vec![]),
+                favorites: None,
+                drink_preferences: None,
+                drink_dislikes: None,
+            }))
+            .await
+            .expect("update_person returns Ok");
+        assert_ne!(result.is_error, Some(true));
+
+        let reloaded = PersonService::find_active_by_name(&mcp.db, "Cleo")
+            .await
+            .expect("lookup succeeds")
+            .expect("Cleo still exists");
+        // Touched field cleared to "[]".
+        assert_eq!(reloaded.dislikes, "[]");
+        // Untouched fields preserved from the seed.
+        assert_eq!(reloaded.favorites, "[\"pasta\"]");
+        assert_eq!(reloaded.notes.as_deref(), Some("original note"));
+    }
+
+    #[tokio::test]
+    async fn update_person_refuses_to_update_inactive_member() {
+        // The active-only filter is enforced transitively via
+        // `find_active_by_name → get_all → IsActive.eq(true)`. Pin the
+        // tool-level behavior so a future refactor that bypasses the
+        // helper (e.g. switching to `find_by_id`) can't silently let
+        // the LLM resurrect soft-deleted rows.
+        let mcp = setup_test_mcp().await;
+        let cleo = seed_person(&mcp, "Cleo").await;
+        // Soft-delete Cleo directly via the service.
+        PersonService::update(
+            &mcp.db,
+            cleo.id,
+            crate::dto::UpdatePersonDto {
+                name: None,
+                birthdate: None,
+                dietary_goals: None,
+                dislikes: None,
+                favorites: None,
+                notes: None,
+                is_active: Some(false),
+                drink_preferences: None,
+                drink_dislikes: None,
+            },
+        )
+        .await
+        .expect("soft-delete");
+
+        let result = mcp
+            .update_person(LenientParameters::for_test(UpdatePersonInput {
+                name: "Cleo".into(),
+                notes: Some("should not write".into()),
+                dislikes: None,
+                favorites: None,
+                drink_preferences: None,
+                drink_dislikes: None,
+            }))
+            .await;
+        // From the LLM's perspective an inactive person looks identical
+        // to a non-existent one — same actionable error, same recovery.
+        assert_tool_user_error(result, &["Cleo", "list_people"]);
     }
 
     #[tokio::test]
