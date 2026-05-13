@@ -33,7 +33,9 @@ mod shopping;
 pub use common::{DateRangeParams, EmptyParams, GetRecipeParams};
 pub use errors::CreateMealError;
 pub use meals::{create_meal_input_to_dto, meal_to_brief, CreateMealInput};
-pub use people::{person_to_prefs, render_family_overview};
+pub use people::{
+    person_to_prefs, render_family_overview, update_person_input_to_dto, UpdatePersonInput,
+};
 pub use recipes::{
     create_recipe_input_to_dto, recipe_to_brief, recipe_to_full, CreateRecipeInput,
     SearchRecipesParams,

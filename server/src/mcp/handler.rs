@@ -24,8 +24,8 @@ use super::lookups::MealLookups;
 use super::schemas::{
     create_meal_input_to_dto, create_recipe_input_to_dto, meal_to_brief, person_to_prefs,
     recipe_to_brief, recipe_to_full, render_family_overview, shopping_item_from_dto,
-    CreateMealError, CreateMealInput, CreateRecipeInput, DateRangeParams, EmptyParams,
-    GetRecipeParams, SearchRecipesParams,
+    update_person_input_to_dto, CreateMealError, CreateMealInput, CreateRecipeInput,
+    DateRangeParams, EmptyParams, GetRecipeParams, SearchRecipesParams, UpdatePersonInput,
 };
 use super::AuthenticatedPerson;
 
@@ -235,7 +235,7 @@ impl FewdMcp {
 
     #[tool(
         name = "list_people",
-        description = "Look up active family members' canonical names — call BEFORE `create_meal` (to assign servings), `search_recipes`'s `excludes_for_persons`, or any other tool that takes a person name, so the names match exactly. Returns each member's dietary goals, dislikes, favorites, and notes; the `name` field (case-insensitive) is the identifier.",
+        description = "Look up active family members' canonical names — call BEFORE `create_meal` (to assign servings), `search_recipes`'s `excludes_for_persons`, `update_person` (to write preference learnings back), or any other tool that takes a person name, so the names match exactly. Returns each member's dietary goals, dislikes, favorites, notes, and drink preferences/dislikes; the `name` field (case-insensitive) is the identifier.",
         input_schema = rmcp::handler::server::common::schema_for_type::<EmptyParams>()
     )]
     async fn list_people(
@@ -261,13 +261,54 @@ impl FewdMcp {
         tool_json_result(&out)
     }
 
+    #[tool(
+        name = "update_person",
+        description = "Record what you've learned about a family member's preferences this session so future conversations inherit it — call AFTER `list_people` or `get_family_overview` to grab the canonical `name`. Updates any subset of `notes`, `dislikes`, `favorites`, `drink_preferences`, `drink_dislikes`; omitted (or null) fields are left unchanged. There is no way to clear a field back to null via this tool — use the web UI for that. Identification is case-insensitive on `name`. Authorization: any authenticated family member may update any other member (single-household trust model). Changes are visible to subsequent `list_people` / `get_family_overview` calls immediately.",
+        input_schema = rmcp::handler::server::common::schema_for_type::<UpdatePersonInput>()
+    )]
+    async fn update_person(
+        &self,
+        input: LenientParameters<UpdatePersonInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let input = match input.into_tool_input("update_person") {
+            Ok(v) => v,
+            Err(e) => return Ok(e),
+        };
+        // `find_active_by_name` is the same case-insensitive resolver
+        // `list_people` and `create_meal` use, and it intentionally
+        // collapses "no match" and "ambiguous match" both to `Ok(None)`
+        // (the ambiguous case is logged separately via `tracing::warn!`
+        // for the operator). Surface a single actionable error pointing
+        // at `list_people` — matching the existing pattern in
+        // `create_meal`'s person-resolution path so the LLM's recovery
+        // route is identical across tools.
+        let original_name = input.name.clone();
+        let person = match PersonService::find_active_by_name(&self.db, &input.name)
+            .await
+            .map_err(db_error)?
+        {
+            Some(p) => p,
+            None => {
+                return Ok(tool_user_error(format!(
+                    "update_person: no active family member named '{original_name}'. Call list_people for valid names."
+                )));
+            }
+        };
+        let dto = update_person_input_to_dto(input);
+        let updated = PersonService::update(&self.db, person.id, dto)
+            .await
+            .map_err(db_error)?;
+        let out = person_to_prefs(&updated).map_err(internal_error)?;
+        tool_json_result(&out)
+    }
+
     /// Tool mirror of the `fewd://family/overview` resource. Resources in
     /// MCP are expected to be surfaced by the host for user-side attachment
     /// (paperclip UI) and are not addressable by the LLM on its own, so a
     /// tool is the only way to let Claude read the overview autonomously.
     #[tool(
         name = "get_family_overview",
-        description = "Ground a meal-planning conversation by reading every family member's diet, dislikes, favorites, and notes in one block — call this FIRST in any planning session before `list_curated_recipes` / `search_recipes`. Returns a human-readable Markdown summary (use `list_people` instead when you need structured fields per member). Equivalent to the `fewd://family/overview` resource.",
+        description = "Ground a meal-planning conversation by reading every family member's diet, dislikes, favorites, notes, and drink preferences in one block — call this FIRST in any planning session before `list_curated_recipes` / `search_recipes`. Returns a human-readable Markdown summary (use `list_people` instead when you need structured fields per member; use `update_person` to persist preference learnings back). Equivalent to the `fewd://family/overview` resource.",
         input_schema = rmcp::handler::server::common::schema_for_type::<EmptyParams>()
     )]
     async fn get_family_overview(
@@ -462,6 +503,10 @@ impl ServerHandler for FewdMcp {
                  members by name to recipes by slug (or ad-hoc items). \
                  (5) SHOP — `get_shopping_list` over the date range produces the \
                  consolidated grocery list. \
+                 (6) CAPTURE — when you learn something durable about a family member \
+                 mid-conversation (a standing note, a new like/dislike, a drink \
+                 preference), call `update_person` so it's available next session \
+                 instead of dying with this conversation. \
                  All date inputs are YYYY-MM-DD.",
             )
     }
@@ -1224,6 +1269,158 @@ mod tests {
         assert_tool_user_error(result, &["Bob", "list_people"]);
     }
 
+    // ─── update_person ──────────────────────────────────────────────
+    //
+    // Tools that mutate state need a happy-path test that re-reads the
+    // row (so we catch a regression where the service call is dropped
+    // and the tool reports success without writing). Negative paths
+    // assert the actionable-error contract so the LLM can recover.
+
+    use crate::dto::CreatePersonDto;
+
+    async fn seed_person(mcp: &FewdMcp, name: &str) -> person::Model {
+        PersonService::create(
+            &mcp.db,
+            CreatePersonDto {
+                name: name.into(),
+                birthdate: "1990-01-01".into(),
+                dietary_goals: None,
+                dislikes: vec!["olives".into()],
+                favorites: vec!["pasta".into()],
+                notes: Some("original note".into()),
+                drink_preferences: Some(vec!["whiskey".into()]),
+                drink_dislikes: Some(vec!["gin".into()]),
+            },
+        )
+        .await
+        .expect("seed person")
+    }
+
+    #[tokio::test]
+    async fn update_person_happy_path_writes_notes_and_returns_canonical_state() {
+        let mcp = setup_test_mcp().await;
+        seed_person(&mcp, "Cleo").await;
+
+        let result = mcp
+            .update_person(LenientParameters::for_test(UpdatePersonInput {
+                name: "Cleo".into(),
+                notes: Some("pull from oven before glazing".into()),
+                dislikes: None,
+                favorites: None,
+                drink_preferences: None,
+                drink_dislikes: None,
+            }))
+            .await
+            .expect("update_person returns Ok");
+        assert_ne!(
+            result.is_error,
+            Some(true),
+            "happy path must not be a tool-level error: {result:?}"
+        );
+        let body = serde_json::to_string(&result).expect("serializes");
+        // The returned payload is `PersonWithPrefs`, so the new notes
+        // appear, the unchanged JSON-array fields round-trip, and the
+        // drink fields stay populated from the seed.
+        assert!(body.contains("pull from oven before glazing"));
+        assert!(body.contains("olives"));
+        assert!(body.contains("pasta"));
+        assert!(body.contains("whiskey"));
+        assert!(body.contains("gin"));
+
+        // Re-read via the service to catch any "echoes-but-didn't-write"
+        // regression — the tool's response could theoretically come from
+        // a successfully-built `PersonWithPrefs` even if the SQL update
+        // silently failed.
+        let reloaded = PersonService::find_active_by_name(&mcp.db, "Cleo")
+            .await
+            .expect("lookup succeeds")
+            .expect("Cleo still exists");
+        assert_eq!(
+            reloaded.notes.as_deref(),
+            Some("pull from oven before glazing")
+        );
+    }
+
+    #[tokio::test]
+    async fn update_person_partial_update_leaves_other_fields_untouched() {
+        let mcp = setup_test_mcp().await;
+        seed_person(&mcp, "Cleo").await;
+
+        let result = mcp
+            .update_person(LenientParameters::for_test(UpdatePersonInput {
+                name: "Cleo".into(),
+                notes: None,
+                dislikes: None,
+                favorites: None,
+                drink_preferences: Some(vec!["mezcal".into(), "amaro".into()]),
+                drink_dislikes: None,
+            }))
+            .await
+            .expect("update_person returns Ok");
+        assert_ne!(result.is_error, Some(true));
+
+        let reloaded = PersonService::find_active_by_name(&mcp.db, "Cleo")
+            .await
+            .expect("lookup succeeds")
+            .expect("Cleo still exists");
+        // Touched field updated.
+        assert_eq!(
+            reloaded.drink_preferences.as_deref(),
+            Some("[\"mezcal\",\"amaro\"]")
+        );
+        // Untouched fields preserved byte-for-byte from the seed.
+        assert_eq!(reloaded.notes.as_deref(), Some("original note"));
+        assert_eq!(reloaded.dislikes, "[\"olives\"]");
+        assert_eq!(reloaded.favorites, "[\"pasta\"]");
+        assert_eq!(reloaded.drink_dislikes.as_deref(), Some("[\"gin\"]"));
+    }
+
+    #[tokio::test]
+    async fn update_person_unknown_name_returns_tool_level_error_not_protocol_error() {
+        let mcp = setup_test_mcp().await;
+        // Empty DB → find_active_by_name returns None → tool-level error
+        // pointing at `list_people` per the cross-tool recovery convention.
+        let result = mcp
+            .update_person(LenientParameters::for_test(UpdatePersonInput {
+                name: "Phantom".into(),
+                notes: Some("doesn't matter".into()),
+                dislikes: None,
+                favorites: None,
+                drink_preferences: None,
+                drink_dislikes: None,
+            }))
+            .await;
+        assert_tool_user_error(result, &["Phantom", "list_people"]);
+    }
+
+    #[tokio::test]
+    async fn update_person_is_case_insensitive_and_trims_the_lookup_name() {
+        let mcp = setup_test_mcp().await;
+        seed_person(&mcp, "Cleo").await;
+
+        // Inherits the trim+lowercase normalization from
+        // `PersonService::find_active_by_name`. Verifies the tool does
+        // NOT add its own normalization (single source of truth).
+        let result = mcp
+            .update_person(LenientParameters::for_test(UpdatePersonInput {
+                name: "  CLEO  ".into(),
+                notes: Some("normalized lookup".into()),
+                dislikes: None,
+                favorites: None,
+                drink_preferences: None,
+                drink_dislikes: None,
+            }))
+            .await
+            .expect("update_person returns Ok");
+        assert_ne!(result.is_error, Some(true));
+
+        let reloaded = PersonService::find_active_by_name(&mcp.db, "Cleo")
+            .await
+            .expect("lookup succeeds")
+            .expect("Cleo still exists");
+        assert_eq!(reloaded.notes.as_deref(), Some("normalized lookup"));
+    }
+
     // ─── LenientParameters extraction layer ─────────────────────────
     //
     // Direct unit tests for `LenientParameters::extract`, the static
@@ -1454,6 +1651,7 @@ mod tests {
             "Find",     // search_recipes
             "Read",     // get_recipe
             "Look",     // list_people
+            "Record",   // update_person
             "Ground",   // get_family_overview
             "Check",    // list_meals
             "Produce",  // get_shopping_list
