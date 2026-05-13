@@ -1298,12 +1298,12 @@ mod tests {
     #[tokio::test]
     async fn update_person_happy_path_writes_notes_and_returns_canonical_state() {
         let mcp = setup_test_mcp().await;
-        seed_person(&mcp, "Cleo").await;
+        seed_person(&mcp, "Alice").await;
 
         let result = mcp
             .update_person(LenientParameters::for_test(UpdatePersonInput {
-                name: "Cleo".into(),
-                notes: Some("pull from oven before glazing".into()),
+                name: "Alice".into(),
+                notes: Some("needs smaller portion".into()),
                 dislikes: None,
                 favorites: None,
                 drink_preferences: None,
@@ -1320,7 +1320,7 @@ mod tests {
         // The returned payload is `PersonWithPrefs`, so the new notes
         // appear, the unchanged JSON-array fields round-trip, and the
         // drink fields stay populated from the seed.
-        assert!(body.contains("pull from oven before glazing"));
+        assert!(body.contains("needs smaller portion"));
         assert!(body.contains("olives"));
         assert!(body.contains("pasta"));
         assert!(body.contains("whiskey"));
@@ -1330,24 +1330,21 @@ mod tests {
         // regression — the tool's response could theoretically come from
         // a successfully-built `PersonWithPrefs` even if the SQL update
         // silently failed.
-        let reloaded = PersonService::find_active_by_name(&mcp.db, "Cleo")
+        let reloaded = PersonService::find_active_by_name(&mcp.db, "Alice")
             .await
             .expect("lookup succeeds")
-            .expect("Cleo still exists");
-        assert_eq!(
-            reloaded.notes.as_deref(),
-            Some("pull from oven before glazing")
-        );
+            .expect("Alice still exists");
+        assert_eq!(reloaded.notes.as_deref(), Some("needs smaller portion"));
     }
 
     #[tokio::test]
     async fn update_person_partial_update_leaves_other_fields_untouched() {
         let mcp = setup_test_mcp().await;
-        seed_person(&mcp, "Cleo").await;
+        seed_person(&mcp, "Alice").await;
 
         let result = mcp
             .update_person(LenientParameters::for_test(UpdatePersonInput {
-                name: "Cleo".into(),
+                name: "Alice".into(),
                 notes: None,
                 dislikes: None,
                 favorites: None,
@@ -1358,10 +1355,10 @@ mod tests {
             .expect("update_person returns Ok");
         assert_ne!(result.is_error, Some(true));
 
-        let reloaded = PersonService::find_active_by_name(&mcp.db, "Cleo")
+        let reloaded = PersonService::find_active_by_name(&mcp.db, "Alice")
             .await
             .expect("lookup succeeds")
-            .expect("Cleo still exists");
+            .expect("Alice still exists");
         // Touched field updated.
         assert_eq!(
             reloaded.drink_preferences.as_deref(),
@@ -1400,11 +1397,11 @@ mod tests {
         // A regression that coalesced `Some(vec![])` to `None` would
         // silently drop a legitimate write; this test catches that.
         let mcp = setup_test_mcp().await;
-        seed_person(&mcp, "Cleo").await;
+        seed_person(&mcp, "Alice").await;
 
         let result = mcp
             .update_person(LenientParameters::for_test(UpdatePersonInput {
-                name: "Cleo".into(),
+                name: "Alice".into(),
                 notes: None,
                 dislikes: Some(vec![]),
                 favorites: None,
@@ -1415,10 +1412,10 @@ mod tests {
             .expect("update_person returns Ok");
         assert_ne!(result.is_error, Some(true));
 
-        let reloaded = PersonService::find_active_by_name(&mcp.db, "Cleo")
+        let reloaded = PersonService::find_active_by_name(&mcp.db, "Alice")
             .await
             .expect("lookup succeeds")
-            .expect("Cleo still exists");
+            .expect("Alice still exists");
         // Touched field cleared to "[]".
         assert_eq!(reloaded.dislikes, "[]");
         // Untouched fields preserved from the seed.
@@ -1434,11 +1431,11 @@ mod tests {
         // helper (e.g. switching to `find_by_id`) can't silently let
         // the LLM resurrect soft-deleted rows.
         let mcp = setup_test_mcp().await;
-        let cleo = seed_person(&mcp, "Cleo").await;
-        // Soft-delete Cleo directly via the service.
+        let alice = seed_person(&mcp, "Alice").await;
+        // Soft-delete Alice directly via the service.
         PersonService::update(
             &mcp.db,
-            cleo.id,
+            alice.id,
             crate::dto::UpdatePersonDto {
                 name: None,
                 birthdate: None,
@@ -1456,7 +1453,7 @@ mod tests {
 
         let result = mcp
             .update_person(LenientParameters::for_test(UpdatePersonInput {
-                name: "Cleo".into(),
+                name: "Alice".into(),
                 notes: Some("should not write".into()),
                 dislikes: None,
                 favorites: None,
@@ -1466,20 +1463,20 @@ mod tests {
             .await;
         // From the LLM's perspective an inactive person looks identical
         // to a non-existent one — same actionable error, same recovery.
-        assert_tool_user_error(result, &["Cleo", "list_people"]);
+        assert_tool_user_error(result, &["Alice", "list_people"]);
     }
 
     #[tokio::test]
     async fn update_person_is_case_insensitive_and_trims_the_lookup_name() {
         let mcp = setup_test_mcp().await;
-        seed_person(&mcp, "Cleo").await;
+        seed_person(&mcp, "Alice").await;
 
         // Inherits the trim+lowercase normalization from
         // `PersonService::find_active_by_name`. Verifies the tool does
         // NOT add its own normalization (single source of truth).
         let result = mcp
             .update_person(LenientParameters::for_test(UpdatePersonInput {
-                name: "  CLEO  ".into(),
+                name: "  ALICE  ".into(),
                 notes: Some("normalized lookup".into()),
                 dislikes: None,
                 favorites: None,
@@ -1490,10 +1487,10 @@ mod tests {
             .expect("update_person returns Ok");
         assert_ne!(result.is_error, Some(true));
 
-        let reloaded = PersonService::find_active_by_name(&mcp.db, "Cleo")
+        let reloaded = PersonService::find_active_by_name(&mcp.db, "Alice")
             .await
             .expect("lookup succeeds")
-            .expect("Cleo still exists");
+            .expect("Alice still exists");
         assert_eq!(reloaded.notes.as_deref(), Some("normalized lookup"));
     }
 

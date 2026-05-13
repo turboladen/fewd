@@ -305,8 +305,8 @@ mod tests {
         // `name` on the input is the lookup key — it must NOT propagate
         // into `UpdatePersonDto.name` (which would rename the row).
         let input = UpdatePersonInput {
-            name: "Cleo".into(),
-            notes: Some("pull from oven before glazing".into()),
+            name: "Alice".into(),
+            notes: Some("needs smaller portion".into()),
             dislikes: None,
             favorites: Some(vec!["mac and cheese".into()]),
             drink_preferences: None,
@@ -324,7 +324,7 @@ mod tests {
         assert!(dto.dietary_goals.is_none());
         assert!(dto.is_active.is_none());
         // Writable fields forward verbatim.
-        assert_eq!(dto.notes.as_deref(), Some("pull from oven before glazing"));
+        assert_eq!(dto.notes.as_deref(), Some("needs smaller portion"));
         assert_eq!(dto.favorites.unwrap(), vec!["mac and cheese".to_string()]);
         assert!(dto.dislikes.is_none());
         assert!(dto.drink_preferences.is_none());
