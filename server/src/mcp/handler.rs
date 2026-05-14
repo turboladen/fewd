@@ -264,7 +264,7 @@ impl FewdMcp {
 
     #[tool(
         name = "update_person",
-        description = "Record what you've learned about a family member's preferences this session so future conversations inherit it — call AFTER `list_people` or `get_family_overview` to grab the canonical `name`. Updates any subset of `notes`, `dislikes`, `favorites`, `drink_preferences`, `drink_dislikes`; omitted (or null) fields are left unchanged. For the list fields, passing an explicit empty array (`[]`) REPLACES the existing list with empty — that's the only path to clearing one via this tool. `notes` (a free-form string) cannot be cleared back to null at all; use the web UI for that. Identification is case-insensitive on `name`. Authorization: any authenticated family member may update any other member (single-household trust model). Changes are visible to subsequent `list_people` / `get_family_overview` calls immediately.",
+        description = "Record what you've learned about a family member's preferences this session so future conversations inherit it — call AFTER `list_people` or `get_family_overview` to grab the canonical `name`. Updates any subset of `notes`, `dislikes`, `favorites`, `drink_preferences`, `drink_dislikes`; omitted (or null) fields are left unchanged. For the list fields, passing an explicit empty array (`[]`) REPLACES the existing list with empty — that's the only path to clearing one via this tool. `notes` (a free-form string) has no clear-to-null path in fewd today, neither here nor in the web UI; empty or whitespace-only input is normalized to 'no change' to preserve that invariant. Identification is case-insensitive on `name`. Authorization: any authenticated family member may update any other member (single-household trust model). Changes are visible to subsequent `list_people` / `get_family_overview` calls immediately.",
         input_schema = rmcp::handler::server::common::schema_for_type::<UpdatePersonInput>()
     )]
     async fn update_person(
@@ -1421,6 +1421,48 @@ mod tests {
         // Untouched fields preserved from the seed.
         assert_eq!(reloaded.favorites, "[\"pasta\"]");
         assert_eq!(reloaded.notes.as_deref(), Some("original note"));
+    }
+
+    #[tokio::test]
+    async fn update_person_empty_string_notes_is_no_op() {
+        // Pins the empty-string normalization for `notes`. Without this,
+        // a caller could persist `Some("")` to the notes column — which
+        // the family-overview renderer collapses to `_none_`, effectively
+        // backdooring a "clear" that the codebase invariant rules out.
+        // A regression that removed the trim-coerce-to-None step in
+        // `update_person_input_to_dto` would silently let that through;
+        // this test catches it end-to-end. See `UpdatePersonInput` rustdoc
+        // for the full rationale.
+        let mcp = setup_test_mcp().await;
+        seed_person(&mcp, "Alice").await;
+
+        for raw in ["", "   ", "\t\n"] {
+            let result = mcp
+                .update_person(LenientParameters::for_test(UpdatePersonInput {
+                    name: "Alice".into(),
+                    notes: Some(raw.into()),
+                    dislikes: None,
+                    favorites: None,
+                    drink_preferences: None,
+                    drink_dislikes: None,
+                }))
+                .await
+                .expect("update_person returns Ok");
+            assert_ne!(result.is_error, Some(true));
+
+            let reloaded = PersonService::find_active_by_name(&mcp.db, "Alice")
+                .await
+                .expect("lookup succeeds")
+                .expect("Alice still exists");
+            // The seed's original note must survive — the empty input
+            // must NOT have overwritten it with an empty/whitespace
+            // string.
+            assert_eq!(
+                reloaded.notes.as_deref(),
+                Some("original note"),
+                "empty notes input {raw:?} must not overwrite the seeded note"
+            );
+        }
     }
 
     #[tokio::test]

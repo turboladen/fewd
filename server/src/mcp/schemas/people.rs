@@ -57,12 +57,18 @@ pub fn person_to_prefs(person: &person::Model) -> Result<PersonWithPrefs, String
 ///
 /// **Clear semantics differ by field shape**:
 ///
-/// - `notes` (free-form string column): cannot be cleared back to NULL via
-///   this tool. The codebase's universal partial-update convention (every
-///   `service::update` across person, recipe, meal, drink-recipe,
-///   meal-template) only supports "set", not "clear"; the web UI is the
-///   path for clearing. A single MCP entry point shouldn't fork the
-///   convention.
+/// - `notes` (free-form string column): there is NO clear-to-NULL path
+///   for this column anywhere in fewd today — not via this tool, not via
+///   the web UI (which sends `notes: formData.notes || undefined` and
+///   so cannot clear either). `PersonService::update`'s convention is
+///   "set" only, never "clear". To preserve that invariant at the MCP
+///   boundary, `update_person_input_to_dto` normalizes an empty or
+///   whitespace-only `notes` string to `None` — without that
+///   normalization a caller could persist `Some("")` as a back-door
+///   clear (the renderer collapses it to `_none_`), silently forking
+///   the codebase invariant. If a real "clear" affordance is wanted
+///   later, it has to land in `UpdatePersonDto` + service + UI
+///   together so all three paths agree.
 /// - The four list fields (`dislikes`, `favorites`, `drink_preferences`,
 ///   `drink_dislikes`): passing `[]` REPLACES the existing list with an
 ///   empty array. That's the same write path as setting them to any other
@@ -91,13 +97,20 @@ pub struct UpdatePersonInput {
 /// write — the DTO's `name` (which would rename the person) is always left
 /// `None` because renames touch other tables that reference person.name and
 /// belong in a separate, more deliberate tool.
+///
+/// `notes` gets one normalization step: empty / whitespace-only input is
+/// coerced to `None` so the codebase invariant "no clear-to-NULL path for
+/// notes" holds at the MCP boundary. See `UpdatePersonInput`'s docstring
+/// for the full rationale.
 pub fn update_person_input_to_dto(input: UpdatePersonInput) -> UpdatePersonDto {
     UpdatePersonDto {
         name: None,
         birthdate: None,
         dietary_goals: None,
         is_active: None,
-        notes: input.notes,
+        notes: input
+            .notes
+            .and_then(|s| if s.trim().is_empty() { None } else { Some(s) }),
         dislikes: input.dislikes,
         favorites: input.favorites,
         drink_preferences: input.drink_preferences,
@@ -329,5 +342,43 @@ mod tests {
         assert!(dto.dislikes.is_none());
         assert!(dto.drink_preferences.is_none());
         assert!(dto.drink_dislikes.is_none());
+    }
+
+    #[test]
+    fn update_person_input_to_dto_normalizes_empty_notes_to_none() {
+        // Empty and whitespace-only `notes` inputs must collapse to None
+        // at this boundary — otherwise the caller could persist
+        // `Some("")` as a back-door clear (the family-overview renderer
+        // collapses it to `_none_`), silently forking the codebase
+        // invariant that `notes` has no clear-to-NULL path. The four
+        // list fields don't get the same treatment: `Some(vec![])` is
+        // documented as a legitimate "replace with empty" write.
+        for raw in ["", " ", "  \t\n  "] {
+            let dto = update_person_input_to_dto(UpdatePersonInput {
+                name: "Alice".into(),
+                notes: Some(raw.into()),
+                dislikes: None,
+                favorites: None,
+                drink_preferences: None,
+                drink_dislikes: None,
+            });
+            assert!(
+                dto.notes.is_none(),
+                "empty/whitespace notes ({raw:?}) must coerce to None, got {:?}",
+                dto.notes
+            );
+        }
+        // Non-empty notes (even when they contain internal whitespace)
+        // forward verbatim so we don't accidentally strip meaningful
+        // content.
+        let dto = update_person_input_to_dto(UpdatePersonInput {
+            name: "Alice".into(),
+            notes: Some("  needs smaller portion  ".into()),
+            dislikes: None,
+            favorites: None,
+            drink_preferences: None,
+            drink_dislikes: None,
+        });
+        assert_eq!(dto.notes.as_deref(), Some("  needs smaller portion  "));
     }
 }
