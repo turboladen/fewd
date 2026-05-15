@@ -21,7 +21,7 @@ use crate::services::recipe_service::{RecipeService, SearchFilters};
 use crate::services::shopping_service::ShoppingService;
 
 use super::lookups::MealLookups;
-use super::schemas::errors::ResolveError;
+use super::schemas::errors::{InputError, ResolveError};
 use super::schemas::{
     create_meal_input_to_dto, create_recipe_input_to_dto, meal_to_brief, person_to_prefs,
     recipe_to_brief, recipe_to_full, render_family_overview, shopping_item_from_dto,
@@ -275,6 +275,18 @@ impl FewdMcp {
             Ok(v) => v,
             Err(e) => return Ok(e),
         };
+        // Validate empty / whitespace-only `name` at input time rather
+        // than letting it route through `find_active_by_name → Ok(None)
+        // → "no active family member named ''. Call list_people …"`,
+        // which is technically actionable but semantically misleading
+        // (the problem is a missing value, not a typo'd name). Matches
+        // the precedent set by `create_recipe_input_to_dto` for empty
+        // recipe names. `create_meal` / `search_recipes`' person lookups
+        // share the same latent issue and would benefit from the same
+        // treatment — tracked as a follow-up bead.
+        if input.name.trim().is_empty() {
+            return Ok(tool_user_error(InputError::EmptyName("name").to_string()));
+        }
         // `find_active_by_name` is the same case-insensitive resolver
         // `list_people` and `create_meal` use, and it intentionally
         // collapses "no match" and "ambiguous match" both to `Ok(None)`
@@ -1421,6 +1433,34 @@ mod tests {
         // Untouched fields preserved from the seed.
         assert_eq!(reloaded.favorites, "[\"pasta\"]");
         assert_eq!(reloaded.notes.as_deref(), Some("original note"));
+    }
+
+    #[tokio::test]
+    async fn update_person_empty_name_returns_input_error_not_unknown_person() {
+        // An empty / whitespace-only `name` is a missing-value problem,
+        // not a typo, and deserves an input-level diagnostic
+        // (`InputError::EmptyName`: "name must not be empty or
+        // whitespace-only.") rather than the misleading
+        // `ResolveError::UnknownPerson` route ("no active family member
+        // named ''. Call list_people …"). Mirrors what
+        // `create_recipe_input_to_dto` already does for empty recipe
+        // names (server/src/mcp/schemas/recipes.rs:308).
+        let mcp = setup_test_mcp().await;
+        for raw in ["", "   ", "\t\n"] {
+            let result = mcp
+                .update_person(LenientParameters::for_test(UpdatePersonInput {
+                    name: raw.into(),
+                    notes: Some("doesn't matter".into()),
+                    dislikes: None,
+                    favorites: None,
+                    drink_preferences: None,
+                    drink_dislikes: None,
+                }))
+                .await;
+            // Asserts the actionable input-error path, not the
+            // "no active family member" recovery path.
+            assert_tool_user_error(result, &["name", "empty"]);
+        }
     }
 
     #[tokio::test]
