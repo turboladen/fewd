@@ -7,7 +7,8 @@ import { installFetchMock, mockJson, resetFetchMock } from '../test/fetchMock'
 import { renderWithProviders } from '../test/renderWithProviders'
 import { installStreamMock, mockStream, resetStreamMock } from '../test/streamMock'
 import type { Recipe } from '../types/recipe'
-import { RecipeManager, ScalingPreviewAltRow } from './RecipeManager'
+import { RecipeManager, ScaleRecipePanel, ScalingPreviewAltRow } from './RecipeManager'
+import type { ParsedRecipe, ScaleResult } from '../types/recipe'
 
 beforeEach(() => {
   installFetchMock()
@@ -186,5 +187,64 @@ describe('ScalingPreviewAltRow', () => {
     expect(html).toContain('or milk')
     expect(html).toContain('or cream')
     expect(html).toContain('or water')
+  })
+})
+
+describe('ScaleRecipePanel', () => {
+  function makeParsed(): ParsedRecipe {
+    const recipe = makeRecipe({
+      id: 'r1',
+      name: 'Test Recipe',
+      servings: 4,
+      ingredients: [
+        { name: 'eggs', amount: { type: 'single', value: 3 }, unit: '' },
+        { name: 'milk', amount: { type: 'single', value: 1 }, unit: 'cup' },
+      ],
+    })
+    return {
+      ...recipe,
+      prep_time: null,
+      cook_time: null,
+      total_time: null,
+      portion_size: null,
+      nutrition_per_serving: null,
+      tags: [],
+      ingredients: recipe.ingredients,
+    } as ParsedRecipe
+  }
+
+  function makeScaleResult(): ScaleResult {
+    return {
+      ingredients: [
+        { name: 'eggs', amount: { type: 'single', value: 3.75 }, unit: '' },
+        { name: 'milk', amount: { type: 'single', value: 1.25 }, unit: 'cup' },
+      ],
+      flagged: [
+        { index: 0, name: 'eggs', scaled_value: 3.75, unit: '' },
+      ],
+    }
+  }
+
+  it('renders an editable input for every ingredient row after Preview', async () => {
+    const parsed = makeParsed()
+    mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
+
+    renderWithProviders(
+      <ScaleRecipePanel
+        parsed={parsed}
+        onSaveAsNew={() => {}}
+        onUpdateInPlace={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    const servingsInput = screen.getByDisplayValue('4')
+    fireEvent.change(servingsInput, { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('3.75')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('1.25')).toBeInTheDocument()
+    })
   })
 })
