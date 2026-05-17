@@ -691,6 +691,7 @@ export function ScaleRecipePanel({
                     <input
                       type='number'
                       step='any'
+                      min={0}
                       value={inputValue}
                       onChange={(e) => {
                         const val = parseFloat(e.target.value)
