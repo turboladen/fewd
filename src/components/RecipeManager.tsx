@@ -617,6 +617,8 @@ export function ScaleRecipePanel({
     )
   }
 
+  const flaggedIndices = new Set(preview?.flagged.map((f) => f.index) ?? [])
+
   const handleIngredientChange = (index: number, updated: Ingredient) => {
     if (!editedIngredients) return
     const newList = [...editedIngredients]
@@ -653,7 +655,9 @@ export function ScaleRecipePanel({
 
       {previewMutation.error && (
         <div className='mb-3 panel-error text-red-700 text-sm'>
-          {String(previewMutation.error)}
+          {previewMutation.error instanceof Error
+            ? previewMutation.error.message
+            : 'Could not preview scale. Try again or refresh.'}
         </div>
       )}
 
@@ -679,31 +683,34 @@ export function ScaleRecipePanel({
               const ratio = original
                 ? ingredientRatio(ing.amount, original.amount)
                 : null
-              const inputValue = ing.amount.type === 'single'
-                ? ing.amount.value
-                : ing.amount.min
+              const isFlagged = flaggedIndices.has(i)
               return (
                 <div key={i}>
                   <div className='grid grid-cols-[6rem_minmax(6rem,8rem)_3rem_1fr_4rem] gap-2 items-center text-sm p-1'>
                     <span className='font-medium text-right text-stone-600'>
                       {original ? formatAmount(original.amount) : '—'}
                     </span>
-                    <input
-                      type='number'
-                      step='any'
-                      min={0}
-                      value={inputValue}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value)
-                        if (isNaN(val)) return
-                        handleIngredientChange(i, {
-                          ...ing,
-                          amount: { type: 'single', value: val },
-                        })
-                      }}
-                      className='input-sm'
-                      aria-label={`${ing.name} amount`}
-                    />
+                    {ing.amount.type === 'range'
+                      ? (
+                        // Range amounts (e.g. "1-2 cups") aren't editable in
+                        // place — committing as a single value would silently
+                        // drop the max bound.
+                        <span className='font-medium tabular-nums'>{formatAmount(ing.amount)}</span>
+                      )
+                      : (
+                        <NumberInput
+                          value={ing.amount.value}
+                          onChange={(val) =>
+                            handleIngredientChange(i, {
+                              ...ing,
+                              amount: { type: 'single', value: val },
+                            })}
+                          min={0}
+                          step='any'
+                          className={`input-sm ${isFlagged ? 'border-amber-300' : ''}`}
+                          aria-label={`${ing.name} amount`}
+                        />
+                      )}
                     <span className='text-stone-500'>{ing.unit}</span>
                     <span>{formatIngredientLabel(ing)}</span>
                     <span className='text-right text-stone-500 tabular-nums'>
