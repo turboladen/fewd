@@ -247,4 +247,76 @@ describe('ScaleRecipePanel', () => {
       expect(screen.getByDisplayValue('1.25')).toBeInTheDocument()
     })
   })
+
+  it('updates only the edited row’s ratio cell when the user changes its value', async () => {
+    const parsed = makeParsed()
+    mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
+
+    renderWithProviders(
+      <ScaleRecipePanel
+        parsed={parsed}
+        onSaveAsNew={() => {}}
+        onUpdateInPlace={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+
+    await waitFor(() => expect(screen.getByDisplayValue('1.25')).toBeInTheDocument())
+
+    // Initially both rows show 1.25× (eggs 3.75/3 and milk 1.25/1).
+    expect(screen.getAllByText('1.25×')).toHaveLength(2)
+
+    // Bump milk 1.25 → 1.5.
+    fireEvent.change(screen.getByDisplayValue('1.25'), { target: { value: '1.5' } })
+
+    // Eggs row still shows 1.25×; milk row now shows 1.5×.
+    await waitFor(() => {
+      expect(screen.getByText('1.5×')).toBeInTheDocument()
+      expect(screen.getByText('1.25×')).toBeInTheDocument()
+    })
+  })
+
+  it('discards local edits when the user re-Previews with a different target', async () => {
+    const parsed = makeParsed()
+
+    // First Preview returns scale-factor 1.25 (eggs 3.75, milk 1.25).
+    mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
+
+    renderWithProviders(
+      <ScaleRecipePanel
+        parsed={parsed}
+        onSaveAsNew={() => {}}
+        onUpdateInPlace={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+
+    await waitFor(() => expect(screen.getByDisplayValue('1.25')).toBeInTheDocument())
+
+    // Edit milk locally to a deliberately weird value, confirm it stuck.
+    fireEvent.change(screen.getByDisplayValue('1.25'), { target: { value: '7.7' } })
+    expect(screen.getByDisplayValue('7.7')).toBeInTheDocument()
+
+    // Re-Preview with a new target (5 -> 6). Second mock returns 1.5× scale.
+    mockJson('POST', '/api/recipes/r1/scale', {
+      ingredients: [
+        { name: 'eggs', amount: { type: 'single', value: 4.5 }, unit: '' },
+        { name: 'milk', amount: { type: 'single', value: 1.5 }, unit: 'cup' },
+      ],
+      flagged: [{ index: 0, name: 'eggs', scaled_value: 4.5, unit: '' }],
+    })
+
+    fireEvent.change(screen.getByDisplayValue('5'), { target: { value: '6' } })
+    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+
+    // The 7.7 edit should be gone; milk now shows 1.5 from the new preview.
+    await waitFor(() => expect(screen.getByDisplayValue('1.5')).toBeInTheDocument())
+    expect(screen.queryByDisplayValue('7.7')).not.toBeInTheDocument()
+  })
 })
