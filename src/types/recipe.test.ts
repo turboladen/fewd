@@ -256,7 +256,13 @@ describe('ingredientRatio', () => {
     expect(ingredientRatio(current, original)).toBe(1.5)
   })
 
-  it('returns null when the original value is zero (would divide by zero)', () => {
+  it('uses min on both sides when neither has collapsed to single yet', () => {
+    const original: IngredientAmount = { type: 'range', min: 2, max: 4 }
+    const current: IngredientAmount = { type: 'range', min: 3, max: 5 }
+    expect(ingredientRatio(current, original)).toBe(1.5)
+  })
+
+  it('returns null when the original value is zero', () => {
     const original: IngredientAmount = { type: 'single', value: 0 }
     const current: IngredientAmount = { type: 'single', value: 1 }
     expect(ingredientRatio(current, original)).toBeNull()
@@ -274,7 +280,7 @@ describe('formatRatio', () => {
     expect(formatRatio(1.0)).toBe('1×')
   })
 
-  it('renders 1.667 as "1.67×" (two decimals, no trailing zero trim needed)', () => {
+  it('renders 1.667 as "1.67×"', () => {
     expect(formatRatio(1.667)).toBe('1.67×')
   })
 
