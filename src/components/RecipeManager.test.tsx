@@ -6,8 +6,8 @@ import { makeRecipe } from '../test/factories'
 import { installFetchMock, mockJson, resetFetchMock } from '../test/fetchMock'
 import { renderWithProviders } from '../test/renderWithProviders'
 import { installStreamMock, mockStream, resetStreamMock } from '../test/streamMock'
-import type { Recipe } from '../types/recipe'
-import type { ParsedRecipe, ScaleResult } from '../types/recipe'
+import type { ParsedRecipe, Recipe, ScaleResult } from '../types/recipe'
+import { parseRecipe } from '../types/recipe'
 import { RecipeManager, ScaleRecipePanel, ScalingPreviewAltRow } from './RecipeManager'
 
 beforeEach(() => {
@@ -192,25 +192,15 @@ describe('ScalingPreviewAltRow', () => {
 
 describe('ScaleRecipePanel', () => {
   function makeParsed(): ParsedRecipe {
-    const recipe = makeRecipe({
+    return parseRecipe(makeRecipe({
       id: 'r1',
       name: 'Test Recipe',
       servings: 4,
-      ingredients: [
+      ingredients: JSON.stringify([
         { name: 'eggs', amount: { type: 'single', value: 3 }, unit: '' },
         { name: 'milk', amount: { type: 'single', value: 1 }, unit: 'cup' },
-      ],
-    })
-    return {
-      ...recipe,
-      prep_time: null,
-      cook_time: null,
-      total_time: null,
-      portion_size: null,
-      nutrition_per_serving: null,
-      tags: [],
-      ingredients: recipe.ingredients,
-    } as ParsedRecipe
+      ]),
+    }))
   }
 
   function makeScaleResult(): ScaleResult {
