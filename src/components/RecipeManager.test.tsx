@@ -266,13 +266,12 @@ describe('ScaleRecipePanel', () => {
 
     await waitFor(() => expect(screen.getByDisplayValue('1.25')).toBeInTheDocument())
 
-    // Initially both rows show 1.25× (eggs 3.75/3 and milk 1.25/1).
+    // Both rows coincidentally land at 1.25× (eggs 3.75/3, milk 1.25/1), so
+    // the assertion below needs `getAllByText` to match both at this point.
     expect(screen.getAllByText('1.25×')).toHaveLength(2)
 
-    // Bump milk 1.25 → 1.5.
     fireEvent.change(screen.getByDisplayValue('1.25'), { target: { value: '1.5' } })
 
-    // Eggs row still shows 1.25×; milk row now shows 1.5×.
     await waitFor(() => {
       expect(screen.getByText('1.5×')).toBeInTheDocument()
       expect(screen.getByText('1.25×')).toBeInTheDocument()
@@ -281,8 +280,6 @@ describe('ScaleRecipePanel', () => {
 
   it('discards local edits when the user re-Previews with a different target', async () => {
     const parsed = makeParsed()
-
-    // First Preview returns scale-factor 1.25 (eggs 3.75, milk 1.25).
     mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
 
     renderWithProviders(
@@ -299,11 +296,9 @@ describe('ScaleRecipePanel', () => {
 
     await waitFor(() => expect(screen.getByDisplayValue('1.25')).toBeInTheDocument())
 
-    // Edit milk locally to a deliberately weird value, confirm it stuck.
     fireEvent.change(screen.getByDisplayValue('1.25'), { target: { value: '7.7' } })
     expect(screen.getByDisplayValue('7.7')).toBeInTheDocument()
 
-    // Re-Preview with a new target (5 -> 6). Second mock returns 1.5× scale.
     mockJson('POST', '/api/recipes/r1/scale', {
       ingredients: [
         { name: 'eggs', amount: { type: 'single', value: 4.5 }, unit: '' },
@@ -315,7 +310,6 @@ describe('ScaleRecipePanel', () => {
     fireEvent.change(screen.getByDisplayValue('5'), { target: { value: '6' } })
     fireEvent.click(screen.getByRole('button', { name: /preview/i }))
 
-    // The 7.7 edit should be gone; milk now shows 1.5 from the new preview.
     await waitFor(() => expect(screen.getByDisplayValue('1.5')).toBeInTheDocument())
     expect(screen.queryByDisplayValue('7.7')).not.toBeInTheDocument()
   })
@@ -348,13 +342,17 @@ describe('ScaleRecipePanel', () => {
     const parsed = makeParsed()
     // Range amount on the milk row — would silently flatten to single on
     // first keystroke if it rendered as an editable number input.
-    mockJson('POST', '/api/recipes/r1/scale', {
-      ingredients: [
-        { name: 'eggs', amount: { type: 'single', value: 3.75 }, unit: '' },
-        { name: 'milk', amount: { type: 'range', min: 1.25, max: 1.75 }, unit: 'cup' },
-      ],
-      flagged: [],
-    } satisfies ScaleResult)
+    mockJson(
+      'POST',
+      '/api/recipes/r1/scale',
+      {
+        ingredients: [
+          { name: 'eggs', amount: { type: 'single', value: 3.75 }, unit: '' },
+          { name: 'milk', amount: { type: 'range', min: 1.25, max: 1.75 }, unit: 'cup' },
+        ],
+        flagged: [],
+      } satisfies ScaleResult,
+    )
 
     renderWithProviders(
       <ScaleRecipePanel

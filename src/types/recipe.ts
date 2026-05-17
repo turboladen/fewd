@@ -219,12 +219,9 @@ export function formatAmount(amount: IngredientAmount): string {
 }
 
 /**
- * Returns the ratio of `current` to `original` as a positive number, or
- * `null` if the original side has a zero reference value (avoids div-by-zero
- * UI noise). For `range` amounts on either side, uses `.min` as the
- * reference value — post-edit values always collapse to `single`, so a
- * `range` only appears on an untouched preview row where `.min` matches
- * what the user sees rendered in the input.
+ * Returns `current / original`, or `null` if the original reference is 0.
+ * For `range` amounts on either side, uses `.min` on both — callers that
+ * need full-range ratios should compute them separately.
  */
 export function ingredientRatio(
   current: IngredientAmount,
