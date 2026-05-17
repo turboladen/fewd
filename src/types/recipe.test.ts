@@ -3,7 +3,9 @@ import type { Ingredient, IngredientAmount, Recipe, TimeValue } from './recipe'
 import {
   formatAmount,
   formatIngredientLabel,
+  formatRatio,
   formatTime,
+  ingredientRatio,
   parseInstructionSteps,
   parseRecipe,
 } from './recipe'
@@ -238,5 +240,54 @@ describe('parseInstructionSteps', () => {
       'Heat oil in a pan over medium heat.',
       'Add onions.',
     ])
+  })
+})
+
+describe('ingredientRatio', () => {
+  it('returns current.value / original.value for single amounts', () => {
+    const original: IngredientAmount = { type: 'single', value: 3 }
+    const current: IngredientAmount = { type: 'single', value: 5 }
+    expect(ingredientRatio(current, original)).toBeCloseTo(1.667, 3)
+  })
+
+  it('uses min on either side when the amount is a range', () => {
+    const original: IngredientAmount = { type: 'range', min: 2, max: 4 }
+    const current: IngredientAmount = { type: 'single', value: 3 }
+    expect(ingredientRatio(current, original)).toBe(1.5)
+  })
+
+  it('returns null when the original value is zero (would divide by zero)', () => {
+    const original: IngredientAmount = { type: 'single', value: 0 }
+    const current: IngredientAmount = { type: 'single', value: 1 }
+    expect(ingredientRatio(current, original)).toBeNull()
+  })
+
+  it('returns 1 when current matches original exactly', () => {
+    const original: IngredientAmount = { type: 'single', value: 2 }
+    const current: IngredientAmount = { type: 'single', value: 2 }
+    expect(ingredientRatio(current, original)).toBe(1)
+  })
+})
+
+describe('formatRatio', () => {
+  it('renders 1.0 as "1×"', () => {
+    expect(formatRatio(1.0)).toBe('1×')
+  })
+
+  it('renders 1.667 as "1.67×" (two decimals, no trailing zero trim needed)', () => {
+    expect(formatRatio(1.667)).toBe('1.67×')
+  })
+
+  it('trims trailing zeros after the decimal', () => {
+    expect(formatRatio(1.5)).toBe('1.5×')
+    expect(formatRatio(1.5000001)).toBe('1.5×')
+  })
+
+  it('handles sub-1 ratios', () => {
+    expect(formatRatio(0.5)).toBe('0.5×')
+  })
+
+  it('renders null as em dash', () => {
+    expect(formatRatio(null)).toBe('—')
   })
 })
