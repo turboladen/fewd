@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the Scale Recipe panel's row-rendering block with a 3-column grid (Original | Current/editable | Ratio) where every row is editable and the ratio column shows per-ingredient deviation from the original.
+**Goal:** Replace the Scale Recipe panel's row-rendering block with a 3-column grid (Original | Current/editable | Ratio). Every `single`-typed row is editable; `range`-typed rows render as static text (since committing a range through a single input would silently drop the max bound). The ratio column shows per-ingredient deviation from the original.
 
-**Architecture:** Frontend-only change inside `src/components/RecipeManager.tsx` (the `ScaleRecipePanel` function). Two small pure helpers (`ingredientRatio`, `formatRatio`) live in `src/types/recipe.ts` next to the existing `formatAmount`. The flagged-highlight machinery gets removed; the warning banner stays (per spec, until `fewd-2bp` lands). No backend, no schema, no migration.
+**Architecture:** Frontend-only change inside `src/components/RecipeManager.tsx` (the `ScaleRecipePanel` function). Two small pure helpers (`ingredientRatio`, `formatRatio`) live in `src/types/recipe.ts` next to the existing `formatAmount`. The previous heavy flagged-row treatment (full-row amber background + "fractional" pill) is replaced with a lighter input-only `border-amber-300` cue (kept after the first round of code review surfaced a UX regression in removing all flagged signaling); the warning banner stays per spec until `fewd-2bp` lands. No backend, no schema, no migration.
 
 **Tech Stack:** React 18 + TypeScript + Vitest + React Testing Library + Tailwind. The Vitest test setup uses `installFetchMock` / `installStreamMock` from `src/test/fetchMock.ts` and `src/test/streamMock.ts`. The recipe factory is at `src/test/factories.ts` (function `makeRecipe`).
 

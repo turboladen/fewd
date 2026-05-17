@@ -674,8 +674,8 @@ export function ScaleRecipePanel({
             <div className='grid grid-cols-[6rem_minmax(6rem,8rem)_3rem_1fr_4rem] gap-2 items-center text-xs text-stone-500 px-1'>
               <span className='text-right'>Original</span>
               <span>Current</span>
-              <span />
-              <span />
+              <span className='sr-only'>Unit</span>
+              <span className='sr-only'>Ingredient</span>
               <span className='text-right'>Ratio</span>
             </div>
             {editedIngredients.map((ing, i) => {
