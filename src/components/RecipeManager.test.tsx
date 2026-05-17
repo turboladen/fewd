@@ -7,8 +7,8 @@ import { installFetchMock, mockJson, resetFetchMock } from '../test/fetchMock'
 import { renderWithProviders } from '../test/renderWithProviders'
 import { installStreamMock, mockStream, resetStreamMock } from '../test/streamMock'
 import type { Recipe } from '../types/recipe'
-import { RecipeManager, ScaleRecipePanel, ScalingPreviewAltRow } from './RecipeManager'
 import type { ParsedRecipe, ScaleResult } from '../types/recipe'
+import { RecipeManager, ScaleRecipePanel, ScalingPreviewAltRow } from './RecipeManager'
 
 beforeEach(() => {
   installFetchMock()
