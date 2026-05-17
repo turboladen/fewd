@@ -667,10 +667,7 @@ export function ScaleRecipePanel({
           )}
 
           <div className='space-y-1 mb-4'>
-            <div
-              className='grid grid-cols-[6rem_minmax(6rem,8rem)_3rem_1fr_4rem] gap-2 items-center text-xs text-stone-500 px-1'
-              aria-hidden
-            >
+            <div className='grid grid-cols-[6rem_minmax(6rem,8rem)_3rem_1fr_4rem] gap-2 items-center text-xs text-stone-500 px-1'>
               <span className='text-right'>Original</span>
               <span>Current</span>
               <span />
@@ -696,7 +693,8 @@ export function ScaleRecipePanel({
                       step='any'
                       value={inputValue}
                       onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0
+                        const val = parseFloat(e.target.value)
+                        if (isNaN(val)) return
                         handleIngredientChange(i, {
                           ...ing,
                           amount: { type: 'single', value: val },
