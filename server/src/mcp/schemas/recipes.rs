@@ -301,6 +301,18 @@ pub fn recipe_to_full(
     })
 }
 
+/// Input for `import_recipe_url`. The `url` field is typed as [`url::Url`] so
+/// malformed URLs fail at deserialization (LenientParameters routes that to a
+/// tool_user_error). The handler additionally rejects non-http(s) schemes for a
+/// clearer error than the downstream SSRF guard would produce.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ImportRecipeUrlInput {
+    /// Public http(s) URL of the recipe page. The server fetches it, extracts
+    /// schema.org/Recipe data (JSON-LD first, html2text fallback), parses the
+    /// result with Claude into the same shape as `create_recipe`, and persists.
+    pub url: url::Url,
+}
+
 pub fn create_recipe_input_to_dto(
     input: CreateRecipeInput,
     parent_recipe_id: Option<String>,

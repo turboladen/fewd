@@ -432,26 +432,15 @@ pub async fn import_file(
         .map_err(AppError::from)
 }
 
-/// Helper: get the Anthropic API key from settings
+/// Helper: get the Anthropic API key from settings, mapping missing/empty to a 400.
 async fn get_api_key(state: &AppState) -> Result<String, AppError> {
-    let key = SettingsService::get(&state.db, "anthropic_api_key".to_string())
+    SettingsService::get_anthropic_api_key(&state.db)
         .await
         .map_err(AppError::from)?
-        .ok_or_else(|| AppError::BadRequest("No API key configured. Set it in Settings.".into()))?;
-
-    if key.is_empty() {
-        return Err(AppError::BadRequest(
-            "No API key configured. Set it in Settings.".into(),
-        ));
-    }
-    Ok(key)
+        .ok_or_else(|| AppError::BadRequest("No API key configured. Set it in Settings.".into()))
 }
 
-/// Helper: get the selected Claude model (or default)
+/// Helper: get the selected Claude model (or default).
 async fn get_model(state: &AppState) -> String {
-    SettingsService::get(&state.db, "claude_model".to_string())
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| ClaudeClient::default_model().to_string())
+    SettingsService::get_claude_model(&state.db).await
 }

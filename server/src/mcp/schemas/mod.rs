@@ -38,6 +38,6 @@ pub use people::{
 };
 pub use recipes::{
     create_recipe_input_to_dto, recipe_to_brief, recipe_to_full, CreateRecipeInput,
-    SearchRecipesParams,
+    ImportRecipeUrlInput, SearchRecipesParams,
 };
 pub use shopping::shopping_item_from_dto;
