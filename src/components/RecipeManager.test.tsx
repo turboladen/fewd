@@ -6,8 +6,9 @@ import { makeRecipe } from '../test/factories'
 import { installFetchMock, mockJson, resetFetchMock } from '../test/fetchMock'
 import { renderWithProviders } from '../test/renderWithProviders'
 import { installStreamMock, mockStream, resetStreamMock } from '../test/streamMock'
-import type { Recipe } from '../types/recipe'
-import { RecipeManager, ScalingPreviewAltRow } from './RecipeManager'
+import type { ParsedRecipe, Recipe, ScaleResult } from '../types/recipe'
+import { parseRecipe } from '../types/recipe'
+import { RecipeManager, ScaleRecipePanel, ScalingPreviewAltRow } from './RecipeManager'
 
 beforeEach(() => {
   installFetchMock()
@@ -186,5 +187,179 @@ describe('ScalingPreviewAltRow', () => {
     expect(html).toContain('or milk')
     expect(html).toContain('or cream')
     expect(html).toContain('or water')
+  })
+})
+
+describe('ScaleRecipePanel', () => {
+  function makeParsed(): ParsedRecipe {
+    return parseRecipe(makeRecipe({
+      id: 'r1',
+      name: 'Test Recipe',
+      servings: 4,
+      ingredients: JSON.stringify([
+        { name: 'eggs', amount: { type: 'single', value: 3 }, unit: '' },
+        { name: 'milk', amount: { type: 'single', value: 1 }, unit: 'cup' },
+      ]),
+    }))
+  }
+
+  function makeScaleResult(): ScaleResult {
+    return {
+      ingredients: [
+        { name: 'eggs', amount: { type: 'single', value: 3.75 }, unit: '' },
+        { name: 'milk', amount: { type: 'single', value: 1.25 }, unit: 'cup' },
+      ],
+      flagged: [
+        { index: 0, name: 'eggs', scaled_value: 3.75, unit: '' },
+      ],
+    }
+  }
+
+  it('renders an editable input for every ingredient row after Preview', async () => {
+    const parsed = makeParsed()
+    mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
+
+    renderWithProviders(
+      <ScaleRecipePanel
+        parsed={parsed}
+        onSaveAsNew={() => {}}
+        onUpdateInPlace={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    const servingsInput = screen.getByDisplayValue('4')
+    fireEvent.change(servingsInput, { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('3.75')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('1.25')).toBeInTheDocument()
+    })
+  })
+
+  it('updates only the edited row’s ratio cell when the user changes its value', async () => {
+    const parsed = makeParsed()
+    mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
+
+    renderWithProviders(
+      <ScaleRecipePanel
+        parsed={parsed}
+        onSaveAsNew={() => {}}
+        onUpdateInPlace={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+
+    await waitFor(() => expect(screen.getByDisplayValue('1.25')).toBeInTheDocument())
+
+    // Both rows coincidentally land at 1.25× (eggs 3.75/3, milk 1.25/1), so
+    // the assertion below needs `getAllByText` to match both at this point.
+    expect(screen.getAllByText('1.25×')).toHaveLength(2)
+
+    fireEvent.change(screen.getByDisplayValue('1.25'), { target: { value: '1.5' } })
+
+    await waitFor(() => {
+      expect(screen.getByText('1.5×')).toBeInTheDocument()
+      expect(screen.getByText('1.25×')).toBeInTheDocument()
+    })
+  })
+
+  it('discards local edits when the user re-Previews with a different target', async () => {
+    const parsed = makeParsed()
+    mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
+
+    renderWithProviders(
+      <ScaleRecipePanel
+        parsed={parsed}
+        onSaveAsNew={() => {}}
+        onUpdateInPlace={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+
+    await waitFor(() => expect(screen.getByDisplayValue('1.25')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByDisplayValue('1.25'), { target: { value: '7.7' } })
+    expect(screen.getByDisplayValue('7.7')).toBeInTheDocument()
+
+    mockJson('POST', '/api/recipes/r1/scale', {
+      ingredients: [
+        { name: 'eggs', amount: { type: 'single', value: 4.5 }, unit: '' },
+        { name: 'milk', amount: { type: 'single', value: 1.5 }, unit: 'cup' },
+      ],
+      flagged: [{ index: 0, name: 'eggs', scaled_value: 4.5, unit: '' }],
+    })
+
+    fireEvent.change(screen.getByDisplayValue('5'), { target: { value: '6' } })
+    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+
+    await waitFor(() => expect(screen.getByDisplayValue('1.5')).toBeInTheDocument())
+    expect(screen.queryByDisplayValue('7.7')).not.toBeInTheDocument()
+  })
+
+  it('does not collapse the row to 0 when the user clears the input mid-typing', async () => {
+    const parsed = makeParsed()
+    mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
+
+    renderWithProviders(
+      <ScaleRecipePanel
+        parsed={parsed}
+        onSaveAsNew={() => {}}
+        onUpdateInPlace={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+    await waitFor(() => expect(screen.getByDisplayValue('1.25')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByDisplayValue('1.25'), { target: { value: '' } })
+
+    // The committed amount must not have collapsed to 0 — that was the
+    // pre-fix UX trap where clearing the field stomped state with `|| 0`.
+    expect(screen.queryByDisplayValue('0')).not.toBeInTheDocument()
+  })
+
+  it('renders range-typed amounts as static text so the max bound is not silently dropped on edit', async () => {
+    const parsed = makeParsed()
+    // Range amount on the milk row — would silently flatten to single on
+    // first keystroke if it rendered as an editable number input.
+    mockJson(
+      'POST',
+      '/api/recipes/r1/scale',
+      {
+        ingredients: [
+          { name: 'eggs', amount: { type: 'single', value: 3.75 }, unit: '' },
+          { name: 'milk', amount: { type: 'range', min: 1.25, max: 1.75 }, unit: 'cup' },
+        ],
+        flagged: [],
+      } satisfies ScaleResult,
+    )
+
+    renderWithProviders(
+      <ScaleRecipePanel
+        parsed={parsed}
+        onSaveAsNew={() => {}}
+        onUpdateInPlace={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+
+    fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+
+    // Eggs is single → editable input.
+    await waitFor(() => expect(screen.getByDisplayValue('3.75')).toBeInTheDocument())
+    // Milk is range → rendered as text "1.25-1.75", not an input.
+    expect(screen.getByText('1.25-1.75')).toBeInTheDocument()
+    expect(screen.queryByLabelText('milk amount')).not.toBeInTheDocument()
   })
 })

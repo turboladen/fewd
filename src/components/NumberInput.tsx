@@ -8,6 +8,7 @@ interface NumberInputProps {
   className?: string
   required?: boolean
   title?: string
+  'aria-label'?: string
 }
 
 export function NumberInput({
@@ -18,6 +19,7 @@ export function NumberInput({
   className = 'input-sm w-20',
   required,
   title,
+  'aria-label': ariaLabel,
 }: NumberInputProps) {
   const [raw, setRaw] = useState(String(value))
 
@@ -36,6 +38,7 @@ export function NumberInput({
       step={step}
       required={required}
       title={title}
+      aria-label={ariaLabel}
       value={raw}
       onChange={(e) => {
         setRaw(e.target.value)

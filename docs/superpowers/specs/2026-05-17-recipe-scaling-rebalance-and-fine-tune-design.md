@@ -42,8 +42,10 @@ Original          Current (editable)     Ratio
 ```
 
 - **Original** is read-only, sourced from the recipe at its native serving count.
-- **Current** is editable on every row (not just discrete units, not just flagged values).
+- **Current** is editable on every row whose amount is a `single`. Rows whose amount is a `range` (e.g. `1–2 cups`) render as static text — committing a range-typed amount through a single input would silently drop the max bound, so range rows are held out of the editable surface rather than collapsed on edit.
 - **Ratio** is computed as `current / original`. When all rows share the same ratio, the recipe is in a strictly-proportional state. When they diverge, the user sees exactly which rows have drifted and by how much.
+
+Rows whose backend response marked them as fractional-discrete carry a subtle visual cue (a soft amber border on the input) so the user can find them at a glance. This is a discoverability hint, not a "must-fix" gate — the user can ignore it and save the recipe as-is. It's much lighter than the previous design's full-row amber background + "fractional" pill, which framed flagged values as broken; the new treatment frames them as worth noticing.
 
 The Ratio column is the central feature. It serves two purposes:
 
@@ -77,9 +79,10 @@ No backend changes for this work. The existing `recipe_scaler::scale_ingredients
 `RecipeManager.tsx` Scale Recipe panel changes:
 
 - Replace the current ingredient list (lines ~669–716, the section that conditionally renders editable input vs. static span based on `flaggedIndices.has(i)`) with a three-column grid using Tailwind grid utilities.
-- Make `Current` an `<input type="number">` on every row, wired through the existing `handleIngredientChange`. Keep current's `min`/`step` reasonable for the unit (no negatives, allow decimals).
+- Make `Current` an editable `<NumberInput>` (the existing string-buffered component) for `single`-typed amounts; render `range`-typed amounts as static text so the max bound can't be silently dropped. Wire onChange through `handleIngredientChange`. No negatives (`min={0}`), allow decimals (`step='any'`).
 - Add `Ratio` column rendering `current / original` formatted as e.g. `1.67×` (2 decimal places, trailing zeros trimmed).
-- Remove the amber `flagged` highlight machinery from this panel — free-edit values no longer carry a "must-fix" flag, so the highlight has nothing to mark. (`fewd-0mt` becomes irrelevant after this and can be closed.)
+- Keep `flaggedIndices` derived from `preview.flagged` and apply a soft `border-amber-300` to the input on flagged rows — discoverable signal, no "must-fix" weight.
+- Drop the previous heavy flagged-row treatment (full-row amber background, "fractional" pill). The lighter `border-amber-300` input treatment above replaces it. `fewd-0mt` (the original bug about the highlight stretching full-width) is moot under the new treatment since the styling lives on the input rather than the row, and can be closed when this lands.
 - The warning banner ("Some ingredients have fractional amounts for discrete units…") is only meaningful while initial Preview can return fractional discrete values. If this work ships **after** `fewd-2bp` (auto-round), remove the banner — there's nothing to warn about. If this work ships **before** `fewd-2bp`, leave the banner in place; remove it when `fewd-2bp` lands.
 
 ### Test plan

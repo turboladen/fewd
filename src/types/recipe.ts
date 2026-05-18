@@ -219,6 +219,35 @@ export function formatAmount(amount: IngredientAmount): string {
 }
 
 /**
+ * Returns `current / original`, or `null` if the original reference is 0.
+ * For `range` amounts on either side, uses `.min` on both — callers that
+ * need full-range ratios should compute them separately.
+ */
+export function ingredientRatio(
+  current: IngredientAmount,
+  original: IngredientAmount,
+): number | null {
+  const originalRef = original.type === 'single' ? original.value : original.min
+  if (originalRef === 0) return null
+  const currentRef = current.type === 'single' ? current.value : current.min
+  return currentRef / originalRef
+}
+
+/**
+ * Display string for a ratio value. Uses the Unicode multiplication sign
+ * (×, U+00D7), formats to up to two decimal places, trims trailing zeros,
+ * and renders `null` as an em dash for ratios that can't be computed.
+ */
+export function formatRatio(ratio: number | null): string {
+  if (ratio === null) return '—'
+  const rounded = Math.round(ratio * 100) / 100
+  const formatted = rounded % 1 === 0
+    ? String(rounded)
+    : rounded.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+  return `${formatted}×`
+}
+
+/**
  * Splits free-form instructions into trimmed, non-empty steps. Leading list
  * markers like `1.` or `2)` are stripped so the renderer can supply its own
  * numbering.

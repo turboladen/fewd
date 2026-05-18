@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the Scale Recipe panel's row-rendering block with a 3-column grid (Original | Current/editable | Ratio) where every row is editable and the ratio column shows per-ingredient deviation from the original.
+**Goal:** Replace the Scale Recipe panel's row-rendering block with a 3-column grid (Original | Current/editable | Ratio). Every `single`-typed row is editable; `range`-typed rows render as static text (since committing a range through a single input would silently drop the max bound). The ratio column shows per-ingredient deviation from the original.
 
-**Architecture:** Frontend-only change inside `src/components/RecipeManager.tsx` (the `ScaleRecipePanel` function). Two small pure helpers (`ingredientRatio`, `formatRatio`) live in `src/types/recipe.ts` next to the existing `formatAmount`. The flagged-highlight machinery gets removed; the warning banner stays (per spec, until `fewd-2bp` lands). No backend, no schema, no migration.
+**Architecture:** Frontend-only change inside `src/components/RecipeManager.tsx` (the `ScaleRecipePanel` function). Two small pure helpers (`ingredientRatio`, `formatRatio`) live in `src/types/recipe.ts` next to the existing `formatAmount`. The previous heavy flagged-row treatment (full-row amber background + "fractional" pill) is replaced with a lighter input-only `border-amber-300` cue (kept after the first round of code review surfaced a UX regression in removing all flagged signaling); the warning banner stays per spec until `fewd-2bp` lands. No backend, no schema, no migration.
 
 **Tech Stack:** React 18 + TypeScript + Vitest + React Testing Library + Tailwind. The Vitest test setup uses `installFetchMock` / `installStreamMock` from `src/test/fetchMock.ts` and `src/test/streamMock.ts`. The recipe factory is at `src/test/factories.ts` (function `makeRecipe`).
 
@@ -32,12 +32,12 @@ Expected: branch `fewd-b3x/ratio-column-free-edit` created from main.
 
 Files this plan touches:
 
-| File | Role |
-|------|------|
-| `src/types/recipe.ts` | Add `ingredientRatio(current, original)` and `formatRatio(ratio)` pure helpers next to `formatAmount`. |
-| `src/types/recipe.test.ts` | Unit tests for the two new helpers. |
-| `src/components/RecipeManager.tsx` | Rewrite the `ScaleRecipePanel`'s row-rendering block (~lines 660–716): 3-column grid, every row editable, ratio column, remove flagged-highlight machinery and the `flaggedIndices` Set. Banner stays. |
-| `src/components/RecipeManager.test.tsx` | New `describe('ScaleRecipePanel')` block with rendering + interaction tests. |
+| File                                    | Role                                                                                                                                                                                                                                                                                                                                                         |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/types/recipe.ts`                   | Add `ingredientRatio(current, original)` and `formatRatio(ratio)` pure helpers next to `formatAmount`.                                                                                                                                                                                                                                                       |
+| `src/types/recipe.test.ts`              | Unit tests for the two new helpers.                                                                                                                                                                                                                                                                                                                          |
+| `src/components/RecipeManager.tsx`      | Rewrite the `ScaleRecipePanel`'s row-rendering block (~lines 660–716): 3-column grid, `single`-typed rows editable, `range`-typed rows static, ratio column. Drop the heavy flagged-row treatment (full-row amber bg + "fractional" pill) in favor of a lighter `border-amber-300` on flagged inputs; `flaggedIndices` stays. Warning banner stays per spec. |
+| `src/components/RecipeManager.test.tsx` | New `describe('ScaleRecipePanel')` block with rendering + interaction tests.                                                                                                                                                                                                                                                                                 |
 
 No files created; only modifications.
 
@@ -46,6 +46,7 @@ No files created; only modifications.
 ## Task 1: Add `ingredientRatio` and `formatRatio` helpers
 
 **Files:**
+
 - Modify: `src/types/recipe.ts` (add two functions next to `formatAmount` around line 219)
 - Modify: `src/types/recipe.test.ts` (add new `describe` blocks)
 
@@ -54,6 +55,7 @@ No files created; only modifications.
 `ingredientRatio(current, original)` returns a positive number (or `null` if either side is non-numeric, e.g. division by zero). For `single` amounts, use `current.value / original.value`. For `range` amounts on either side, use the `.min` value as the reference (post-edit values always collapse to single, so a `range` will only appear when the row is unedited — `.min` matches what the user sees in the input field).
 
 `formatRatio(ratio: number | null)` returns a display string. Examples:
+
 - `1.0` → `"1×"`
 - `1.667` → `"1.67×"`
 - `1.5` → `"1.5×"`
@@ -69,7 +71,7 @@ Note the multiplication sign is `×` (U+00D7, Unicode multiplication sign), not 
 Append to `src/types/recipe.test.ts` (after the last existing test):
 
 ```typescript
-import { formatAmount, ingredientRatio, formatRatio } from './recipe'
+import { formatAmount, formatRatio, ingredientRatio } from './recipe'
 import type { IngredientAmount } from './recipe'
 
 describe('ingredientRatio', () => {
@@ -206,6 +208,7 @@ EOF
 ## Task 2: Rewrite `ScaleRecipePanel` row rendering as a 3-column grid
 
 **Files:**
+
 - Modify: `src/components/RecipeManager.tsx` (replace lines ~660–716; remove `flaggedIndices` derivation at line 618)
 - Modify: `src/components/RecipeManager.test.tsx` (add `describe('ScaleRecipePanel')` block at the end)
 
@@ -238,8 +241,8 @@ Append to `src/components/RecipeManager.test.tsx`:
 
 ```typescript
 // Add to existing imports at the top of the file
-import { ScaleRecipePanel } from './RecipeManager'
 import type { ParsedRecipe, ScaleResult } from '../types/recipe'
+import { ScaleRecipePanel } from './RecipeManager'
 
 describe('ScaleRecipePanel', () => {
   function makeParsed(): ParsedRecipe {
@@ -332,6 +335,7 @@ const flaggedIndices = new Set(preview?.flagged.map((f) => f.index) ?? [])
 **3b. Replace the row-rendering section (the `<div className='space-y-1 mb-4'>` block and its children).**
 
 KEEP the surrounding pieces:
+
 - The `{preview && editedIngredients && (` opener and its `<>` fragment.
 - The `{preview.flagged.length > 0 && (` warning banner — unchanged. Spec keeps the banner until `fewd-2bp` lands.
 - The `{error && (` block, the action-buttons row, and the closing tags.
@@ -439,7 +443,9 @@ Replace with:
             {formatRatio(ratio)}
           </span>
         </div>
-        {ing.or_alternative && <ScalingPreviewAltRow ingredient={ing.or_alternative} />}
+        {ing.or_alternative && (
+          <ScalingPreviewAltRow ingredient={ing.or_alternative} />
+        )}
       </div>
     )
   })}
@@ -526,6 +532,7 @@ EOF
 ## Task 3: Add behavior tests for ratio updates and Re-Preview reset
 
 **Files:**
+
 - Modify: `src/components/RecipeManager.test.tsx` (append two more `it` blocks inside the `describe('ScaleRecipePanel')`)
 
 ### Background
@@ -542,77 +549,87 @@ Two behaviors worth pinning explicitly:
 Append inside the existing `describe('ScaleRecipePanel')` block (after the test from Task 2):
 
 ```typescript
-  it('updates only the edited row’s ratio cell when the user changes its value', async () => {
-    const parsed = makeParsed()
-    mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
+it('updates only the edited row’s ratio cell when the user changes its value', async () => {
+  const parsed = makeParsed()
+  mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
 
-    renderWithProviders(
-      <ScaleRecipePanel
-        parsed={parsed}
-        onSaveAsNew={() => {}}
-        onUpdateInPlace={() => {}}
-        onCancel={() => {}}
-      />,
-    )
+  renderWithProviders(
+    <ScaleRecipePanel
+      parsed={parsed}
+      onSaveAsNew={() => {}}
+      onUpdateInPlace={() => {}}
+      onCancel={() => {}}
+    />,
+  )
 
-    fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '5' } })
-    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+  fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '5' } })
+  fireEvent.click(screen.getByRole('button', { name: /preview/i }))
 
-    await waitFor(() => expect(screen.getByDisplayValue('1.25')).toBeInTheDocument())
+  await waitFor(() =>
+    expect(screen.getByDisplayValue('1.25')).toBeInTheDocument()
+  )
 
-    // Initially both rows show 1.25× (3.75/3 and 1.25/1).
-    expect(screen.getAllByText('1.25×')).toHaveLength(2)
+  // Initially both rows show 1.25× (3.75/3 and 1.25/1).
+  expect(screen.getAllByText('1.25×')).toHaveLength(2)
 
-    // Bump milk 1.25 → 1.5.
-    fireEvent.change(screen.getByDisplayValue('1.25'), { target: { value: '1.5' } })
-
-    // Eggs row still shows 1.25×; milk row now shows 1.5×.
-    await waitFor(() => {
-      expect(screen.getByText('1.5×')).toBeInTheDocument()
-      expect(screen.getByText('1.25×')).toBeInTheDocument()
-    })
+  // Bump milk 1.25 → 1.5.
+  fireEvent.change(screen.getByDisplayValue('1.25'), {
+    target: { value: '1.5' },
   })
 
-  it('discards local edits when the user re-Previews with a different target', async () => {
-    const parsed = makeParsed()
-
-    // First Preview returns scale-factor 1.25 (eggs 3.75, milk 1.25).
-    mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
-
-    renderWithProviders(
-      <ScaleRecipePanel
-        parsed={parsed}
-        onSaveAsNew={() => {}}
-        onUpdateInPlace={() => {}}
-        onCancel={() => {}}
-      />,
-    )
-
-    fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '5' } })
-    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
-
-    await waitFor(() => expect(screen.getByDisplayValue('1.25')).toBeInTheDocument())
-
-    // Edit milk locally to a deliberately weird value, confirm it stuck.
-    fireEvent.change(screen.getByDisplayValue('1.25'), { target: { value: '7.7' } })
-    expect(screen.getByDisplayValue('7.7')).toBeInTheDocument()
-
-    // Re-Preview with a new target (4 -> 6). Second mock returns 1.5× scale.
-    mockJson('POST', '/api/recipes/r1/scale', {
-      ingredients: [
-        { name: 'eggs', amount: { type: 'single', value: 4.5 }, unit: '' },
-        { name: 'milk', amount: { type: 'single', value: 1.5 }, unit: 'cup' },
-      ],
-      flagged: [{ index: 0, name: 'eggs', scaled_value: 4.5, unit: '' }],
-    })
-
-    fireEvent.change(screen.getByDisplayValue('5'), { target: { value: '6' } })
-    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
-
-    // The 7.7 edit should be gone; milk now shows 1.5 from the new preview.
-    await waitFor(() => expect(screen.getByDisplayValue('1.5')).toBeInTheDocument())
-    expect(screen.queryByDisplayValue('7.7')).not.toBeInTheDocument()
+  // Eggs row still shows 1.25×; milk row now shows 1.5×.
+  await waitFor(() => {
+    expect(screen.getByText('1.5×')).toBeInTheDocument()
+    expect(screen.getByText('1.25×')).toBeInTheDocument()
   })
+})
+
+it('discards local edits when the user re-Previews with a different target', async () => {
+  const parsed = makeParsed()
+
+  // First Preview returns scale-factor 1.25 (eggs 3.75, milk 1.25).
+  mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
+
+  renderWithProviders(
+    <ScaleRecipePanel
+      parsed={parsed}
+      onSaveAsNew={() => {}}
+      onUpdateInPlace={() => {}}
+      onCancel={() => {}}
+    />,
+  )
+
+  fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '5' } })
+  fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+
+  await waitFor(() =>
+    expect(screen.getByDisplayValue('1.25')).toBeInTheDocument()
+  )
+
+  // Edit milk locally to a deliberately weird value, confirm it stuck.
+  fireEvent.change(screen.getByDisplayValue('1.25'), {
+    target: { value: '7.7' },
+  })
+  expect(screen.getByDisplayValue('7.7')).toBeInTheDocument()
+
+  // Re-Preview with a new target (4 -> 6). Second mock returns 1.5× scale.
+  mockJson('POST', '/api/recipes/r1/scale', {
+    ingredients: [
+      { name: 'eggs', amount: { type: 'single', value: 4.5 }, unit: '' },
+      { name: 'milk', amount: { type: 'single', value: 1.5 }, unit: 'cup' },
+    ],
+    flagged: [{ index: 0, name: 'eggs', scaled_value: 4.5, unit: '' }],
+  })
+
+  fireEvent.change(screen.getByDisplayValue('5'), { target: { value: '6' } })
+  fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+
+  // The 7.7 edit should be gone; milk now shows 1.5 from the new preview.
+  await waitFor(() =>
+    expect(screen.getByDisplayValue('1.5')).toBeInTheDocument()
+  )
+  expect(screen.queryByDisplayValue('7.7')).not.toBeInTheDocument()
+})
 ```
 
 - [ ] **Step 2: Run the new tests, confirm they pass**
@@ -722,6 +739,7 @@ Wait for server output: backend on port 3000, frontend on port 5173.
 - [ ] **Step 3: Verify the new layout**
 
 Check by eye:
+
 - Each ingredient row shows three columns: Original (read-only, right-aligned) | Current (editable input) | Ratio (e.g. "1×" before changing servings).
 - Column header row shows "Original / Current / Ratio".
 - Row width hugs content rather than stretching the panel.
