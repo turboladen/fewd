@@ -513,6 +513,13 @@ impl FewdMcp {
                          `create_recipe` to add it manually."
                     )))
                 }
+                Err(ImportError::PrivateNetwork(host)) => {
+                    return Ok(tool_user_error(format!(
+                        "URL host '{host}' resolves to a private or internal network address, \
+                         which is not allowed. Provide a public web URL (or use \
+                         `create_recipe` to add the recipe manually)."
+                    )))
+                }
                 Err(ImportError::ContentTooShort) => {
                     return Ok(tool_user_error(
                         "The page did not have enough recipe text to extract — it may be \
@@ -1364,6 +1371,47 @@ mod tests {
             .import_recipe_url(LenientParameters::for_test(input))
             .await;
         assert_tool_user_error(result, &["http or https", "ftp"]);
+    }
+
+    #[tokio::test]
+    async fn import_recipe_url_private_network_message_is_distinct_from_paywall() {
+        // Literal-IP URL skips DNS, so validate_url is fully offline and
+        // returns ImportError::PrivateNetwork before any fetch attempt.
+        // The handler must surface a message that names the SSRF cause —
+        // not the generic "reachable/paywalled" wording reserved for
+        // ImportError::NetworkError.
+        let mcp = setup_test_mcp().await;
+        // Seed an API key so the handler proceeds past the missing-key
+        // short-circuit and reaches the import call.
+        SettingsService::set(
+            &*mcp.db,
+            "anthropic_api_key".to_string(),
+            "sk-test".to_string(),
+        )
+        .await
+        .expect("settings write");
+        let input = ImportRecipeUrlInput {
+            url: url::Url::parse("https://192.168.1.1/recipes/123").expect("valid url"),
+        };
+        let result = mcp
+            .import_recipe_url(LenientParameters::for_test(input))
+            .await;
+        // Must mention private/internal so the LLM understands the cause.
+        assert_tool_user_error(result, &["192.168.1.1", "private"]);
+        // Belt-and-suspenders: the SSRF case must NOT inherit the generic
+        // NetworkError wording about paywalls. Serialize again to assert
+        // absence (assert_tool_user_error only checks presence).
+        let result = mcp
+            .import_recipe_url(LenientParameters::for_test(ImportRecipeUrlInput {
+                url: url::Url::parse("https://192.168.1.1/recipes/123").expect("valid url"),
+            }))
+            .await
+            .expect("Ok(CallToolResult)");
+        let serialized = serde_json::to_string(&result).expect("serializes");
+        assert!(
+            !serialized.contains("paywall"),
+            "SSRF rejection must not use paywall wording: {serialized}"
+        );
     }
 
     #[tokio::test]

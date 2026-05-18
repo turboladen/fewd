@@ -47,12 +47,17 @@ impl SettingsService {
     }
 
     /// Returns the configured Claude model, falling back to
-    /// `ClaudeClient::default_model` when the setting is missing or unreadable.
+    /// `ClaudeClient::default_model` when the setting is missing, unreadable,
+    /// or empty/whitespace. The Settings write path does not currently trim or
+    /// validate this field, so the empty-string case is a real possibility —
+    /// silently falling back is friendlier than letting an empty model name
+    /// reach the Anthropic API and produce a confusing 400.
     pub async fn get_claude_model(db: &DatabaseConnection) -> String {
         Self::get(db, "claude_model".to_string())
             .await
             .ok()
             .flatten()
+            .filter(|m| !m.trim().is_empty())
             .unwrap_or_else(|| ClaudeClient::default_model().to_string())
     }
 
