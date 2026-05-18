@@ -533,18 +533,26 @@ impl FewdMcp {
                     )))
                 }
                 Err(ImportError::PdfError(_)) => {
-                    return Err(internal_error(
-                        "unexpected PdfError from URL import path".into(),
-                    ))
+                    // `import_from_url` only produces NetworkError / ContentTooShort /
+                    // AiError / ParseError (see recipe_import_service.rs:59-72).
+                    // PdfError is reachable only via the PDF entry points. If a future
+                    // refactor wires PDF detection into the URL path, surface it as a
+                    // tool_user_error pointing at the PDF import flow instead.
+                    unreachable!("import_from_url cannot produce ImportError::PdfError")
                 }
             };
 
-        // Mirror routes/recipes.rs::import_url — record provenance. The DB column
-        // is TEXT today (CreateRecipeDto.source_url: Option<String>); the
-        // String -> Url migration is tracked in fewd-hhu.
+        // Record provenance. `extract_recipe_with_ai` already sets
+        // `source = "url_import"` and `parent_recipe_id = None` (see
+        // recipe_import_service.rs:183-184); only `source_url` is unique to this
+        // call site because the service doesn't know the originating URL.
+        //
+        // Persisted form is the canonical Url serialization (lowercased
+        // scheme/host, default ports stripped, percent-encoding fixed) — a
+        // mild divergence from routes/recipes.rs::import_url, which persists
+        // the raw request string. The String -> Url migration in fewd-hhu
+        // will harmonize both surfaces on the canonical form.
         let mut dto = result.recipe;
-        dto.source = "url_import".to_string();
-        dto.parent_recipe_id = None;
         dto.source_url = Some(url.to_string());
 
         // Match the HTTP-route token meter so MCP imports show up in usage stats.
