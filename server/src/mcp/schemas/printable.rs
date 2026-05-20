@@ -5,12 +5,14 @@
 //! Range is capped tighter than the general [`DateRangeParams`] cap (14 days
 //! vs. 366) because this output is for a single 8.5×11 sheet, not a
 //! quarterly meal plan. The cap is enforced in [`PrintableInput::validate`]
-//! using [`InputError::DateRangeTooWide`] — same error variant the broader
-//! cap uses, just with a tighter `max_days`.
+//! using [`InputError::PrintableSpanTooWide`] with an actionable message
+//! that names the single-sheet-fit reason.
+//!
+//! [`DateRangeParams`]: super::common::DateRangeParams
 
 use chrono::NaiveDate;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use super::common::validate_date_yyyy_mm_dd;
 use super::errors::InputError;
@@ -20,21 +22,33 @@ use super::meals::canonical_meal_type;
 /// to fit a US Letter portrait sheet at default print scale; loosening this
 /// without also loosening the template's typography / row density will
 /// silently overflow onto a second page (the original pain point this tool
-/// is meant to eliminate).
-pub const MAX_PRINTABLE_DAYS: i64 = 13; // span = end - start; 13 → 14 inclusive days
+/// is meant to eliminate). Constant is a *span* (end − start), so the
+/// inclusive day count is `MAX_PRINTABLE_DAYS + 1` (= 14 days).
+pub const MAX_PRINTABLE_DAYS: i64 = 13;
+
+/// Caps on overlay collection sizes. Each item adds a fixed vertical chunk
+/// to the rendered page; runaway counts overflow the single-sheet budget
+/// even when individual strings stay within the line-clamp. These are the
+/// only validation strong enough to prevent visible page-2 spillover, so
+/// they're enforced as hard `InputError::OverlayListTooLong` rejections
+/// rather than as advisory budgets in the docstring.
+pub const MAX_USE_UP_NOTES: usize = 6;
+pub const MAX_DONT_FORGET_ITEMS: usize = 8;
+pub const MAX_PREP_NOTES_PER_DAY: usize = 6;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct PrintableInput {
     /// Inclusive start date in YYYY-MM-DD format.
     pub start_date: String,
-    /// Inclusive end date in YYYY-MM-DD format. Capped at 14 inclusive days
-    /// of span — wider windows are rejected because the output is sized
-    /// for a single fridge-printable sheet.
+    /// Inclusive end date in YYYY-MM-DD format. Capped at 14 inclusive
+    /// days of span — wider windows are rejected because the output is
+    /// sized for a single fridge-printable sheet.
     pub end_date: String,
     /// Which meal slots to include. Defaults to `["Dinner"]` — fridge
-    /// cards almost always show dinners only. Pass multiple
+    /// cards almost always show dinners only. The headline title and the
+    /// `head_title` adapt to non-Dinner slots when widened. Pass multiple
     /// (case-insensitive; same canonical Title Case as `create_meal`) to
-    /// widen.
+    /// include more.
     #[serde(default = "default_include")]
     pub include: Vec<String>,
     /// Show per-person serving notes from `meal.servings[i].notes` as
@@ -42,9 +56,9 @@ pub struct PrintableInput {
     #[serde(default = "default_true")]
     pub show_servings: bool,
     /// Show "who's eating what" person-name prefixes on per-serving notes.
-    /// Default false — most fridge cards don't need it, and the kid-specific
-    /// notes (which DO read better with the name prefix) get it via the
-    /// `notes` text itself ("Cleo: plain rice").
+    /// Default false — most fridge cards don't need it, and the
+    /// kid-specific notes (which DO read better with the name prefix) get
+    /// it via the `notes` text itself ("Cleo: plain rice").
     #[serde(default)]
     pub show_assignees: bool,
     /// Optional top-right header badge (e.g. "Freezer Clear",
@@ -52,13 +66,15 @@ pub struct PrintableInput {
     #[serde(default)]
     pub week_theme: Option<String>,
     /// Top-right list of "use up before X" notes that appear under the
-    /// header badge (e.g. "Frozen gyoza → Monday"). Keep under 4 entries
-    /// for fit.
+    /// header badge (e.g. "Frozen gyoza → Monday"). Capped at
+    /// [`MAX_USE_UP_NOTES`] entries; empty/whitespace-only strings are
+    /// rejected as `EmptyOverlayField`.
     #[serde(default)]
     pub use_up_notes: Vec<String>,
     /// Dark footer block with cross-day reminders. Each item has a bolded
-    /// `prefix` ("Wed night:") and a body. Keep under 5 items so the
-    /// reminders block stays on one page.
+    /// `prefix` ("Wed night:") and a body. Capped at
+    /// [`MAX_DONT_FORGET_ITEMS`] items so the reminders block stays on one
+    /// page.
     #[serde(default)]
     pub dont_forget: Vec<DontForgetItem>,
     /// Per-day annotations keyed by date. `tag` renders as a small badge
@@ -66,33 +82,40 @@ pub struct PrintableInput {
     /// stored description for that day; `prep_notes` render as red
     /// reminder pills in the meal's tag row ("Marinate morning of",
     /// "Defrost the fish at lunch"). Overlays with dates outside
-    /// [start, end] are silently dropped.
+    /// `[start_date, end_date]` are silently dropped (stale overlays from
+    /// a prior call are a common LLM case). Malformed date strings are
+    /// rejected with `InputError::InvalidDate` so the LLM can correct.
     #[serde(default)]
     pub day_overlays: Vec<DayOverlay>,
     /// Optional left-footer subtitle ("Back-friendly week · Hot weather
     /// menu"). When omitted, the tool generates a predictability footer
-    /// of the form "Generated YYYY-MM-DD · {date range} · {slot list}".
+    /// of the form "{date range} · {slot list}".
     #[serde(default)]
     pub foot_note: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct DontForgetItem {
-    /// Bolded prefix (e.g. "Wed night:", "Fri morning:").
+    /// Bolded prefix (e.g. "Wed night:", "Fri morning:"). Must not be
+    /// empty.
     pub prefix: String,
-    /// Body of the reminder.
+    /// Body of the reminder. Must not be empty.
     pub body: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct DayOverlay {
-    /// Date this overlay applies to (YYYY-MM-DD). Overlays whose date is
-    /// outside the printable's range are silently dropped — easier on the
-    /// LLM than an error, since stale overlays from a previous range are
-    /// a common case.
-    pub date: String,
+    /// Date this overlay applies to. Accepts YYYY-MM-DD strings on the
+    /// wire; parsed at deserialize time so malformed dates surface as a
+    /// JSON-RPC validation error rather than disappearing silently at
+    /// render. Out-of-range dates (valid but outside `[start, end]`) are
+    /// dropped at render time, since stale overlays from prior calls are
+    /// a common LLM case.
+    #[serde(deserialize_with = "deserialize_naive_date")]
+    pub date: NaiveDate,
     /// Optional short badge under the day name ("Time Crunch",
-    /// "Date Night"). Keep under ~14 chars for fit.
+    /// "Date Night"). Keep under ~14 chars for fit (advisory — long
+    /// strings clip via CSS).
     #[serde(default)]
     pub tag: Option<String>,
     /// Optional override for the recipe's stored description (the
@@ -102,7 +125,9 @@ pub struct DayOverlay {
     #[serde(default)]
     pub blurb: Option<String>,
     /// Time-sensitive prep notes rendered as red reminder pills
-    /// ("Marinate morning of", "Defrost the fish at lunch").
+    /// ("Marinate morning of", "Defrost the fish at lunch"). Capped at
+    /// [`MAX_PREP_NOTES_PER_DAY`] per overlay; empty/whitespace-only
+    /// strings rejected as `EmptyOverlayField`.
     #[serde(default)]
     pub prep_notes: Vec<String>,
 }
@@ -119,10 +144,11 @@ pub struct ValidatedRange {
 }
 
 impl PrintableInput {
-    /// Validate dates parse, span fits the 14-day cap, and every slot in
-    /// `include` is a known meal type. Returns the parsed dates +
-    /// canonicalized slot list so the caller can render without
-    /// re-validating.
+    /// Validate dates parse, span fits the 14-day cap, every slot in
+    /// `include` is a known meal type, and overlay collection sizes /
+    /// string emptiness honor their per-field constraints. Returns the
+    /// parsed dates + canonicalized slot list so the caller can render
+    /// without re-validating.
     pub fn validate(&self) -> Result<ValidatedRange, InputError> {
         let start = validate_date_yyyy_mm_dd(&self.start_date, "start_date")?;
         let end = validate_date_yyyy_mm_dd(&self.end_date, "end_date")?;
@@ -135,8 +161,8 @@ impl PrintableInput {
         let span = (end - start).num_days();
         if span > MAX_PRINTABLE_DAYS {
             return Err(InputError::PrintableSpanTooWide {
-                days: span,
-                max_days: MAX_PRINTABLE_DAYS,
+                days_inclusive: span + 1,
+                max_days_inclusive: MAX_PRINTABLE_DAYS + 1,
             });
         }
 
@@ -155,6 +181,61 @@ impl PrintableInput {
             out
         };
 
+        // ── Overlay collection sizes ──────────────────────────────────
+        if self.use_up_notes.len() > MAX_USE_UP_NOTES {
+            return Err(InputError::OverlayListTooLong {
+                field: "use_up_notes",
+                count: self.use_up_notes.len(),
+                max_count: MAX_USE_UP_NOTES,
+            });
+        }
+        if self.dont_forget.len() > MAX_DONT_FORGET_ITEMS {
+            return Err(InputError::OverlayListTooLong {
+                field: "dont_forget",
+                count: self.dont_forget.len(),
+                max_count: MAX_DONT_FORGET_ITEMS,
+            });
+        }
+        for o in &self.day_overlays {
+            if o.prep_notes.len() > MAX_PREP_NOTES_PER_DAY {
+                return Err(InputError::OverlayListTooLong {
+                    field: "day_overlays[i].prep_notes",
+                    count: o.prep_notes.len(),
+                    max_count: MAX_PREP_NOTES_PER_DAY,
+                });
+            }
+        }
+
+        // ── Empty-string checks on documented-non-empty fields ────────
+        for note in &self.use_up_notes {
+            if note.trim().is_empty() {
+                return Err(InputError::EmptyOverlayField {
+                    field: "use_up_notes[i]",
+                });
+            }
+        }
+        for item in &self.dont_forget {
+            if item.prefix.trim().is_empty() {
+                return Err(InputError::EmptyOverlayField {
+                    field: "dont_forget[i].prefix",
+                });
+            }
+            if item.body.trim().is_empty() {
+                return Err(InputError::EmptyOverlayField {
+                    field: "dont_forget[i].body",
+                });
+            }
+        }
+        for o in &self.day_overlays {
+            for prep in &o.prep_notes {
+                if prep.trim().is_empty() {
+                    return Err(InputError::EmptyOverlayField {
+                        field: "day_overlays[i].prep_notes[j]",
+                    });
+                }
+            }
+        }
+
         Ok(ValidatedRange {
             start,
             end,
@@ -169,6 +250,23 @@ fn default_include() -> Vec<String> {
 
 fn default_true() -> bool {
     true
+}
+
+/// Parse YYYY-MM-DD into `NaiveDate` at deserialize time so malformed dates
+/// surface as JSON-RPC parameter errors (caught by `LenientParameters` and
+/// surfaced as a tool-level error) rather than silently disappearing at
+/// render time when the overlay-by-date map is built.
+fn deserialize_naive_date<'de, D>(deserializer: D) -> Result<NaiveDate, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+    let s = String::deserialize(deserializer)?;
+    NaiveDate::parse_from_str(&s, "%Y-%m-%d").map_err(|_| {
+        D::Error::custom(format!(
+            "day_overlays[i].date must be YYYY-MM-DD (got '{s}')"
+        ))
+    })
 }
 
 #[cfg(test)]
@@ -216,16 +314,18 @@ mod tests {
             matches!(
                 err,
                 InputError::PrintableSpanTooWide {
-                    days: 14,
-                    max_days: 13
+                    days_inclusive: 15,
+                    max_days_inclusive: 14
                 }
             ),
-            "expected PrintableSpanTooWide (14/13), got {err:?}"
+            "expected PrintableSpanTooWide (15/14 inclusive), got {err:?}"
         );
-        // Message must be actionable for the LLM — name the cap and the
-        // recovery, and be specific to the printable use case (not the
-        // generic "multi-megabyte response" wording).
-        assert!(msg.contains("13"), "msg should reference the cap: {msg}");
+        // Message must reference the inclusive day count (matches docs)
+        // and the recovery path.
+        assert!(
+            msg.contains("15") && msg.contains("14"),
+            "msg should reference both inclusive day counts: {msg}"
+        );
         assert!(
             msg.to_lowercase().contains("narrow"),
             "msg should hint at narrowing: {msg}"
@@ -292,5 +392,155 @@ mod tests {
     fn validate_empty_include_defaults_to_dinner() {
         let v = input("2026-05-11", "2026-05-17").validate().unwrap();
         assert_eq!(v.include, vec!["Dinner".to_string()]);
+    }
+
+    // ─── Overlay collection-size caps ──────────────────────────────────
+
+    #[test]
+    fn validate_rejects_too_many_use_up_notes() {
+        let mut p = input("2026-05-11", "2026-05-17");
+        p.use_up_notes = (0..MAX_USE_UP_NOTES + 1)
+            .map(|i| format!("note {i}"))
+            .collect();
+        let err = p.validate().unwrap_err();
+        assert!(matches!(
+            err,
+            InputError::OverlayListTooLong {
+                field: "use_up_notes",
+                ..
+            }
+        ));
+        let msg = format!("{err}");
+        assert!(msg.contains("use_up_notes"));
+        assert!(msg.contains(&format!("{}", MAX_USE_UP_NOTES + 1)));
+    }
+
+    #[test]
+    fn validate_rejects_too_many_dont_forget_items() {
+        let mut p = input("2026-05-11", "2026-05-17");
+        p.dont_forget = (0..MAX_DONT_FORGET_ITEMS + 1)
+            .map(|i| DontForgetItem {
+                prefix: format!("Day {i}:"),
+                body: format!("body {i}"),
+            })
+            .collect();
+        let err = p.validate().unwrap_err();
+        assert!(matches!(
+            err,
+            InputError::OverlayListTooLong {
+                field: "dont_forget",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_too_many_prep_notes_in_one_overlay() {
+        let mut p = input("2026-05-11", "2026-05-17");
+        p.day_overlays = vec![DayOverlay {
+            date: NaiveDate::from_ymd_opt(2026, 5, 11).unwrap(),
+            tag: None,
+            blurb: None,
+            prep_notes: (0..MAX_PREP_NOTES_PER_DAY + 1)
+                .map(|i| format!("prep {i}"))
+                .collect(),
+        }];
+        let err = p.validate().unwrap_err();
+        assert!(matches!(
+            err,
+            InputError::OverlayListTooLong {
+                field: "day_overlays[i].prep_notes",
+                ..
+            }
+        ));
+    }
+
+    // ─── Empty-string rejection on documented-non-empty fields ─────────
+
+    #[test]
+    fn validate_rejects_empty_use_up_note_string() {
+        let mut p = input("2026-05-11", "2026-05-17");
+        p.use_up_notes = vec!["valid".into(), "  ".into()];
+        let err = p.validate().unwrap_err();
+        assert!(matches!(
+            err,
+            InputError::EmptyOverlayField {
+                field: "use_up_notes[i]"
+            }
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_empty_dont_forget_prefix() {
+        let mut p = input("2026-05-11", "2026-05-17");
+        p.dont_forget = vec![DontForgetItem {
+            prefix: "".into(),
+            body: "valid body".into(),
+        }];
+        let err = p.validate().unwrap_err();
+        assert!(matches!(
+            err,
+            InputError::EmptyOverlayField {
+                field: "dont_forget[i].prefix"
+            }
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_empty_dont_forget_body() {
+        let mut p = input("2026-05-11", "2026-05-17");
+        p.dont_forget = vec![DontForgetItem {
+            prefix: "Wed:".into(),
+            body: "   ".into(),
+        }];
+        let err = p.validate().unwrap_err();
+        assert!(matches!(
+            err,
+            InputError::EmptyOverlayField {
+                field: "dont_forget[i].body"
+            }
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_empty_prep_note() {
+        let mut p = input("2026-05-11", "2026-05-17");
+        p.day_overlays = vec![DayOverlay {
+            date: NaiveDate::from_ymd_opt(2026, 5, 11).unwrap(),
+            tag: None,
+            blurb: None,
+            prep_notes: vec!["valid".into(), "".into()],
+        }];
+        let err = p.validate().unwrap_err();
+        assert!(matches!(
+            err,
+            InputError::EmptyOverlayField {
+                field: "day_overlays[i].prep_notes[j]"
+            }
+        ));
+    }
+
+    // ─── Date deserialization on DayOverlay.date ───────────────────────
+
+    #[test]
+    fn day_overlay_deserialize_rejects_malformed_date() {
+        // The serde deserializer surfaces malformed dates at parse time
+        // (this catches the silent-drop case where a bad date used to
+        // disappear at render with no LLM feedback).
+        let raw = serde_json::json!({
+            "date": "2026-O5-11",  // letter O for zero — easy LLM typo
+        });
+        let err = serde_json::from_value::<DayOverlay>(raw).unwrap_err();
+        assert!(
+            err.to_string().contains("YYYY-MM-DD"),
+            "deserialize error should mention the format: {err}"
+        );
+    }
+
+    #[test]
+    fn day_overlay_deserialize_accepts_well_formed_date() {
+        let raw = serde_json::json!({ "date": "2026-05-11" });
+        let parsed: DayOverlay = serde_json::from_value(raw).unwrap();
+        assert_eq!(parsed.date, NaiveDate::from_ymd_opt(2026, 5, 11).unwrap());
     }
 }

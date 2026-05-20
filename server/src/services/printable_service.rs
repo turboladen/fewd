@@ -17,10 +17,29 @@
 //!
 //! ## Determinism contract
 //!
-//! Given the same `(meals, recipe_models, lookups, input)`, output is byte
-//! identical. The footer's "Generated on …" date comes from `input.foot_note`
-//! when supplied, OR from `input` directly — the renderer never reads the
-//! system clock. This is what makes the snapshot tests below stable.
+//! Given the same `(meals, recipe_models, person_names, validated, input)`,
+//! output is byte identical. The renderer never reads the system clock; the
+//! footer's subtitle comes from `input.foot_note` when supplied, else from a
+//! deterministic format derived from the validated range and slot list.
+//! This is what makes the snapshot tests below stable.
+//!
+//! ## Soft-failure observability
+//!
+//! Several conditions degrade rendering rather than failing it outright:
+//!
+//! - A meal whose `servings` JSON fails to parse → that single row renders
+//!   as a `(corrupt meal data)` placeholder, an `error!` is logged with
+//!   `meal_id` + parse error, and the rest of the week still renders. The
+//!   alternative (failing the whole render) would deny the family their
+//!   printable over a single bad row.
+//! - A meal referencing a soft-deleted `person_id` or a deleted `recipe_id`
+//!   → placeholder text (`(inactive person, id=…)` / `(deleted recipe,
+//!   id=…)`) renders in-place and a `warn!` is logged with the meal id and
+//!   reference id. The placeholders match the wording used by
+//!   [`mcp::schemas::meals::meal_to_brief`] so log searches catch both
+//!   surfaces with one query.
+//! - A recipe with corrupt `total_time` JSON → the time-tag is omitted and a
+//!   `warn!` is logged with the recipe id and parse error.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -52,7 +71,7 @@ pub fn render(
     person_names: &PersonNameMap,
     validated: &ValidatedRange,
     input: &PrintableInput,
-) -> Result<String, String> {
+) -> String {
     let included_slots: std::collections::HashSet<&str> =
         validated.include.iter().map(String::as_str).collect();
 
@@ -64,12 +83,8 @@ pub fn render(
     let overlay_by_date: HashMap<NaiveDate, &DayOverlay> = input
         .day_overlays
         .iter()
-        .filter_map(|ov| {
-            NaiveDate::parse_from_str(&ov.date, "%Y-%m-%d")
-                .ok()
-                .filter(|d| *d >= validated.start && *d <= validated.end)
-                .map(|d| (d, ov))
-        })
+        .filter(|ov| ov.date >= validated.start && ov.date <= validated.end)
+        .map(|ov| (ov.date, ov))
         .collect();
 
     let nights_or_empty = if visible_meals.is_empty() {
@@ -81,7 +96,7 @@ pub fn render(
             person_names,
             &overlay_by_date,
             input,
-        )?
+        )
     };
 
     let header_right = render_header_right(input);
@@ -91,26 +106,26 @@ pub fn render(
         .clone()
         .unwrap_or_else(|| default_foot_note(validated));
     let week_label = format_week_label(validated.start, validated.end);
-    let head_title = format!("Dinner Plan — {}", week_label);
+    let slot_label = slot_label(&validated.include);
+    let head_title = format!("{slot_label} Plan — {week_label}");
+    let (title_top, title_bottom) = title_lines(&validated.include);
 
-    let html = TEMPLATE
-        .replace("{{HEAD_TITLE}}", &esc(&head_title))
-        .replace("{{TITLE_TOP}}", "This Week's")
-        .replace("{{TITLE_BOTTOM}}", "Dinners")
-        .replace("{{WEEK_LABEL}}", &esc(&week_label))
+    TEMPLATE
+        .replace("{{HEAD_TITLE}}", &esc_text(&head_title))
+        .replace("{{TITLE_TOP}}", &esc_text(title_top))
+        .replace("{{TITLE_BOTTOM}}", &esc_text(&title_bottom))
+        .replace("{{WEEK_LABEL}}", &esc_text(&week_label))
         .replace("{{HEADER_RIGHT}}", &header_right)
         .replace("{{NIGHTS_OR_EMPTY}}", &nights_or_empty)
         .replace("{{REMINDERS_BLOCK}}", &reminders)
-        .replace("{{FOOT_NOTE}}", &esc(&foot_note));
-
-    Ok(html)
+        .replace("{{FOOT_NOTE}}", &esc_text(&foot_note))
 }
 
 fn render_empty_state(validated: &ValidatedRange) -> String {
     format!(
         "<div class=\"empty-state\">No meals scheduled for {} — call \
          <code>create_meal</code> to populate the week first.</div>",
-        esc(&format_week_label(validated.start, validated.end))
+        esc_text(&format_week_label(validated.start, validated.end))
     )
 }
 
@@ -120,12 +135,12 @@ fn render_header_right(input: &PrintableInput) -> String {
     }
     let mut html = String::from("<div class=\"header-right\">");
     if let Some(theme) = &input.week_theme {
-        let _ = write!(html, "<div class=\"badge\">{}</div>", esc(theme));
+        let _ = write!(html, "<div class=\"badge\">{}</div>", esc_text(theme));
     }
     if !input.use_up_notes.is_empty() {
         html.push_str("<div class=\"use-up\">");
         for note in &input.use_up_notes {
-            let _ = write!(html, "<div>{}</div>", esc(note));
+            let _ = write!(html, "<div>{}</div>", esc_text(note));
         }
         html.push_str("</div>");
     }
@@ -139,15 +154,20 @@ fn render_nights(
     person_names: &PersonNameMap,
     overlay_by_date: &HashMap<NaiveDate, &DayOverlay>,
     input: &PrintableInput,
-) -> Result<String, String> {
+) -> String {
     let mut html = String::from("<div class=\"nights\">");
     for m in meals {
         let overlay = overlay_by_date.get(&m.date).copied();
-        let row = render_night(m, recipe_models, person_names, overlay, input)?;
-        html.push_str(&row);
+        html.push_str(&render_night(
+            m,
+            recipe_models,
+            person_names,
+            overlay,
+            input,
+        ));
     }
     html.push_str("</div>");
-    Ok(html)
+    html
 }
 
 fn render_night(
@@ -156,22 +176,50 @@ fn render_night(
     person_names: &PersonNameMap,
     overlay: Option<&DayOverlay>,
     input: &PrintableInput,
-) -> Result<String, String> {
-    let servings: Vec<PersonServingDto> = serde_json::from_str(&m.servings)
-        .map_err(|e| format!("malformed servings JSON on meal {}: {e}", m.id))?;
-
-    let title_block = render_meal_title(&servings, recipe_models);
-    let blurb = render_blurb(&servings, recipe_models, overlay);
-    let tags = render_tags(&servings, recipe_models, overlay, person_names, input);
-
+) -> String {
     let day_name = m.date.format("%a").to_string();
     let day_date = m.date.format("%b %-d").to_string();
     let day_tag_html = overlay
         .and_then(|o| o.tag.as_deref())
-        .map(|t| format!("<div class=\"day-tag\">{}</div>", esc(t)))
+        .map(|t| format!("<div class=\"day-tag\">{}</div>", esc_text(t)))
         .unwrap_or_default();
 
-    Ok(format!(
+    // Per-row fallback so a single corrupt servings JSON degrades that row
+    // rather than killing the whole printable. See module docs (Soft-failure
+    // observability).
+    let (title_block, blurb, tags) =
+        match serde_json::from_str::<Vec<PersonServingDto>>(&m.servings) {
+            Ok(servings) => (
+                render_meal_title(&m.id, &servings, recipe_models),
+                render_blurb(&servings, recipe_models, overlay),
+                render_tags(
+                    &m.id,
+                    &servings,
+                    recipe_models,
+                    overlay,
+                    person_names,
+                    input,
+                ),
+            ),
+            Err(e) => {
+                tracing::error!(
+                    meal_id = %m.id,
+                    error = %e,
+                    "printable: meal.servings JSON parse failed; rendering placeholder row"
+                );
+                (
+                    format!(
+                        "<div class=\"meal-title\"><span class=\"meal-icon\">⚠</span> \
+                     {}</div>",
+                        esc_text(&format!("(corrupt meal data, id={})", m.id))
+                    ),
+                    String::new(),
+                    String::new(),
+                )
+            }
+        };
+
+    format!(
         "<div class=\"night\">\
            <div class=\"night-day\">\
              <div class=\"day-name\">{day_name}</div>\
@@ -184,16 +232,17 @@ fn render_night(
              {tags}\
            </div>\
          </div>",
-        day_name = esc(&day_name),
-        day_date = esc(&day_date),
+        day_name = esc_text(&day_name),
+        day_date = esc_text(&day_date),
         day_tag_html = day_tag_html,
         title_block = title_block,
         blurb = blurb,
         tags = tags,
-    ))
+    )
 }
 
 fn render_meal_title(
+    meal_id: &str,
     servings: &[PersonServingDto],
     recipe_models: &HashMap<String, recipe::Model>,
 ) -> String {
@@ -204,23 +253,41 @@ fn render_meal_title(
         let label = servings
             .iter()
             .find_map(|s| match s {
-                PersonServingDto::Adhoc { adhoc_items, .. } => {
-                    adhoc_items.first().map(|i| i.name.clone())
-                }
+                PersonServingDto::Adhoc { adhoc_items, .. } => adhoc_items
+                    .first()
+                    .map(|i| i.name.trim())
+                    .filter(|n| !n.is_empty())
+                    .map(str::to_string),
                 _ => None,
             })
-            .unwrap_or_else(|| "Ad-hoc dinner".to_string());
+            .unwrap_or_else(|| {
+                tracing::warn!(
+                    meal_id,
+                    "printable: meal is adhoc-only and no adhoc item has a \
+                     non-empty name; using generic 'Ad-hoc dinner' label"
+                );
+                "Ad-hoc dinner".to_string()
+            });
         return format!(
             "<div class=\"meal-title\"><span class=\"meal-icon\">🍽</span> {}</div>",
-            esc(&label)
+            esc_text(&label)
         );
     }
 
     let primary_id = &unique_recipes[0];
     let primary = recipe_models.get(primary_id);
-    let primary_name = primary
-        .map(|r| r.name.clone())
-        .unwrap_or_else(|| format!("(deleted recipe, id={primary_id})"));
+    let primary_name = match primary {
+        Some(r) => r.name.clone(),
+        None => {
+            tracing::warn!(
+                meal_id,
+                recipe_id = %primary_id,
+                "printable: meal references a recipe that no longer exists; \
+                 rendering placeholder. Matches the meal_to_brief convention."
+            );
+            format!("(deleted recipe, id={primary_id})")
+        }
+    };
     let icon = primary
         .and_then(|r| r.icon.clone())
         .filter(|s| !s.trim().is_empty())
@@ -228,25 +295,31 @@ fn render_meal_title(
 
     let mut html = format!(
         "<div class=\"meal-title\"><span class=\"meal-icon\">{}</span> {}</div>",
-        esc(&icon),
-        esc(&primary_name)
+        esc_text(&icon),
+        esc_text(&primary_name)
     );
 
     if unique_recipes.len() > 1 {
         let others: Vec<String> = unique_recipes
             .iter()
             .skip(1)
-            .map(|id| {
-                recipe_models
-                    .get(id)
-                    .map(|r| r.name.clone())
-                    .unwrap_or_else(|| format!("(deleted, id={id})"))
+            .map(|id| match recipe_models.get(id) {
+                Some(r) => r.name.clone(),
+                None => {
+                    tracing::warn!(
+                        meal_id,
+                        recipe_id = %id,
+                        "printable: secondary recipe reference does not resolve; \
+                         rendering placeholder"
+                    );
+                    format!("(deleted recipe, id={id})")
+                }
             })
             .collect();
         let _ = write!(
             html,
             "<div class=\"meal-also\">Also: {}</div>",
-            esc(&others.join(", "))
+            esc_text(&others.join(", "))
         );
     }
 
@@ -268,12 +341,13 @@ fn render_blurb(
             .map(str::to_string)
     });
     match text {
-        Some(t) => format!("<div class=\"meal-sub\">{}</div>", esc(&t)),
+        Some(t) => format!("<div class=\"meal-sub\">{}</div>", esc_text(&t)),
         None => String::new(),
     }
 }
 
 fn render_tags(
+    meal_id: &str,
     servings: &[PersonServingDto],
     recipe_models: &HashMap<String, recipe::Model>,
     overlay: Option<&DayOverlay>,
@@ -283,7 +357,10 @@ fn render_tags(
     let mut tags: Vec<String> = Vec::new();
 
     if let Some(time_str) = primary_total_time_label(servings, recipe_models) {
-        tags.push(format!("<span class=\"tag\">{}</span>", esc(&time_str)));
+        tags.push(format!(
+            "<span class=\"tag\">{}</span>",
+            esc_text(&time_str)
+        ));
     }
 
     if input.show_servings {
@@ -300,28 +377,36 @@ fn render_tags(
                 continue;
             };
             let display = if input.show_assignees {
-                let name = person_names
-                    .get(person_id)
-                    .map(String::as_str)
-                    .unwrap_or("(inactive)");
+                let name = match person_names.get(person_id) {
+                    Some(n) => n.clone(),
+                    None => {
+                        tracing::warn!(
+                            meal_id,
+                            person_id,
+                            "printable: meal references a person not in the \
+                             active-family map (likely soft-deleted); rendering \
+                             placeholder. Matches the meal_to_brief convention."
+                        );
+                        format!("(inactive person, id={person_id})")
+                    }
+                };
                 format!("{name}: {note}")
             } else {
                 // Trust the note text to carry the person prefix when needed
                 // (the LLM idiom is "Cleo: plain gyoza" in the notes field).
                 note.to_string()
             };
-            tags.push(format!("<span class=\"tag\">{}</span>", esc(&display)));
+            tags.push(format!("<span class=\"tag\">{}</span>", esc_text(&display)));
         }
     }
 
     if let Some(o) = overlay {
+        // prep_notes are guaranteed non-empty by the validator
+        // (InputError::EmptyOverlayField). Render straight through.
         for prep in &o.prep_notes {
-            if prep.trim().is_empty() {
-                continue;
-            }
             tags.push(format!(
                 "<span class=\"tag reminder-tag\">⚑ {}</span>",
-                esc(prep)
+                esc_text(prep)
             ));
         }
     }
@@ -344,8 +429,8 @@ fn render_reminders(items: &[DontForgetItem]) -> String {
         let _ = write!(
             html,
             "<div class=\"reminder-item\"><strong>{}</strong> {}</div>",
-            esc(&item.prefix),
-            esc(&item.body)
+            esc_text(&item.prefix),
+            esc_text(&item.body)
         );
     }
     html.push_str("</div></div>");
@@ -372,8 +457,17 @@ fn primary_total_time_label(
     let primary_id = unique_recipe_ids_in_order(servings).into_iter().next()?;
     let r = recipe_models.get(&primary_id)?;
     let raw = r.total_time.as_deref().filter(|s| !s.trim().is_empty())?;
-    let parsed: TimeValueDto = serde_json::from_str(raw).ok()?;
-    Some(format!("{} {}", parsed.value, parsed.unit))
+    match serde_json::from_str::<TimeValueDto>(raw) {
+        Ok(parsed) => Some(format!("{} {}", parsed.value, parsed.unit)),
+        Err(e) => {
+            tracing::warn!(
+                recipe_id = %primary_id,
+                error = %e,
+                "printable: recipe.total_time JSON parse failed; omitting time tag"
+            );
+            None
+        }
+    }
 }
 
 fn format_week_label(start: NaiveDate, end: NaiveDate) -> String {
@@ -404,6 +498,34 @@ fn format_week_label(start: NaiveDate, end: NaiveDate) -> String {
     }
 }
 
+/// Pluralized slot label used in the headline title and head/tab title.
+/// Single-slot defaults to that slot ("Dinner", "Breakfast"); multi-slot
+/// gets a generic "Meal" wrapper so the title doesn't read awkwardly
+/// ("Breakfast + Dinner Plan" would force layout work this v1 doesn't do).
+fn slot_label(include: &[String]) -> &'static str {
+    match include {
+        [one] => match one.as_str() {
+            "Breakfast" => "Breakfast",
+            "Lunch" => "Lunch",
+            "Snack" => "Snack",
+            _ => "Dinner",
+        },
+        _ => "Meal",
+    }
+}
+
+/// Two-line title at the top-left of the printable. For Dinner-only weeks
+/// this reads "This Week's / Dinners" (matches Steve's reference design).
+/// Other single-slot variants read "This Week's / Breakfasts" etc.
+/// Multi-slot widens to "This Week's / Meals" so the layout still balances.
+fn title_lines(include: &[String]) -> (&'static str, String) {
+    let bottom = match include {
+        [one] => format!("{one}s"), // "Dinners", "Breakfasts", "Lunches"... acceptable for v1
+        _ => "Meals".to_string(),
+    };
+    ("This Week's", bottom)
+}
+
 fn default_foot_note(validated: &ValidatedRange) -> String {
     let slot_summary = match validated.include.as_slice() {
         [one] => one.to_lowercase() + "s only",
@@ -420,11 +542,17 @@ fn default_foot_note(validated: &ValidatedRange) -> String {
     )
 }
 
-/// HTML-escape text content. Five characters: `&`, `<`, `>`, `"`, `'`.
-/// Adequate for text injected into HTML body or attributes; the renderer
-/// never builds attribute values from variable input (everything substituted
-/// is body text).
-fn esc(s: &str) -> String {
+/// HTML-escape **text content**. Escapes `&`, `<`, `>`, `"`, `'`.
+///
+/// Contract: callers may only inject the output into HTML body text
+/// (`<div>…</div>`, `<strong>…</strong>`) or RCDATA contexts
+/// (`<title>…</title>`). Do **not** inject into attribute values, URL
+/// contexts, `<script>` / `<style>` bodies, or any other parser state —
+/// the 5-char escape isn't sufficient for those contexts. Every
+/// substitution site in `template.html` currently honors this; if a future
+/// edit moves a `{{VAR}}` into an attribute, switch to a context-aware
+/// escaper instead of widening this one.
+fn esc_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
         match ch {
@@ -560,7 +688,7 @@ mod tests {
 
         let input = input_minimal();
         let validated = input.validate().unwrap();
-        let html = render(&meals, &recipes, &person_names(), &validated, &input).unwrap();
+        let html = render(&meals, &recipes, &person_names(), &validated, &input);
 
         assert!(
             html.contains("Pan-Fried Gyoza"),
@@ -588,7 +716,7 @@ mod tests {
         let recipes: HashMap<String, recipe::Model> = HashMap::new();
         let input = input_minimal();
         let validated = input.validate().unwrap();
-        let html = render(&[], &recipes, &person_names(), &validated, &input).unwrap();
+        let html = render(&[], &recipes, &person_names(), &validated, &input);
         assert!(html.contains("No meals scheduled"));
         assert!(html.contains("<html"));
         assert!(html.contains("create_meal"));
@@ -626,8 +754,7 @@ mod tests {
             &person_names(),
             &validated,
             &input,
-        )
-        .unwrap();
+        );
         // One row for the dinner, none for the breakfast.
         assert_eq!(html.matches("class=\"night\"").count(), 1);
     }
@@ -647,7 +774,7 @@ mod tests {
 
         let input = input_minimal();
         let validated = input.validate().unwrap();
-        let html = render(&meals, &recipes, &person_names(), &validated, &input).unwrap();
+        let html = render(&meals, &recipes, &person_names(), &validated, &input);
         assert!(!html.contains("<script>alert(1)</script>"));
         assert!(html.contains("&lt;script&gt;"));
         assert!(html.contains("&quot;caution&quot;"));
@@ -675,7 +802,7 @@ mod tests {
         )];
         let input = input_minimal();
         let validated = input.validate().unwrap();
-        let html = render(&meals, &recipes, &person_names(), &validated, &input).unwrap();
+        let html = render(&meals, &recipes, &person_names(), &validated, &input);
         // Primary appears in the meal-title; secondary in the meal-also line.
         assert!(html.contains("Pan-Fried Gyoza"));
         assert!(html.contains("meal-also"));
@@ -712,7 +839,7 @@ mod tests {
         }))
         .unwrap();
         let validated = input.validate().unwrap();
-        let html = render(&meals, &recipes, &person_names(), &validated, &input).unwrap();
+        let html = render(&meals, &recipes, &person_names(), &validated, &input);
         assert!(html.contains("Override blurb for the week."));
         assert!(!html.contains("Stored recipe description."));
         assert!(html.contains("Time Crunch"));
@@ -745,7 +872,7 @@ mod tests {
         }))
         .unwrap();
         let validated = input.validate().unwrap();
-        let html = render(&meals, &recipes, &person_names(), &validated, &input).unwrap();
+        let html = render(&meals, &recipes, &person_names(), &validated, &input);
         assert!(!html.contains("Should not appear"));
         assert!(!html.contains("stale overlay"));
     }
@@ -763,7 +890,7 @@ mod tests {
         }))
         .unwrap();
         let validated = input.validate().unwrap();
-        let html = render(&[], &recipes, &person_names(), &validated, &input).unwrap();
+        let html = render(&[], &recipes, &person_names(), &validated, &input);
         assert!(html.contains("class=\"reminders\""));
         assert!(html.contains("<strong>Wed night:</strong>"));
         assert!(html.contains("<strong>Fri morning:</strong>"));
@@ -781,7 +908,7 @@ mod tests {
         }))
         .unwrap();
         let validated = input.validate().unwrap();
-        let html = render(&[], &recipes, &person_names(), &validated, &input).unwrap();
+        let html = render(&[], &recipes, &person_names(), &validated, &input);
         assert!(html.contains("class=\"badge\""));
         assert!(html.contains("Freezer Clear"));
         assert!(html.contains("Frozen gyoza → Monday"));
@@ -793,7 +920,7 @@ mod tests {
         let recipes = HashMap::new();
         let input = input_minimal();
         let validated = input.validate().unwrap();
-        let html = render(&[], &recipes, &person_names(), &validated, &input).unwrap();
+        let html = render(&[], &recipes, &person_names(), &validated, &input);
         // Default footer follows the predictability format: "{date range} · {slots}"
         assert!(html.contains("May 11 – 13, 2026 · dinners only"));
     }
@@ -808,7 +935,7 @@ mod tests {
         }))
         .unwrap();
         let validated = input.validate().unwrap();
-        let html = render(&[], &recipes, &person_names(), &validated, &input).unwrap();
+        let html = render(&[], &recipes, &person_names(), &validated, &input);
         assert!(html.contains("Back-friendly week · Hot weather menu"));
         // Should not double up with the default predictability footer.
         assert!(!html.contains("dinners only"));
@@ -832,7 +959,7 @@ mod tests {
         let meals = vec![meal_dinner("m1", date(2026, 5, 11), vec![adhoc])];
         let input = input_minimal();
         let validated = input.validate().unwrap();
-        let html = render(&meals, &recipes, &person_names(), &validated, &input).unwrap();
+        let html = render(&meals, &recipes, &person_names(), &validated, &input);
         assert!(html.contains("leftover pizza"));
     }
 
@@ -850,7 +977,7 @@ mod tests {
         )];
         let input = input_minimal();
         let validated = input.validate().unwrap();
-        let html = render(&meals, &recipes, &person_names(), &validated, &input).unwrap();
+        let html = render(&meals, &recipes, &person_names(), &validated, &input);
         assert!(
             html.contains("🍽"),
             "fallback icon should render when icon is None"
@@ -864,11 +991,132 @@ mod tests {
         let recipes = HashMap::new();
         let input = input_minimal();
         let validated = input.validate().unwrap();
-        let html = render(&[], &recipes, &person_names(), &validated, &input).unwrap();
+        let html = render(&[], &recipes, &person_names(), &validated, &input);
         assert!(html.contains("@page"));
         assert!(html.contains("size: letter portrait"));
         assert!(html.contains("page-break-inside: avoid"));
         assert!(html.contains("-webkit-line-clamp"));
+    }
+
+    // ─── New tests for code-review fixes ──────────────────────────────
+
+    #[test]
+    fn render_title_adapts_to_breakfast_only_include() {
+        // Hardcoded "Dinners" was a bug — `include` should drive the
+        // title. Pin both the headline and the head/tab title.
+        let input: PrintableInput = serde_json::from_value(serde_json::json!({
+            "start_date": "2026-05-11",
+            "end_date": "2026-05-13",
+            "include": ["breakfast"]
+        }))
+        .unwrap();
+        let validated = input.validate().unwrap();
+        let html = render(&[], &HashMap::new(), &person_names(), &validated, &input);
+        assert!(
+            html.contains("<title>Breakfast Plan — "),
+            "head title should reflect slot: {}",
+            &html[..200]
+        );
+        assert!(
+            html.contains(">Breakfasts<"),
+            "headline title should reflect slot"
+        );
+        assert!(
+            !html.contains(">Dinners<"),
+            "Dinners must not appear for a breakfast-only week"
+        );
+    }
+
+    #[test]
+    fn render_title_widens_to_meals_when_multiple_slots_included() {
+        let input: PrintableInput = serde_json::from_value(serde_json::json!({
+            "start_date": "2026-05-11",
+            "end_date": "2026-05-13",
+            "include": ["breakfast", "dinner"]
+        }))
+        .unwrap();
+        let validated = input.validate().unwrap();
+        let html = render(&[], &HashMap::new(), &person_names(), &validated, &input);
+        assert!(html.contains("<title>Meal Plan — "));
+        assert!(html.contains(">Meals<"));
+    }
+
+    #[test]
+    fn render_corrupt_servings_json_renders_placeholder_row_and_continues() {
+        // A single corrupt row should NOT fail the whole printable —
+        // family still gets the other days. Verified by checking that
+        // the second day's recipe still renders alongside the placeholder.
+        let recipes: HashMap<String, recipe::Model> =
+            [recipe_basic("r-gyoza", "Pan-Fried Gyoza", None, None)]
+                .into_iter()
+                .map(|r| (r.id.clone(), r))
+                .collect();
+        let corrupt = meal::Model {
+            id: "m-bad".into(),
+            date: date(2026, 5, 11),
+            meal_type: "Dinner".into(),
+            order_index: 2,
+            servings: "{not valid json".into(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let good = meal_dinner(
+            "m-ok",
+            date(2026, 5, 12),
+            vec![serving_recipe("alice", "r-gyoza", None)],
+        );
+        let input = input_minimal();
+        let validated = input.validate().unwrap();
+        let html = render(
+            &[corrupt, good],
+            &recipes,
+            &person_names(),
+            &validated,
+            &input,
+        );
+        assert!(html.contains("(corrupt meal data, id=m-bad)"));
+        assert!(html.contains("Pan-Fried Gyoza"));
+        assert_eq!(html.matches("class=\"night\"").count(), 2);
+    }
+
+    #[test]
+    fn render_deleted_recipe_reference_uses_placeholder_consistent_with_meal_to_brief() {
+        // No recipes in the map; meal references "r-ghost" → placeholder
+        // matches the meal_to_brief wording so log searches can grep both.
+        let meals = vec![meal_dinner(
+            "m1",
+            date(2026, 5, 11),
+            vec![serving_recipe("alice", "r-ghost", None)],
+        )];
+        let input = input_minimal();
+        let validated = input.validate().unwrap();
+        let html = render(&meals, &HashMap::new(), &person_names(), &validated, &input);
+        assert!(html.contains("(deleted recipe, id=r-ghost)"));
+    }
+
+    #[test]
+    fn render_soft_deleted_person_uses_placeholder_when_show_assignees_true() {
+        // person_names is empty; meal serving references "ghost". With
+        // show_assignees on, the per-serving tag includes the placeholder.
+        let recipes: HashMap<String, recipe::Model> =
+            [recipe_basic("r-x", "Carbonara", None, None)]
+                .into_iter()
+                .map(|r| (r.id.clone(), r))
+                .collect();
+        let meals = vec![meal_dinner(
+            "m1",
+            date(2026, 5, 11),
+            vec![serving_recipe("ghost", "r-x", Some("plain pasta"))],
+        )];
+        let input: PrintableInput = serde_json::from_value(serde_json::json!({
+            "start_date": "2026-05-11",
+            "end_date": "2026-05-13",
+            "show_assignees": true
+        }))
+        .unwrap();
+        let validated = input.validate().unwrap();
+        let html = render(&meals, &recipes, &PersonNameMap::new(), &validated, &input);
+        assert!(html.contains("(inactive person, id=ghost): plain pasta"));
     }
 
     /// Manual single-page-fit verification helper. CSS rules pinned by the
@@ -876,10 +1124,9 @@ mod tests {
     /// confirm a maxed-out week renders on one US Letter sheet is to open
     /// the output in a browser and look. This test dumps a realistic
     /// 7-day fixture with every overlay field exercised to
-    /// `/tmp/fewd-printable-sample.html`, then anyone (Steve, a future
-    /// reviewer) can run:
+    /// `/tmp/fewd-printable-sample.html`, then anyone can run:
     ///
-    ///   `cargo test --lib printable_service::tests::dump_max_content_sample -- --ignored`
+    ///   `cargo test --lib dump_max_content_sample -- --ignored --nocapture`
     ///
     /// and inspect the file in print preview. `#[ignore]` keeps it out of
     /// the default CI/test run so the file write isn't repeated on every
@@ -985,10 +1232,14 @@ mod tests {
         }))
         .unwrap();
         let validated = input.validate().unwrap();
-        let html = render(&meals, &recipes, &person_names(), &validated, &input).unwrap();
+        let html = render(&meals, &recipes, &person_names(), &validated, &input);
 
         let path = "/tmp/fewd-printable-sample.html";
         fs::write(path, &html).expect("write sample HTML");
-        eprintln!("\nWrote {} ({} bytes). Open it in a browser and use print preview to verify single-page fit.\n", path, html.len());
+        eprintln!(
+            "\nWrote {} ({} bytes). Open it in a browser and use print preview to verify single-page fit.\n",
+            path,
+            html.len()
+        );
     }
 }
