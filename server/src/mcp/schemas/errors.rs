@@ -58,6 +58,14 @@ pub enum InputError {
         days: i64,
         max_days: i64,
     },
+    /// Specialized variant for the printable tool's tighter cap. The
+    /// generic [`DateRangeTooWide`] message mentions "multi-megabyte
+    /// responses" — accurate for the 366-day cap but misleading here,
+    /// where the real reason is a single-sheet print fit.
+    PrintableSpanTooWide {
+        days: i64,
+        max_days: i64,
+    },
 }
 
 impl std::fmt::Display for InputError {
@@ -90,6 +98,10 @@ impl std::fmt::Display for InputError {
             Self::DateRangeTooWide { days, max_days } => write!(
                 f,
                 "date range spans {days} days, exceeding the {max_days}-day per-call cap. Narrow start_date / end_date and call again — wider sweeps would fan out into a multi-megabyte response."
+            ),
+            Self::PrintableSpanTooWide { days, max_days } => write!(
+                f,
+                "printable spans {days} days, exceeding the {max_days}-day cap. Narrow start_date / end_date — fridge-card printables are sized for a single US Letter sheet, and wider windows overflow onto a second page."
             ),
         }
     }

@@ -12,6 +12,7 @@ pub mod meal_template_service;
 pub mod pantry_classifier;
 pub mod paren_notes;
 pub mod person_service;
+pub mod printable_service;
 pub mod prompt_builder;
 pub mod recipe_adapter;
 pub mod recipe_enhancer;
