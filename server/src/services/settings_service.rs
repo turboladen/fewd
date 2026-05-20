@@ -1,6 +1,7 @@
 use sea_orm::*;
 
 use crate::entities::setting::{self, Entity as Setting};
+use crate::services::claude_client::ClaudeClient;
 
 pub struct SettingsService;
 
@@ -35,6 +36,29 @@ impl SettingsService {
     pub async fn delete<C: ConnectionTrait>(db: &C, key: String) -> Result<(), DbErr> {
         Setting::delete_by_id(key).exec(db).await?;
         Ok(())
+    }
+
+    /// Returns the configured Anthropic API key, or `None` if it is unset or empty.
+    /// Callers map `None` to whatever error fits their surface (HTTP route -> 400,
+    /// MCP -> tool_user_error).
+    pub async fn get_anthropic_api_key(db: &DatabaseConnection) -> Result<Option<String>, DbErr> {
+        let key = Self::get(db, "anthropic_api_key".to_string()).await?;
+        Ok(key.filter(|k| !k.is_empty()))
+    }
+
+    /// Returns the configured Claude model, falling back to
+    /// `ClaudeClient::default_model` when the setting is missing, unreadable,
+    /// or empty/whitespace. The Settings write path does not currently trim or
+    /// validate this field, so the empty-string case is a real possibility —
+    /// silently falling back is friendlier than letting an empty model name
+    /// reach the Anthropic API and produce a confusing 400.
+    pub async fn get_claude_model(db: &DatabaseConnection) -> String {
+        Self::get(db, "claude_model".to_string())
+            .await
+            .ok()
+            .flatten()
+            .filter(|m| !m.trim().is_empty())
+            .unwrap_or_else(|| ClaudeClient::default_model().to_string())
     }
 
     /// Increment cumulative token usage counters atomically within a transaction.

@@ -20,6 +20,11 @@ pub struct ImportResult {
 #[derive(Debug)]
 pub enum ImportError {
     NetworkError(String),
+    /// SSRF guard rejection: the URL resolves to a loopback / private /
+    /// link-local / CGNAT / unique-local address. Distinct from
+    /// `NetworkError` so callers can show "use a public URL" rather than
+    /// generic "couldn't reach the page" wording. Payload is the host.
+    PrivateNetwork(String),
     PdfError(String),
     ContentTooShort,
     AiError(ClaudeError),
@@ -30,6 +35,13 @@ impl fmt::Display for ImportError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ImportError::NetworkError(msg) => write!(f, "Network error: {}", msg),
+            ImportError::PrivateNetwork(host) => {
+                write!(
+                    f,
+                    "URLs pointing to private/internal networks are not allowed (host: {})",
+                    host
+                )
+            }
             ImportError::PdfError(msg) => write!(f, "PDF error: {}", msg),
             ImportError::ContentTooShort => {
                 write!(
@@ -298,9 +310,7 @@ async fn validate_url(raw: &str) -> Result<(), ImportError> {
 
     for addr in &addrs {
         if is_private_ip(addr) {
-            return Err(ImportError::NetworkError(
-                "URLs pointing to private/internal networks are not allowed".to_string(),
-            ));
+            return Err(ImportError::PrivateNetwork(host.to_string()));
         }
     }
 

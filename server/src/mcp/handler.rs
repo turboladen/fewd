@@ -17,7 +17,9 @@ use serde::Serialize;
 use crate::entities::person;
 use crate::services::meal_service::MealService;
 use crate::services::person_service::PersonService;
+use crate::services::recipe_import_service::{ImportError, RecipeImportService};
 use crate::services::recipe_service::{RecipeService, SearchFilters};
+use crate::services::settings_service::SettingsService;
 use crate::services::shopping_service::ShoppingService;
 
 use super::lookups::MealLookups;
@@ -26,7 +28,8 @@ use super::schemas::{
     create_meal_input_to_dto, create_recipe_input_to_dto, meal_to_brief, person_to_prefs,
     recipe_to_brief, recipe_to_full, render_family_overview, shopping_item_from_dto,
     update_person_input_to_dto, CreateMealError, CreateMealInput, CreateRecipeInput,
-    DateRangeParams, EmptyParams, GetRecipeParams, SearchRecipesParams, UpdatePersonInput,
+    DateRangeParams, EmptyParams, GetRecipeParams, ImportRecipeUrlInput, SearchRecipesParams,
+    UpdatePersonInput,
 };
 use super::AuthenticatedPerson;
 
@@ -458,6 +461,115 @@ impl FewdMcp {
             .await
             .map_err(db_error)?;
         let full = recipe_to_full(&created, parent_slug_canonical).map_err(internal_error)?;
+        tool_json_result(&full)
+    }
+
+    #[tool(
+        name = "import_recipe_url",
+        description = "Import a recipe from a public web URL (food blog, recipe site, etc.) and save it. Use this BEFORE `create_recipe` when the recipe lives online — the server fetches the page, extracts schema.org/Recipe data (JSON-LD first, html2text fallback), parses ingredients via the same pipeline as manual entry, and persists. Returns the saved recipe in the same shape as `create_recipe`. Errors actionably if the page is unreachable, paywalled, or unparsable — fall back to `create_recipe` with manually-pasted fields in that case. The source URL is recorded automatically. Call `list_recipes` or `search_recipes` after import to pick the slug for `create_meal`.",
+        input_schema = rmcp::handler::server::common::schema_for_type::<ImportRecipeUrlInput>()
+    )]
+    async fn import_recipe_url(
+        &self,
+        input: LenientParameters<ImportRecipeUrlInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let input = match input.into_tool_input("import_recipe_url") {
+            Ok(v) => v,
+            Err(e) => return Ok(e),
+        };
+
+        let url = input.url;
+        match url.scheme() {
+            "http" | "https" => {}
+            other => {
+                return Ok(tool_user_error(format!(
+                    "url scheme must be http or https (got '{other}'). \
+                     Provide a public web URL of the recipe page."
+                )));
+            }
+        }
+
+        let api_key = match SettingsService::get_anthropic_api_key(&self.db)
+            .await
+            .map_err(db_error)?
+        {
+            Some(k) => k,
+            None => {
+                return Ok(tool_user_error(
+                    "No Anthropic API key configured. Open the fewd web UI -> Settings, \
+                     paste an API key, then retry.",
+                ))
+            }
+        };
+        let model = SettingsService::get_claude_model(&self.db).await;
+
+        let result =
+            match RecipeImportService::import_from_url(&api_key, &model, url.as_str()).await {
+                Ok(r) => r,
+                Err(ImportError::NetworkError(msg)) => {
+                    return Ok(tool_user_error(format!(
+                        "Could not fetch the recipe page: {msg}. Check that the URL is \
+                         reachable and not paywalled. If the site requires login, use \
+                         `create_recipe` to add it manually."
+                    )))
+                }
+                Err(ImportError::PrivateNetwork(host)) => {
+                    return Ok(tool_user_error(format!(
+                        "URL host '{host}' resolves to a private or internal network address, \
+                         which is not allowed. Provide a public web URL (or use \
+                         `create_recipe` to add the recipe manually)."
+                    )))
+                }
+                Err(ImportError::ContentTooShort) => {
+                    return Ok(tool_user_error(
+                        "The page did not have enough recipe text to extract — it may be \
+                         JavaScript-rendered or behind a paywall. Use `create_recipe` with \
+                         manually-pasted fields.",
+                    ))
+                }
+                Err(ImportError::AiError(e)) => {
+                    return Ok(tool_user_error(format!(
+                        "Could not parse the recipe with AI: {e}. Try again in a moment, or \
+                         use `create_recipe` to add it manually."
+                    )))
+                }
+                Err(ImportError::ParseError(msg)) => {
+                    return Ok(tool_user_error(format!(
+                        "AI returned an unparsable recipe shape: {msg}. Try again, or use \
+                         `create_recipe` with manually-entered fields."
+                    )))
+                }
+                Err(ImportError::PdfError(_)) => {
+                    // `import_from_url` only produces NetworkError / ContentTooShort /
+                    // AiError / ParseError (see recipe_import_service.rs:59-72).
+                    // PdfError is reachable only via the PDF entry points. If a future
+                    // refactor wires PDF detection into the URL path, surface it as a
+                    // tool_user_error pointing at the PDF import flow instead.
+                    unreachable!("import_from_url cannot produce ImportError::PdfError")
+                }
+            };
+
+        // Record provenance. `extract_recipe_with_ai` already sets
+        // `source = "url_import"` and `parent_recipe_id = None` (see
+        // recipe_import_service.rs:183-184); only `source_url` is unique to this
+        // call site because the service doesn't know the originating URL.
+        //
+        // Persisted form is the canonical Url serialization (lowercased
+        // scheme/host, default ports stripped, percent-encoding fixed) — a
+        // mild divergence from routes/recipes.rs::import_url, which persists
+        // the raw request string. The String -> Url migration in fewd-hhu
+        // will harmonize both surfaces on the canonical form.
+        let mut dto = result.recipe;
+        dto.source_url = Some(url.to_string());
+
+        // Match the HTTP-route token meter so MCP imports show up in usage stats.
+        SettingsService::increment_token_usage(&self.db, result.input_tokens, result.output_tokens)
+            .await;
+
+        let created = RecipeService::create(&self.db, dto)
+            .await
+            .map_err(db_error)?;
+        let full = recipe_to_full(&created, None).map_err(internal_error)?;
         tool_json_result(&full)
     }
 
@@ -1235,6 +1347,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn import_recipe_url_unparsable_url_returns_tool_user_error() {
+        // `url: url::Url` rejects malformed strings at serde-deserialize time.
+        // LenientParameters captures the failure and routes it through
+        // into_tool_input → tool_user_error so the LLM sees an actionable
+        // message instead of a JSON-RPC -32602.
+        let mcp = setup_test_mcp().await;
+        let args = args_with(&[("url", serde_json::json!("not-a-url"))]);
+        let params = LenientParameters::<ImportRecipeUrlInput>::extract(args);
+        let result = mcp.import_recipe_url(params).await;
+        assert_tool_user_error(result, &["import_recipe_url", "url"]);
+    }
+
+    #[tokio::test]
+    async fn import_recipe_url_rejects_non_http_scheme() {
+        let mcp = setup_test_mcp().await;
+        // `ftp://` parses as a valid Url but the handler's scheme check
+        // rejects it before any settings/network work happens.
+        let input = ImportRecipeUrlInput {
+            url: url::Url::parse("ftp://example.com/recipe").expect("valid url"),
+        };
+        let result = mcp
+            .import_recipe_url(LenientParameters::for_test(input))
+            .await;
+        assert_tool_user_error(result, &["http or https", "ftp"]);
+    }
+
+    #[tokio::test]
+    async fn import_recipe_url_private_network_message_is_distinct_from_paywall() {
+        // Literal-IP URL skips DNS, so validate_url is fully offline and
+        // returns ImportError::PrivateNetwork before any fetch attempt.
+        // The handler must surface a message that names the SSRF cause —
+        // not the generic "reachable/paywalled" wording reserved for
+        // ImportError::NetworkError.
+        let mcp = setup_test_mcp().await;
+        // Seed an API key so the handler proceeds past the missing-key
+        // short-circuit and reaches the import call.
+        SettingsService::set(
+            &*mcp.db,
+            "anthropic_api_key".to_string(),
+            "sk-test".to_string(),
+        )
+        .await
+        .expect("settings write");
+        let input = ImportRecipeUrlInput {
+            url: url::Url::parse("https://192.168.1.1/recipes/123").expect("valid url"),
+        };
+        let result = mcp
+            .import_recipe_url(LenientParameters::for_test(input))
+            .await;
+        // Must mention private/internal so the LLM understands the cause.
+        assert_tool_user_error(result, &["192.168.1.1", "private"]);
+        // Belt-and-suspenders: the SSRF case must NOT inherit the generic
+        // NetworkError wording about paywalls. Serialize again to assert
+        // absence (assert_tool_user_error only checks presence).
+        let result = mcp
+            .import_recipe_url(LenientParameters::for_test(ImportRecipeUrlInput {
+                url: url::Url::parse("https://192.168.1.1/recipes/123").expect("valid url"),
+            }))
+            .await
+            .expect("Ok(CallToolResult)");
+        let serialized = serde_json::to_string(&result).expect("serializes");
+        assert!(
+            !serialized.contains("paywall"),
+            "SSRF rejection must not use paywall wording: {serialized}"
+        );
+    }
+
+    #[tokio::test]
+    async fn import_recipe_url_missing_api_key_reports_actionably() {
+        // Empty in-memory DB → no `anthropic_api_key` setting → handler
+        // surfaces the "open Settings" message instead of attempting the
+        // outbound fetch. No network is touched.
+        let mcp = setup_test_mcp().await;
+        let input = ImportRecipeUrlInput {
+            url: url::Url::parse("https://example.com/recipes/123").expect("valid url"),
+        };
+        let result = mcp
+            .import_recipe_url(LenientParameters::for_test(input))
+            .await;
+        assert_tool_user_error(result, &["API key", "Settings"]);
+    }
+
+    #[tokio::test]
     async fn list_meals_reversed_date_range_returns_tool_level_error() {
         let mcp = setup_test_mcp().await;
         // Both dates parse cleanly but start > end. The service-layer
@@ -1811,6 +2006,7 @@ mod tests {
             "Check",    // list_meals
             "Produce",  // get_shopping_list
             "Add",      // create_recipe
+            "Import",   // import_recipe_url
             "Schedule", // create_meal
         ];
 

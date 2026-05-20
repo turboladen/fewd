@@ -50,7 +50,7 @@ pdf-extract = "0.10.0"
 html2text = "0.16.7"
 
 # URL parsing & validation
-url = "2"
+url = { version = "2", features = ["serde"] }
 
 # Misc
 hostname = "0.4.2"
@@ -67,4 +67,4 @@ rmcp = { version = "1.5", features = [
     "transport-streamable-http-server",
     "schemars",
 ] }
-schemars = "1"
+schemars = { version = "1", features = ["url2"] }
