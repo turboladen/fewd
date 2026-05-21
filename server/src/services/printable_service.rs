@@ -110,15 +110,80 @@ pub fn render(
     let head_title = format!("{slot_label} Plan — {week_label}");
     let (title_top, title_bottom) = title_lines(&validated.include);
 
-    TEMPLATE
-        .replace("{{HEAD_TITLE}}", &esc_text(&head_title))
-        .replace("{{TITLE_TOP}}", &esc_text(title_top))
-        .replace("{{TITLE_BOTTOM}}", &esc_text(&title_bottom))
-        .replace("{{WEEK_LABEL}}", &esc_text(&week_label))
-        .replace("{{HEADER_RIGHT}}", &header_right)
-        .replace("{{NIGHTS_OR_EMPTY}}", &nights_or_empty)
-        .replace("{{REMINDERS_BLOCK}}", &reminders)
-        .replace("{{FOOT_NOTE}}", &esc_text(&foot_note))
+    // Single-pass substitution: walk the *template* once and emit the
+    // mapped value for each `{{NAME}}` token. Naive `template.replace(a, x)
+    // .replace(b, y)` chains let a `b`-shaped substring of `x` get rewritten
+    // in the next pass — so a user-supplied `week_theme = "{{NIGHTS_OR_EMPTY}}"`
+    // would corrupt the badge with the day-rows block. Walking the template
+    // once avoids that entire class of collision because inserted values
+    // are never re-scanned.
+    let head_title_esc = esc_text(&head_title);
+    let title_top_esc = esc_text(title_top);
+    let title_bottom_esc = esc_text(&title_bottom);
+    let week_label_esc = esc_text(&week_label);
+    let foot_note_esc = esc_text(&foot_note);
+    substitute(
+        TEMPLATE,
+        &[
+            ("HEAD_TITLE", &head_title_esc),
+            ("TITLE_TOP", &title_top_esc),
+            ("TITLE_BOTTOM", &title_bottom_esc),
+            ("WEEK_LABEL", &week_label_esc),
+            ("HEADER_RIGHT", &header_right),
+            ("NIGHTS_OR_EMPTY", &nights_or_empty),
+            ("REMINDERS_BLOCK", &reminders),
+            ("FOOT_NOTE", &foot_note_esc),
+        ],
+    )
+}
+
+/// Single-pass `{{NAME}}` substitution. Walks `template` once: literal text
+/// is appended to the output, each `{{NAME}}` is replaced by the matching
+/// entry's value from `replacements`, and the inserted value is **never
+/// re-scanned**. That last property is what makes user-supplied content
+/// like `week_theme = "{{NIGHTS_OR_EMPTY}}"` safe — it survives as literal
+/// text in the output rather than getting picked up by a later replacement.
+///
+/// Unknown placeholders (in the template but not in `replacements`) are
+/// emitted verbatim with the surrounding `{{ }}` and an `error!` log; that
+/// way a typo in the template shows up as a visible debug marker rather
+/// than silently dropping content. An unclosed `{{` (no matching `}}`)
+/// emits the remaining template verbatim for the same reason.
+fn substitute(template: &str, replacements: &[(&'static str, &str)]) -> String {
+    let mut out = String::with_capacity(template.len() + 8 * 1024);
+    let mut rest = template;
+    while let Some(open) = rest.find("{{") {
+        out.push_str(&rest[..open]);
+        let after_open = &rest[open + 2..];
+        match after_open.find("}}") {
+            Some(close) => {
+                let name = &after_open[..close];
+                match replacements.iter().find(|(k, _)| *k == name) {
+                    Some((_, value)) => out.push_str(value),
+                    None => {
+                        tracing::error!(
+                            placeholder = name,
+                            "printable: template references an unknown placeholder; \
+                             leaving literal in output as debug marker"
+                        );
+                        out.push_str("{{");
+                        out.push_str(name);
+                        out.push_str("}}");
+                    }
+                }
+                rest = &after_open[close + 2..];
+            }
+            None => {
+                // Unclosed `{{`. Emit the rest of the template verbatim
+                // (including the dangling `{{`) so the bug is visible in
+                // the output rather than silently truncated.
+                out.push_str(&rest[open..]);
+                return out;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn render_empty_state(validated: &ValidatedRange) -> String {
@@ -1092,6 +1157,66 @@ mod tests {
         let validated = input.validate().unwrap();
         let html = render(&meals, &HashMap::new(), &person_names(), &validated, &input);
         assert!(html.contains("(deleted recipe, id=r-ghost)"));
+    }
+
+    #[test]
+    fn render_user_supplied_value_containing_placeholder_token_does_not_get_re_substituted() {
+        // Regression guard for the chained-replace bug Copilot flagged: a
+        // user-supplied overlay value containing a literal `{{NAME}}` token
+        // must NOT be picked up by a later substitution pass. Single-pass
+        // walker means inserted values are never re-scanned.
+        let recipes = HashMap::new();
+        let input: PrintableInput = serde_json::from_value(serde_json::json!({
+            "start_date": "2026-05-11",
+            "end_date": "2026-05-13",
+            // Adversarial value — if the renderer chained .replace() calls,
+            // this would inject the nights HTML (or empty-state markup) into
+            // the badge.
+            "week_theme": "{{NIGHTS_OR_EMPTY}}",
+            "foot_note": "{{REMINDERS_BLOCK}}"
+        }))
+        .unwrap();
+        let validated = input.validate().unwrap();
+        let html = render(&[], &recipes, &person_names(), &validated, &input);
+        // The literal placeholder text must survive verbatim in the badge.
+        assert!(
+            html.contains(">{{NIGHTS_OR_EMPTY}}<"),
+            "user-supplied placeholder string should render as literal text \
+             inside the badge, not get re-substituted; html: {html}"
+        );
+        // The foot note also lands escaped/intact.
+        assert!(html.contains(">{{REMINDERS_BLOCK}}<"));
+        // And the genuine empty-state still rendered into the real slot.
+        assert!(html.contains("No meals scheduled"));
+    }
+
+    #[test]
+    fn substitute_walks_template_in_one_pass_and_never_rescans_insertions() {
+        // Unit-level pin for the single-pass walker.
+        let y = "{{Y}}";
+        let real_y = "REAL_Y";
+        let out = super::substitute("a {{X}} b {{Y}} c", &[("X", y), ("Y", real_y)]);
+        // `{{Y}}` produced by the X substitution must NOT be picked up by
+        // the subsequent Y substitution — it survives as literal text.
+        assert_eq!(out, "a {{Y}} b REAL_Y c");
+    }
+
+    #[test]
+    fn substitute_unknown_placeholder_emits_verbatim_with_braces() {
+        // Unknown placeholder = bug in the template (or missing key in the
+        // replacements slice). Emit verbatim so the bug is visible in the
+        // rendered output rather than silently dropping content.
+        let out = super::substitute("hello {{UNKNOWN}} world", &[]);
+        assert_eq!(out, "hello {{UNKNOWN}} world");
+    }
+
+    #[test]
+    fn substitute_unclosed_placeholder_emits_remainder_verbatim() {
+        // Defensive: an unclosed `{{` in the template would otherwise
+        // truncate or panic. Emit verbatim so the bug is visible.
+        let v = "VALUE";
+        let out = super::substitute("hello {{UNCLOSED rest", &[("X", v)]);
+        assert_eq!(out, "hello {{UNCLOSED rest");
     }
 
     #[test]
