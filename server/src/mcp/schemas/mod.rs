@@ -24,20 +24,26 @@
 //! `use super::schemas::{…}` import.
 
 mod common;
-pub(super) mod errors;
+pub(crate) mod errors;
 mod meals;
 mod people;
+pub(crate) mod printable;
 mod recipes;
 mod shopping;
 
-pub use common::{DateRangeParams, EmptyParams, GetRecipeParams};
-pub use errors::CreateMealError;
-pub use meals::{create_meal_input_to_dto, meal_to_brief, CreateMealInput};
-pub use people::{
+// Most re-exports stay scoped to `mcp` (the parent of `schemas`) — the
+// schemas exist to feed handler.rs, not the rest of the crate. `printable`
+// is the exception: the renderer lives in `services::printable_service` and
+// imports the input types directly through this re-export.
+pub(super) use common::{DateRangeParams, EmptyParams, GetRecipeParams};
+pub(super) use errors::CreateMealError;
+pub(super) use meals::{create_meal_input_to_dto, meal_to_brief, CreateMealInput};
+pub(super) use people::{
     person_to_prefs, render_family_overview, update_person_input_to_dto, UpdatePersonInput,
 };
-pub use recipes::{
+pub(super) use printable::PrintableInput;
+pub(super) use recipes::{
     create_recipe_input_to_dto, recipe_to_brief, recipe_to_full, CreateRecipeInput,
     ImportRecipeUrlInput, SearchRecipesParams,
 };
-pub use shopping::shopping_item_from_dto;
+pub(super) use shopping::shopping_item_from_dto;

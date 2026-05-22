@@ -66,7 +66,7 @@ use self::handler::FewdMcp;
 
 mod handler;
 mod lookups;
-mod schemas;
+pub(crate) mod schemas;
 
 /// A family member resolved from the `Authorization: Bearer <token>` header.
 /// Inserted into the HTTP request extensions by the auth middleware; tool

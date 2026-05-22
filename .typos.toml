@@ -2,7 +2,7 @@
 extend-ignore-re = [
   "uuid",  # UUIDs often flagged as typos
 ]
-extend-words = { fewd = "fewd" }  # Project name
+extend-words = { fewd = "fewd", parm = "parm" }  # Project name; "parm" = colloquial parmesan in recipe text
 
 [files]
 extend-exclude = [

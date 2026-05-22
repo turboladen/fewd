@@ -58,6 +58,32 @@ pub enum InputError {
         days: i64,
         max_days: i64,
     },
+    /// Specialized variant for the printable tool's tighter cap. The
+    /// generic [`DateRangeTooWide`] message mentions "multi-megabyte
+    /// responses" — accurate for the 366-day cap but misleading here,
+    /// where the real reason is a single-sheet print fit. `days_inclusive`
+    /// and `max_days_inclusive` are inclusive day counts (end − start + 1)
+    /// so the error message matches the way the docs describe the cap
+    /// ("14 inclusive days") rather than the span ("end − start" = 13).
+    PrintableSpanTooWide {
+        days_inclusive: i64,
+        max_days_inclusive: i64,
+    },
+    /// A field that's documented as non-empty (overlay `prep_notes` entry,
+    /// `use_up_notes` entry, `DontForgetItem.prefix`/`body`) was passed as
+    /// an empty / whitespace-only string. Surfaced as a validation error so
+    /// the LLM gets clear feedback rather than silently dropping the field.
+    EmptyOverlayField {
+        field: &'static str,
+    },
+    /// An overlay collection has more items than the printable can fit on a
+    /// single US Letter sheet. Each entry adds a fixed vertical chunk; this
+    /// is the only validation strong enough to prevent runaway overflow.
+    OverlayListTooLong {
+        field: &'static str,
+        count: usize,
+        max_count: usize,
+    },
 }
 
 impl std::fmt::Display for InputError {
@@ -90,6 +116,25 @@ impl std::fmt::Display for InputError {
             Self::DateRangeTooWide { days, max_days } => write!(
                 f,
                 "date range spans {days} days, exceeding the {max_days}-day per-call cap. Narrow start_date / end_date and call again — wider sweeps would fan out into a multi-megabyte response."
+            ),
+            Self::PrintableSpanTooWide {
+                days_inclusive,
+                max_days_inclusive,
+            } => write!(
+                f,
+                "printable covers {days_inclusive} days, exceeding the {max_days_inclusive}-day cap. Narrow start_date / end_date — fridge-card printables are sized for a single US Letter sheet, and wider windows overflow onto a second page."
+            ),
+            Self::EmptyOverlayField { field } => write!(
+                f,
+                "{field} must not be empty or whitespace-only. Either supply a value or omit the field."
+            ),
+            Self::OverlayListTooLong {
+                field,
+                count,
+                max_count,
+            } => write!(
+                f,
+                "{field} has {count} items, exceeding the {max_count}-item cap. Trim the list — each item adds a fixed vertical chunk to the printable, and wider lists overflow onto a second page."
             ),
         }
     }

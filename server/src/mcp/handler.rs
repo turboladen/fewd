@@ -17,6 +17,7 @@ use serde::Serialize;
 use crate::entities::person;
 use crate::services::meal_service::MealService;
 use crate::services::person_service::PersonService;
+use crate::services::printable_service::{self, PersonNameMap};
 use crate::services::recipe_import_service::{ImportError, RecipeImportService};
 use crate::services::recipe_service::{RecipeService, SearchFilters};
 use crate::services::settings_service::SettingsService;
@@ -28,8 +29,8 @@ use super::schemas::{
     create_meal_input_to_dto, create_recipe_input_to_dto, meal_to_brief, person_to_prefs,
     recipe_to_brief, recipe_to_full, render_family_overview, shopping_item_from_dto,
     update_person_input_to_dto, CreateMealError, CreateMealInput, CreateRecipeInput,
-    DateRangeParams, EmptyParams, GetRecipeParams, ImportRecipeUrlInput, SearchRecipesParams,
-    UpdatePersonInput,
+    DateRangeParams, EmptyParams, GetRecipeParams, ImportRecipeUrlInput, PrintableInput,
+    SearchRecipesParams, UpdatePersonInput,
 };
 use super::AuthenticatedPerson;
 
@@ -351,7 +352,7 @@ impl FewdMcp {
 
     #[tool(
         name = "list_meals",
-        description = "Check what's already scheduled BEFORE `create_meal` — surfaces existing meals so you don't double-book a dinner slot, and lets you spot week-over-week patterns ('we had pasta twice last week, switch it up'). Returns all meals in an inclusive date range with each serving's person, recipe (or ad-hoc items), serving count, and per-serving notes.",
+        description = "Check what's already scheduled BEFORE `create_meal` — surfaces existing meals so you don't double-book a dinner slot, and lets you spot week-over-week patterns ('we had pasta twice last week, switch it up'). Returns all meals in an inclusive date range with each serving's person, recipe (or ad-hoc items), serving count, and per-serving notes. For a fridge-ready printable view of the same window, call `get_meal_planner_printable` after the week's `create_meal`s are in place.",
         input_schema = rmcp::handler::server::common::schema_for_type::<DateRangeParams>()
     )]
     async fn list_meals(
@@ -412,6 +413,48 @@ impl FewdMcp {
             .map_err(db_error)?;
         let out: Vec<_> = list.into_iter().map(shopping_item_from_dto).collect();
         tool_json_result(&out)
+    }
+
+    #[tool(
+        name = "get_meal_planner_printable",
+        description = "Produce the family's canonical fridge-card HTML printable for an upcoming window — the finishing step after the week's `create_meal`s (and optionally `get_shopping_list`). Output is sized to fit a single US Letter portrait sheet at 100% browser print scale. Date range is capped at 14 inclusive days; `use_up_notes` ≤6, `dont_forget` ≤8 items, `prep_notes` ≤6 per day are hard-enforced. Required: start_date, end_date. Optional LLM-supplied overlay: include (meal slots, default ['Dinner']), week_theme (top-right badge), use_up_notes (top-right bullets), dont_forget (dark footer block of cross-day reminders), day_overlays (per-date tag + blurb-override + prep_notes), foot_note (left-footer subtitle).",
+        input_schema = rmcp::handler::server::common::schema_for_type::<PrintableInput>()
+    )]
+    async fn get_meal_planner_printable(
+        &self,
+        params: LenientParameters<PrintableInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = match params.into_tool_input("get_meal_planner_printable") {
+            Ok(v) => v,
+            Err(e) => return Ok(e),
+        };
+        let validated = match params.validate() {
+            Ok(v) => v,
+            Err(e) => return Ok(tool_user_error(e.to_string())),
+        };
+
+        let meals = MealService::get_all_for_date_range(
+            &self.db,
+            validated.start.format("%Y-%m-%d").to_string(),
+            validated.end.format("%Y-%m-%d").to_string(),
+        )
+        .await
+        .map_err(db_error)?;
+
+        // Build the (id → model) and (id → name) maps once per call. We
+        // could narrow `RecipeService::get_all` to "just the recipes
+        // referenced by these meals" but household-scale recipe catalogs
+        // are <500 rows and the full fetch keeps the renderer cleanly
+        // decoupled from query construction.
+        let all_recipes = RecipeService::get_all(&self.db).await.map_err(db_error)?;
+        let recipe_models: HashMap<String, crate::entities::recipe::Model> =
+            all_recipes.into_iter().map(|r| (r.id.clone(), r)).collect();
+        let all_people = PersonService::get_all(&self.db).await.map_err(db_error)?;
+        let person_names: PersonNameMap = all_people.into_iter().map(|p| (p.id, p.name)).collect();
+
+        let html =
+            printable_service::render(&meals, &recipe_models, &person_names, &validated, &params);
+        Ok(CallToolResult::success(vec![Content::text(html)]))
     }
 
     #[tool(
@@ -626,7 +669,12 @@ impl ServerHandler for FewdMcp {
                  members by name to recipes by slug (or ad-hoc items). \
                  (5) SHOP — `get_shopping_list` over the date range produces the \
                  consolidated grocery list. \
-                 (6) CAPTURE — when you learn something durable about a family member \
+                 (6) PRINT — `get_meal_planner_printable` is the finishing step \
+                 once the week is scheduled; it renders the family's canonical \
+                 fridge-card HTML (sized for a single US Letter sheet). Supply \
+                 prose overlays — week_theme, dont_forget, day_overlays — as \
+                 the call's LLM-supplied polish. \
+                 (7) CAPTURE — when you learn something durable about a family member \
                  mid-conversation (a standing note, a new like/dislike, a drink \
                  preference), call `update_person` so it's available next session \
                  instead of dying with this conversation. \
