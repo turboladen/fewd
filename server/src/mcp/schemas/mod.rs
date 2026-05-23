@@ -44,6 +44,6 @@ pub(super) use people::{
 pub(super) use printable::PrintableInput;
 pub(super) use recipes::{
     create_recipe_input_to_dto, recipe_to_brief, recipe_to_full, CreateRecipeInput,
-    ImportRecipeUrlInput, SearchRecipesParams,
+    ImportRecipeUrlInput, MarkRecipeMadeInput, SearchRecipesParams,
 };
 pub(super) use shopping::shopping_item_from_dto;

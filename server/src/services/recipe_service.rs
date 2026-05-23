@@ -405,6 +405,30 @@ impl RecipeService {
 
         recipe.update(db).await
     }
+
+    /// Records that a recipe was cooked: atomically increments `times_made`
+    /// and stamps `last_made` with `cooked_at`. The increment is a single
+    /// `times_made = times_made + 1` UPDATE so concurrent calls can't race a
+    /// read-modify-write. Returns the reloaded model, or `None` when no recipe
+    /// has the given id (the MCP handler maps that to an actionable slug error).
+    pub async fn mark_made(
+        db: &DatabaseConnection,
+        id: &str,
+        cooked_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<recipe::Model>, DbErr> {
+        let now = chrono::Utc::now();
+        let res = db
+            .execute(Statement::from_sql_and_values(
+                db.get_database_backend(),
+                "UPDATE recipes SET times_made = times_made + 1, last_made = ?, updated_at = ? WHERE id = ?",
+                [cooked_at.into(), now.into(), id.into()],
+            ))
+            .await?;
+        if res.rows_affected() == 0 {
+            return Ok(None);
+        }
+        Self::get_by_id(db, id.to_string()).await
+    }
 }
 
 /// Cap on slug-suffix retries. `recipes` has only one UNIQUE constraint (slug),

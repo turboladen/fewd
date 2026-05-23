@@ -1,5 +1,6 @@
 //! Recipe-related MCP input/output types and conversion helpers.
 
+use chrono::NaiveDate;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -8,8 +9,8 @@ use crate::entities::recipe;
 
 use super::common::{
     format_date, ingredient_in, ingredient_out, nutrition_in, nutrition_out, parse_json,
-    parse_optional_json, portion_in, portion_out, time_in, time_out, IngredientOut, NutritionOut,
-    PortionSizeOut, TimeOut,
+    parse_optional_json, portion_in, portion_out, time_in, time_out, validate_date_yyyy_mm_dd,
+    IngredientOut, NutritionOut, PortionSizeOut, TimeOut,
 };
 use super::errors::InputError;
 
@@ -236,6 +237,45 @@ pub struct CreateRecipeInput {
     /// Optional emoji / icon character to display next to the recipe.
     #[serde(default)]
     pub icon: Option<String>,
+}
+
+/// Input for `mark_recipe_made`. Records that the family actually cooked a
+/// recipe (distinct from scheduling one via `create_meal`). `on_date` is a
+/// YYYY-MM-DD string mirroring every other MCP date input — see
+/// [`MarkRecipeMadeInput::resolve_cooked_date`] for defaulting/validation.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MarkRecipeMadeInput {
+    /// Recipe slug from `search_recipes` / `list_curated_recipes`.
+    /// Case-insensitive; whitespace is trimmed.
+    pub slug: String,
+    /// ISO date (YYYY-MM-DD) the meal was actually cooked. Omit to use today.
+    /// Must be today or earlier — future meals belong in `create_meal`.
+    #[serde(default)]
+    pub on_date: Option<String>,
+}
+
+impl MarkRecipeMadeInput {
+    /// Resolve `on_date` to a concrete date: defaults to `today` when omitted
+    /// or blank, rejects unparsable values, and rejects any date after
+    /// `today` (recording a future cooking makes no sense — that's planning).
+    pub fn resolve_cooked_date(&self, today: NaiveDate) -> Result<NaiveDate, InputError> {
+        let date = match self
+            .on_date
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(s) => validate_date_yyyy_mm_dd(s, "on_date")?,
+            None => today,
+        };
+        if date > today {
+            return Err(InputError::FutureDate {
+                field: "on_date",
+                value: date.to_string(),
+            });
+        }
+        Ok(date)
+    }
 }
 
 pub fn recipe_to_brief(recipe: &recipe::Model) -> Result<RecipeBrief, String> {

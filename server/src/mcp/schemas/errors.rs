@@ -50,6 +50,13 @@ pub enum InputError {
         field: &'static str,
         value: String,
     },
+    /// A date that must be today-or-earlier (e.g. `mark_recipe_made.on_date`,
+    /// which records cooking history) was given a future date. Scheduling a
+    /// future meal is `create_meal`'s job, not a history-recording tool's.
+    FutureDate {
+        field: &'static str,
+        value: String,
+    },
     ReversedDateRange {
         start_date: String,
         end_date: String,
@@ -105,6 +112,10 @@ impl std::fmt::Display for InputError {
             Self::InvalidDate { field, value } => write!(
                 f,
                 "{field} must be in YYYY-MM-DD format (got '{value}')."
+            ),
+            Self::FutureDate { field, value } => write!(
+                f,
+                "{field} ('{value}') is in the future. mark_recipe_made records meals already cooked, so it must be today or earlier — to schedule an upcoming meal, use create_meal instead."
             ),
             Self::ReversedDateRange {
                 start_date,

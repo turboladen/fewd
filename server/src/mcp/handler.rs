@@ -29,8 +29,8 @@ use super::schemas::{
     create_meal_input_to_dto, create_recipe_input_to_dto, meal_to_brief, person_to_prefs,
     recipe_to_brief, recipe_to_full, render_family_overview, shopping_item_from_dto,
     update_person_input_to_dto, CreateMealError, CreateMealInput, CreateRecipeInput,
-    DateRangeParams, EmptyParams, GetRecipeParams, ImportRecipeUrlInput, PrintableInput,
-    SearchRecipesParams, UpdatePersonInput,
+    DateRangeParams, EmptyParams, GetRecipeParams, ImportRecipeUrlInput, MarkRecipeMadeInput,
+    PrintableInput, SearchRecipesParams, UpdatePersonInput,
 };
 use super::AuthenticatedPerson;
 
@@ -109,7 +109,7 @@ impl FewdMcp {
 
     #[tool(
         name = "search_recipes",
-        description = "Find specific recipes when the user names an ingredient, tag, time constraint, rating, or person preference — call BEFORE `create_meal` (to find a slug to schedule) or `create_recipe` (to avoid creating a near-duplicate). Bare calls (no filters / `query='*'`) are rejected — call `list_curated_recipes` for an unfiltered shortlist. Filters: `query` (case-insensitive substring on name); `tags` (case-insensitive exact match, multiple tags = AND); `max_total_time_minutes` (assumes recipe total_time is in minutes — recipes authored in hours won't match, known limitation); `min_rating`; `is_favorite`; `unmade_since_days`; `excludes_for_persons` (named family members whose dislikes exclude matching recipes — substring match on ingredient names, e.g. 'olive oil' is excluded when a person dislikes 'olive'); `includes_ingredient_substrings` (recipes must contain ALL listed substrings in some ingredient name — case-insensitive, multiple values AND together, possibly across different ingredients; use for 'what can I make with spam?' / 'recipes that use leftover rice' / combine with `tags=[\"dinner\"]` for 'dinner recipes with spam'). Returns brief rows — use `get_recipe` with the slug for full details. Unknown person names return an actionable error pointing at `list_people`.",
+        description = "Find specific recipes when the user names an ingredient, tag, time constraint, rating, or person preference — call BEFORE `create_meal` (to find a slug to schedule) or `create_recipe` (to avoid creating a near-duplicate). Bare calls (no filters / `query='*'`) are rejected — call `list_curated_recipes` for an unfiltered shortlist. Filters: `query` (case-insensitive substring on name); `tags` (case-insensitive exact match, multiple tags = AND); `max_total_time_minutes` (assumes recipe total_time is in minutes — recipes authored in hours won't match, known limitation); `min_rating`; `is_favorite`; `unmade_since_days`; `excludes_for_persons` (named family members whose dislikes exclude matching recipes — substring match on ingredient names, e.g. 'olive oil' is excluded when a person dislikes 'olive'); `includes_ingredient_substrings` (recipes must contain ALL listed substrings in some ingredient name — case-insensitive, multiple values AND together, possibly across different ingredients; use for 'what can I make with spam?' / 'recipes that use leftover rice' / combine with `tags=[\"dinner\"]` for 'dinner recipes with spam'). Returns brief rows — use `get_recipe` with the slug for full details. Unknown person names return an actionable error pointing at `list_people`. The `unmade_since_days` filter is only as accurate as the family's cooking history — remind users to call `mark_recipe_made` when they mention a past meal.",
         input_schema = rmcp::handler::server::common::schema_for_type::<SearchRecipesParams>()
     )]
     async fn search_recipes(
@@ -195,7 +195,7 @@ impl FewdMcp {
 
     #[tool(
         name = "get_recipe",
-        description = "Read the full recipe — call AFTER `search_recipes` or `list_curated_recipes` returned a slug worth inspecting (when the user wants ingredients, instructions, nutrition, or prep time). Returns ingredients (with amounts and units), instructions, nutrition, prep/cook time, and any parent recipe it was adapted from.",
+        description = "Read the full recipe — call AFTER `search_recipes` or `list_curated_recipes` returned a slug worth inspecting (when the user wants ingredients, instructions, nutrition, or prep time). Returns ingredients (with amounts and units), instructions, nutrition, prep/cook time, and any parent recipe it was adapted from. Once the user confirms they actually cooked it, call `mark_recipe_made` to record the history.",
         input_schema = rmcp::handler::server::common::schema_for_type::<GetRecipeParams>()
     )]
     async fn get_recipe(
@@ -508,6 +508,59 @@ impl FewdMcp {
     }
 
     #[tool(
+        name = "mark_recipe_made",
+        description = "Record that the family actually cooked a recipe — call when the user reports a past meal ('we made the chili last night', 'we just had tacos for dinner'). Increments the recipe's times_made counter and stamps last_made with the cook date (defaults to today; pass on_date as YYYY-MM-DD for an earlier day, never a future date). This is HISTORY: for *scheduling* an upcoming or current meal use `create_meal` instead. Keeping last_made current is what makes `search_recipes`'s `unmade_since_days` filter trustworthy. Unknown slugs return an actionable error pointing at search_recipes. Returns the recipe's updated brief (new times_made / last_made).",
+        input_schema = rmcp::handler::server::common::schema_for_type::<MarkRecipeMadeInput>()
+    )]
+    async fn mark_recipe_made(
+        &self,
+        input: LenientParameters<MarkRecipeMadeInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let input = match input.into_tool_input("mark_recipe_made") {
+            Ok(v) => v,
+            Err(e) => return Ok(e),
+        };
+        let today = chrono::Utc::now().date_naive();
+        let cooked_date = match input.resolve_cooked_date(today) {
+            Ok(date) => date,
+            Err(e) => return Ok(tool_user_error(e.to_string())),
+        };
+        // Store the cook date as midnight UTC of that calendar day. This
+        // mirrors how the rest of fewd treats user-supplied dates: the
+        // human cares about the day, not the wall-clock instant.
+        let cooked_at = cooked_date
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight is valid for every NaiveDate")
+            .and_utc();
+
+        let normalized = input.slug.trim().to_lowercase();
+        let Some(recipe) = RecipeService::get_by_slug(&self.db, normalized)
+            .await
+            .map_err(db_error)?
+        else {
+            return Ok(tool_user_error(format!(
+                "no recipe with slug '{}'. Call list_curated_recipes for the shortlist or search_recipes with a filter to find valid slugs.",
+                input.slug
+            )));
+        };
+
+        let Some(updated) = RecipeService::mark_made(&self.db, &recipe.id, cooked_at)
+            .await
+            .map_err(db_error)?
+        else {
+            // The row existed a moment ago (get_by_slug above); a zero-row
+            // update means it was deleted concurrently — a genuine internal
+            // anomaly, not LLM-recoverable input.
+            return Err(internal_error(format!(
+                "recipe '{}' disappeared between lookup and mark_made",
+                recipe.slug
+            )));
+        };
+        let out = recipe_to_brief(&updated).map_err(internal_error)?;
+        tool_json_result(&out)
+    }
+
+    #[tool(
         name = "import_recipe_url",
         description = "Import a recipe from a public web URL (food blog, recipe site, etc.) and save it. Use this BEFORE `create_recipe` when the recipe lives online — the server fetches the page, extracts schema.org/Recipe data (JSON-LD first, html2text fallback), parses ingredients via the same pipeline as manual entry, and persists. Returns the saved recipe in the same shape as `create_recipe`. Errors actionably if the page is unreachable, paywalled, or unparsable — fall back to `create_recipe` with manually-pasted fields in that case. The source URL is recorded automatically. Call `list_recipes` or `search_recipes` after import to pick the slug for `create_meal`.",
         input_schema = rmcp::handler::server::common::schema_for_type::<ImportRecipeUrlInput>()
@@ -618,7 +671,7 @@ impl FewdMcp {
 
     #[tool(
         name = "create_meal",
-        description = "Schedule a planned meal — call AFTER `list_meals` (to confirm the slot is empty) and `search_recipes` / `get_recipe` (to find the slug). Each serving assigns one family member to either an existing recipe (by slug) or an ad-hoc ingredient list. Unknown names or slugs return a clear error so the caller can retry with corrected values. Returns the created meal with slugs/names resolved.",
+        description = "Schedule a planned meal — call AFTER `list_meals` (to confirm the slot is empty) and `search_recipes` / `get_recipe` (to find the slug). This is PLANNING (a future or current slot); to record that a meal already happened, use `mark_recipe_made` instead. Each serving assigns one family member to either an existing recipe (by slug) or an ad-hoc ingredient list. Unknown names or slugs return a clear error so the caller can retry with corrected values. Returns the created meal with slugs/names resolved.",
         input_schema = rmcp::handler::server::common::schema_for_type::<CreateMealInput>()
     )]
     async fn create_meal(
@@ -674,7 +727,12 @@ impl ServerHandler for FewdMcp {
                  fridge-card HTML (sized for a single US Letter sheet). Supply \
                  prose overlays — week_theme, dont_forget, day_overlays — as \
                  the call's LLM-supplied polish. \
-                 (7) CAPTURE — when you learn something durable about a family member \
+                 (7) RECORD what got cooked — when the user mentions a meal they \
+                 already made ('we had tacos Tuesday'), call `mark_recipe_made` so \
+                 `times_made` / `last_made` stay current and the `unmade_since_days` \
+                 search filter keeps working. This is history, distinct from \
+                 `create_meal`'s forward planning. \
+                 (8) CAPTURE — when you learn something durable about a family member \
                  mid-conversation (a standing note, a new like/dislike, a drink \
                  preference), call `update_person` so it's available next session \
                  instead of dying with this conversation. \
@@ -2024,6 +2082,187 @@ mod tests {
         );
         assert_eq!(wire, "failed to serialize result");
         assert!(mcp_err.data.is_none(), "data must not carry detail");
+    }
+
+    // ─── mark_recipe_made ───────────────────────────────────────────
+    //
+    // Recording cooking history: increments times_made and stamps
+    // last_made. Happy paths re-read via the service so a dropped write
+    // can't hide behind a successful-looking response; negative paths
+    // assert the actionable-error contract and that nothing was written.
+
+    async fn seed_recipe(mcp: &FewdMcp, name: &str) -> crate::entities::recipe::Model {
+        RecipeService::create(
+            &mcp.db,
+            crate::dto::CreateRecipeDto {
+                name: name.into(),
+                description: None,
+                source: "manual".into(),
+                source_url: None,
+                parent_recipe_id: None,
+                prep_time: None,
+                cook_time: None,
+                total_time: None,
+                servings: 4,
+                portion_size: None,
+                instructions: "Cook it.".into(),
+                ingredients: vec![],
+                nutrition_per_serving: None,
+                tags: vec![],
+                notes: None,
+                icon: None,
+            },
+        )
+        .await
+        .expect("seed recipe")
+    }
+
+    #[tokio::test]
+    async fn mark_recipe_made_happy_path_increments_times_made_and_sets_last_made() {
+        let mcp = setup_test_mcp().await;
+        let recipe = seed_recipe(&mcp, "Weeknight Chili").await;
+        assert_eq!(recipe.times_made, 0, "seed starts unmade");
+        assert!(recipe.last_made.is_none());
+
+        let result = mcp
+            .mark_recipe_made(LenientParameters::for_test(MarkRecipeMadeInput {
+                slug: recipe.slug.clone(),
+                on_date: None,
+            }))
+            .await
+            .expect("mark_recipe_made returns Ok");
+        assert_ne!(
+            result.is_error,
+            Some(true),
+            "happy path must not be a tool-level error: {result:?}"
+        );
+
+        let reloaded = RecipeService::get_by_id(&mcp.db, recipe.id.clone())
+            .await
+            .expect("lookup succeeds")
+            .expect("recipe still exists");
+        assert_eq!(reloaded.times_made, 1);
+        assert!(
+            reloaded.last_made.is_some(),
+            "last_made must be stamped after marking made"
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_recipe_made_with_explicit_past_date_stamps_that_date() {
+        let mcp = setup_test_mcp().await;
+        let recipe = seed_recipe(&mcp, "Sunday Roast").await;
+        let three_days_ago = Utc::now().date_naive() - chrono::Duration::days(3);
+
+        let result = mcp
+            .mark_recipe_made(LenientParameters::for_test(MarkRecipeMadeInput {
+                slug: recipe.slug.clone(),
+                on_date: Some(three_days_ago.format("%Y-%m-%d").to_string()),
+            }))
+            .await
+            .expect("mark_recipe_made returns Ok");
+        assert_ne!(result.is_error, Some(true), "valid past date must succeed");
+
+        let reloaded = RecipeService::get_by_id(&mcp.db, recipe.id.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            reloaded.last_made.expect("last_made set").date_naive(),
+            three_days_ago,
+            "stored cook date must match the explicit on_date"
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_recipe_made_called_twice_increments_to_two() {
+        let mcp = setup_test_mcp().await;
+        let recipe = seed_recipe(&mcp, "Taco Night").await;
+        let make_input = || {
+            LenientParameters::for_test(MarkRecipeMadeInput {
+                slug: recipe.slug.clone(),
+                on_date: None,
+            })
+        };
+
+        mcp.mark_recipe_made(make_input())
+            .await
+            .expect("first call Ok");
+        mcp.mark_recipe_made(make_input())
+            .await
+            .expect("second call Ok");
+
+        let reloaded = RecipeService::get_by_id(&mcp.db, recipe.id.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            reloaded.times_made, 2,
+            "cooking the same recipe twice records two times — not deduplicated"
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_recipe_made_rejects_future_date_and_does_not_write() {
+        let mcp = setup_test_mcp().await;
+        let recipe = seed_recipe(&mcp, "Premature Stew").await;
+        let tomorrow = Utc::now().date_naive() + chrono::Duration::days(1);
+        let tomorrow_str = tomorrow.to_string();
+
+        let result = mcp
+            .mark_recipe_made(LenientParameters::for_test(MarkRecipeMadeInput {
+                slug: recipe.slug.clone(),
+                on_date: Some(tomorrow.format("%Y-%m-%d").to_string()),
+            }))
+            .await;
+        assert_tool_user_error(result, &[tomorrow_str.as_str(), "create_meal"]);
+
+        let reloaded = RecipeService::get_by_id(&mcp.db, recipe.id.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            reloaded.times_made, 0,
+            "a rejected future date must not increment the counter"
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_recipe_made_unknown_slug_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        let result = mcp
+            .mark_recipe_made(LenientParameters::for_test(MarkRecipeMadeInput {
+                slug: "ghost-stew".into(),
+                on_date: None,
+            }))
+            .await;
+        assert_tool_user_error(result, &["ghost-stew", "search_recipes"]);
+    }
+
+    #[tokio::test]
+    async fn mark_recipe_made_normalizes_slug_case_and_whitespace() {
+        let mcp = setup_test_mcp().await;
+        let recipe = seed_recipe(&mcp, "Chili Con Carne").await;
+
+        let result = mcp
+            .mark_recipe_made(LenientParameters::for_test(MarkRecipeMadeInput {
+                // Same slug, but upper-cased and padded — must still resolve.
+                slug: format!("  {}  ", recipe.slug.to_uppercase()),
+                on_date: None,
+            }))
+            .await
+            .expect("mark_recipe_made returns Ok");
+        assert_ne!(
+            result.is_error,
+            Some(true),
+            "normalized slug must resolve: {result:?}"
+        );
+
+        let reloaded = RecipeService::get_by_id(&mcp.db, recipe.id.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reloaded.times_made, 1);
     }
 
     // ─── Tool-description discoverability (fewd-tqx) ────────────────
