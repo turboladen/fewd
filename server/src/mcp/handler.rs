@@ -520,7 +520,13 @@ impl FewdMcp {
             Ok(v) => v,
             Err(e) => return Ok(e),
         };
-        let today = chrono::Utc::now().date_naive();
+        // Use the server's LOCAL date for "today". Unlike `created_at` /
+        // `updated_at` (instants, correctly tracked in UTC), the cook date is
+        // a calendar-day concept the household reasons about in local time —
+        // a dinner logged at 7pm Pacific belongs to that local day, not the
+        // UTC day that has already rolled over. Assumes the host clock is set
+        // to the household timezone (true for the self-hosted deployment).
+        let today = chrono::Local::now().date_naive();
         let cooked_date = match input.resolve_cooked_date(today) {
             Ok(date) => date,
             Err(e) => return Ok(tool_user_error(e.to_string())),
@@ -2152,7 +2158,9 @@ mod tests {
     async fn mark_recipe_made_with_explicit_past_date_stamps_that_date() {
         let mcp = setup_test_mcp().await;
         let recipe = seed_recipe(&mcp, "Sunday Roast").await;
-        let three_days_ago = Utc::now().date_naive() - chrono::Duration::days(3);
+        // Match the handler's clock (Local) so the future-date guard and the
+        // round-trip assertion stay correct regardless of the test host's TZ.
+        let three_days_ago = chrono::Local::now().date_naive() - chrono::Duration::days(3);
 
         let result = mcp
             .mark_recipe_made(LenientParameters::for_test(MarkRecipeMadeInput {
@@ -2206,7 +2214,9 @@ mod tests {
     async fn mark_recipe_made_rejects_future_date_and_does_not_write() {
         let mcp = setup_test_mcp().await;
         let recipe = seed_recipe(&mcp, "Premature Stew").await;
-        let tomorrow = Utc::now().date_naive() + chrono::Duration::days(1);
+        // Local clock to match the handler — a UTC-derived "tomorrow" could
+        // equal Local "today" on hosts ahead of UTC and spuriously pass.
+        let tomorrow = chrono::Local::now().date_naive() + chrono::Duration::days(1);
         let tomorrow_str = tomorrow.to_string();
 
         let result = mcp
