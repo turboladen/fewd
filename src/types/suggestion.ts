@@ -4,8 +4,8 @@ export interface SuggestionItem {
   recipe_id: string
   recipe_name: string
   rating: number | null
-  last_made: string | null
-  times_made: number
+  last_planned: string | null
+  times_planned: number
   reason: string
 }
 

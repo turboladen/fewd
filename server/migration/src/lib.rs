@@ -18,6 +18,7 @@ mod m20260427_000013_split_ingredient_name_and_prep;
 mod m20260428_000014_reparse_misbucketed_ingredients;
 mod m20260429_000015_peel_size_parens_from_ingredient_name;
 mod m20260509_000016_add_mcp_token_to_people;
+mod m20260523_000017_rename_recipe_planning_fields;
 pub mod paren_notes;
 pub mod slug;
 
@@ -48,6 +49,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260428_000014_reparse_misbucketed_ingredients::Migration),
             Box::new(m20260429_000015_peel_size_parens_from_ingredient_name::Migration),
             Box::new(m20260509_000016_add_mcp_token_to_people::Migration),
+            Box::new(m20260523_000017_rename_recipe_planning_fields::Migration),
         ]
     }
 }

@@ -24,8 +24,8 @@ pub struct RecipeBrief {
     pub icon: Option<String>,
     pub servings: i32,
     pub total_time: Option<TimeOut>,
-    pub times_made: i32,
-    pub last_made: Option<String>,
+    pub times_planned: i32,
+    pub last_planned: Option<String>,
     pub rating: Option<f64>,
     pub is_favorite: bool,
 }
@@ -51,8 +51,8 @@ pub struct RecipeFull {
     pub notes: Option<String>,
     pub icon: Option<String>,
     pub is_favorite: bool,
-    pub times_made: i32,
-    pub last_made: Option<String>,
+    pub times_planned: i32,
+    pub last_planned: Option<String>,
     pub rating: Option<f64>,
 }
 
@@ -81,9 +81,9 @@ pub struct SearchRecipesParams {
     /// If true, only is_favorite recipes; if false, only non-favorites.
     #[serde(default)]
     pub is_favorite: Option<bool>,
-    /// Recipes not made in at least N days (or never made).
+    /// Recipes not planned in at least N days (or never planned).
     #[serde(default)]
-    pub unmade_since_days: Option<i32>,
+    pub unplanned_since_days: Option<i32>,
     /// Exclude recipes that contain ingredients any of these family members
     /// dislikes. Each named person's `dislikes` are matched as
     /// case-insensitive substrings against ingredient names — e.g. "olive
@@ -145,13 +145,13 @@ impl SearchRecipesParams {
             || self.max_total_time_minutes.is_some()
             || self.min_rating.is_some()
             || self.is_favorite.is_some()
-            || self.unmade_since_days.is_some()
+            || self.unplanned_since_days.is_some()
         {
             Ok(())
         } else {
             Err("search_recipes requires at least one filter \
                  (query, tags, max_total_time_minutes, min_rating, is_favorite, \
-                 unmade_since_days, excludes_for_persons, or \
+                 unplanned_since_days, excludes_for_persons, or \
                  includes_ingredient_substrings). \
                  For an unfiltered shortlist call list_curated_recipes.")
         }
@@ -250,8 +250,8 @@ pub fn recipe_to_brief(recipe: &recipe::Model) -> Result<RecipeBrief, String> {
         icon: recipe.icon.clone(),
         servings: recipe.servings,
         total_time: total_time.map(time_out),
-        times_made: recipe.times_made,
-        last_made: recipe.last_made.map(format_date),
+        times_planned: recipe.times_planned,
+        last_planned: recipe.last_planned.map(format_date),
         rating: recipe.rating,
         is_favorite: recipe.is_favorite,
     })
@@ -295,8 +295,8 @@ pub fn recipe_to_full(
         notes: recipe.notes.clone(),
         icon: recipe.icon.clone(),
         is_favorite: recipe.is_favorite,
-        times_made: recipe.times_made,
-        last_made: recipe.last_made.map(format_date),
+        times_planned: recipe.times_planned,
+        last_planned: recipe.last_planned.map(format_date),
         rating: recipe.rating,
     })
 }

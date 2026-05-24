@@ -136,8 +136,8 @@ Array of Ingredient objects:
 - `notes`: Optional String
 - `icon`: Optional String - emoji (e.g., “🍗”, “🍝”)
 - `is_favorite`: Boolean
-- `times_made`: Integer - auto-increments when used in a meal
-- `last_made`: Optional DateTime - auto-updates when used
+- `times_planned`: Integer - auto-increments when scheduled in a meal
+- `last_planned`: Optional DateTime - auto-updates when scheduled
 
 **Example:**
 
@@ -184,8 +184,8 @@ Array of Ingredient objects:
   "notes": "",
   "icon": "🍗",
   "is_favorite": true,
-  "times_made": 12,
-  "last_made": "2026-01-10T18:30:00Z",
+  "times_planned": 12,
+  "last_planned": "2026-01-10T18:30:00Z",
   "created_at": "2025-12-01T10:00:00Z",
   "updated_at": "2026-01-10T18:30:00Z"
 }
@@ -310,7 +310,7 @@ Each person eating this meal has one PersonServing, which can be either:
 1. If `food_type` is “adhoc”, `adhoc_items` array is required
 1. Default meals: Breakfast (order=0), Lunch (order=1), Dinner (order=2)
 1. Custom meals have order >= 3
-1. **When a recipe is used in a meal, increment that recipe’s `times_made` counter and update `last_made`**
+1. **When a recipe is scheduled in a meal, increment that recipe’s `times_planned` counter and update `last_planned`**
 
 **Recipe Scaling Example:**
 
@@ -604,8 +604,8 @@ CREATE TABLE recipes (
     notes TEXT,
     icon TEXT,
     is_favorite BOOLEAN NOT NULL DEFAULT 0,
-    times_made INTEGER NOT NULL DEFAULT 0,
-    last_made TIMESTAMP,
+    times_planned INTEGER NOT NULL DEFAULT 0,
+    last_planned TIMESTAMP,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     FOREIGN KEY (parent_recipe_id) REFERENCES recipes(id)

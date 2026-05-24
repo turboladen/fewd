@@ -26,8 +26,8 @@ pub struct SearchFilters {
     pub max_total_time_minutes: Option<i32>,
     pub min_rating: Option<f64>,
     pub is_favorite: Option<bool>,
-    /// Recipes not made in at least N days (or never made).
-    pub unmade_since_days: Option<i32>,
+    /// Recipes not planned in at least N days (or never planned).
+    pub unplanned_since_days: Option<i32>,
     /// Lowercased substrings — recipe is excluded if ANY ingredient name
     /// contains ANY listed substring (case-insensitive). Already-flattened
     /// across all `excludes_for_persons` resolved in the handler.
@@ -51,7 +51,7 @@ impl SearchFilters {
             && self.max_total_time_minutes.is_none()
             && self.min_rating.is_none()
             && self.is_favorite.is_none()
-            && self.unmade_since_days.is_none()
+            && self.unplanned_since_days.is_none()
             && self.excluded_ingredient_substrings.is_empty()
             && self.included_ingredient_substrings.is_empty()
     }
@@ -125,8 +125,8 @@ impl RecipeService {
                 notes: Set(data.notes.clone()),
                 icon: Set(data.icon.clone()),
                 is_favorite: Set(false),
-                times_made: Set(0),
-                last_made: Set(None),
+                times_planned: Set(0),
+                last_planned: Set(None),
                 rating: Set(None),
                 created_at: Set(now),
                 updated_at: Set(now),
@@ -231,7 +231,7 @@ impl RecipeService {
     /// Bounded shortlist for the MCP `list_curated_recipes` tool.
     ///
     /// Policy: every is_favorite first (never truncated — the user's explicit
-    /// signal), then most-recently-made, then top-rated. Deduped by id. Capped
+    /// signal), then most-recently-planned, then top-rated. Deduped by id. Capped
     /// at `max(CURATED_CAP, favorite_count)` so a family with 50 favorites
     /// gets all 50, while a family with 5 favorites gets a 30-row blend.
     /// Within the favorites bucket, ordered by slug ascending — slugs are
@@ -251,8 +251,8 @@ impl RecipeService {
         // shift between calls. Slug is the deterministic, stable choice
         // (always lowercase, never rewritten after creation).
         let recent = Recipe::find()
-            .filter(recipe::Column::LastMade.is_not_null())
-            .order_by_desc(recipe::Column::LastMade)
+            .filter(recipe::Column::LastPlanned.is_not_null())
+            .order_by_desc(recipe::Column::LastPlanned)
             .order_by_asc(recipe::Column::Slug)
             .limit(CURATED_CAP)
             .all(db)
@@ -349,12 +349,12 @@ impl RecipeService {
             q = q.filter(recipe::Column::IsFavorite.eq(b));
         }
 
-        if let Some(days) = filters.unmade_since_days {
+        if let Some(days) = filters.unplanned_since_days {
             let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
             q = q.filter(
                 Condition::any()
-                    .add(recipe::Column::LastMade.is_null())
-                    .add(recipe::Column::LastMade.lt(cutoff)),
+                    .add(recipe::Column::LastPlanned.is_null())
+                    .add(recipe::Column::LastPlanned.lt(cutoff)),
             );
         }
 
