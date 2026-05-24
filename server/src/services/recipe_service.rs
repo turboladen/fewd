@@ -407,10 +407,19 @@ impl RecipeService {
     }
 
     /// Records that a recipe was cooked: atomically increments `times_made`
-    /// and stamps `last_made` with `cooked_at`. The increment is a single
+    /// and advances `last_made` toward `cooked_at`. The increment is a single
     /// `times_made = times_made + 1` UPDATE so concurrent calls can't race a
-    /// read-modify-write. Returns the reloaded model, or `None` when no recipe
-    /// has the given id (the MCP handler maps that to an actionable slug error).
+    /// read-modify-write.
+    ///
+    /// `last_made` is *monotonic* — it only moves forward. Backfilling an
+    /// older cook date (`on_date` in the past, e.g. "we also made this last
+    /// Tuesday") still counts the cooking but does NOT drag `last_made`
+    /// backward, since downstream features (`unmade_since_days`, suggestions)
+    /// rely on it being the most-recent cook time. The `CASE` keeps that
+    /// max-with-existing in the same atomic statement as the increment.
+    ///
+    /// Returns the reloaded model, or `None` when no recipe has the given id
+    /// (the MCP handler maps that to an actionable slug error).
     pub async fn mark_made(
         db: &DatabaseConnection,
         id: &str,
@@ -420,8 +429,10 @@ impl RecipeService {
         let res = db
             .execute(Statement::from_sql_and_values(
                 db.get_database_backend(),
-                "UPDATE recipes SET times_made = times_made + 1, last_made = ?, updated_at = ? WHERE id = ?",
-                [cooked_at.into(), now.into(), id.into()],
+                "UPDATE recipes SET times_made = times_made + 1, \
+                 last_made = CASE WHEN last_made IS NULL OR last_made < ? THEN ? ELSE last_made END, \
+                 updated_at = ? WHERE id = ?",
+                [cooked_at.into(), cooked_at.into(), now.into(), id.into()],
             ))
             .await?;
         if res.rows_affected() == 0 {

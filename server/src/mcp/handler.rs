@@ -2183,6 +2183,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mark_recipe_made_older_date_does_not_move_last_made_backward() {
+        let mcp = setup_test_mcp().await;
+        let recipe = seed_recipe(&mcp, "Backfill Bisque").await;
+        let today = chrono::Local::now().date_naive();
+        let last_week = today - chrono::Duration::days(7);
+
+        // Mark made today (sets last_made to the recent date).
+        mcp.mark_recipe_made(LenientParameters::for_test(MarkRecipeMadeInput {
+            slug: recipe.slug.clone(),
+            on_date: None,
+        }))
+        .await
+        .expect("first mark Ok");
+
+        // Then backfill an OLDER cook date — must still count, but must not
+        // drag last_made backward (unmade_since_days relies on it being most-recent).
+        mcp.mark_recipe_made(LenientParameters::for_test(MarkRecipeMadeInput {
+            slug: recipe.slug.clone(),
+            on_date: Some(last_week.format("%Y-%m-%d").to_string()),
+        }))
+        .await
+        .expect("backfill mark Ok");
+
+        let reloaded = RecipeService::get_by_id(&mcp.db, recipe.id.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reloaded.times_made, 2, "both cookings are counted");
+        assert_eq!(
+            reloaded.last_made.expect("last_made set").date_naive(),
+            today,
+            "last_made must stay at the most-recent cook date, not regress to the older backfill"
+        );
+    }
+
+    #[tokio::test]
     async fn mark_recipe_made_called_twice_increments_to_two() {
         let mcp = setup_test_mcp().await;
         let recipe = seed_recipe(&mcp, "Taco Night").await;
