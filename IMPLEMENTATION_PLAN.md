@@ -214,7 +214,7 @@
 - `get_suggestions(db, person_ids, meal_type, date_range) -> MealSuggestions`
 - Three categories:
   - **Recent favorites:** Recipes most used in the past 2 weeks for the selected people
-  - **Forgotten hits:** Recipes with high `times_made` + good `rating` but no meals in last 30+ days
+  - **Forgotten hits:** Recipes with high `times_planned` + good `rating` but no meals in last 30+ days
   - **Untried in system:** Recipes in the database that have never been assigned to the selected people (cross-reference meals history)
 - Each category returns up to 5 suggestions with recipe info + relevance reason
 
