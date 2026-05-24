@@ -19,8 +19,8 @@ pub struct SuggestionItem {
     pub recipe_id: String,
     pub recipe_name: String,
     pub rating: Option<f64>,
-    pub last_made: Option<chrono::DateTime<Utc>>,
-    pub times_made: i32,
+    pub last_planned: Option<chrono::DateTime<Utc>>,
+    pub times_planned: i32,
     pub reason: String,
 }
 
@@ -97,10 +97,10 @@ impl SuggestionService {
                     recipe_id: recipe.id,
                     recipe_name: recipe.name,
                     rating: recipe.rating,
-                    last_made: recipe.last_made,
-                    times_made: recipe.times_made,
+                    last_planned: recipe.last_planned,
+                    times_planned: recipe.times_planned,
                     reason: format!(
-                        "Made {} time{} in the last 2 weeks",
+                        "Planned {} time{} in the last 2 weeks",
                         count,
                         if count == 1 { "" } else { "s" }
                     ),
@@ -111,7 +111,7 @@ impl SuggestionService {
         Ok(results)
     }
 
-    /// Well-rated recipes with high usage that haven't been made recently
+    /// Well-rated recipes with high usage that haven't been planned recently
     async fn forgotten_hits(
         db: &DatabaseConnection,
         reference_date: NaiveDate,
@@ -121,37 +121,37 @@ impl SuggestionService {
 
         // Recipes with enough usage and good rating
         let candidates = Recipe::find()
-            .filter(recipe::Column::TimesMade.gte(FORGOTTEN_MIN_TIMES))
+            .filter(recipe::Column::TimesPlanned.gte(FORGOTTEN_MIN_TIMES))
             .filter(recipe::Column::Rating.gte(FORGOTTEN_MIN_RATING))
             .all(db)
             .await?;
 
-        // Filter to those not made recently
+        // Filter to those not planned recently
         let mut hits: Vec<&recipe::Model> = candidates
             .iter()
-            .filter(|r| match r.last_made {
+            .filter(|r| match r.last_planned {
                 None => true,
                 Some(last) => last < cutoff_dt,
             })
             .collect();
 
-        // Sort by rating desc, then times_made desc
+        // Sort by rating desc, then times_planned desc
         hits.sort_by(|a, b| {
             b.rating
                 .unwrap_or(0.0)
                 .partial_cmp(&a.rating.unwrap_or(0.0))
                 .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| b.times_made.cmp(&a.times_made))
+                .then_with(|| b.times_planned.cmp(&a.times_planned))
         });
         hits.truncate(MAX_PER_CATEGORY);
 
         let results = hits
             .into_iter()
             .map(|recipe| {
-                let days_ago = match recipe.last_made {
+                let days_ago = match recipe.last_planned {
                     Some(last) => {
                         let days = (Utc::now() - last).num_days();
-                        format!("last made {} days ago", days)
+                        format!("last planned {} days ago", days)
                     }
                     None => "never recorded".to_string(),
                 };
@@ -159,12 +159,12 @@ impl SuggestionService {
                     recipe_id: recipe.id.clone(),
                     recipe_name: recipe.name.clone(),
                     rating: recipe.rating,
-                    last_made: recipe.last_made,
-                    times_made: recipe.times_made,
+                    last_planned: recipe.last_planned,
+                    times_planned: recipe.times_planned,
                     reason: format!(
-                        "Rated {}★, made {} times, {}",
+                        "Rated {}★, planned {} times, {}",
                         recipe.rating.unwrap_or(0.0) as i32,
-                        recipe.times_made,
+                        recipe.times_planned,
                         days_ago
                     ),
                 }
@@ -235,8 +235,8 @@ impl SuggestionService {
                 recipe_id: recipe.id.clone(),
                 recipe_name: recipe.name.clone(),
                 rating: recipe.rating,
-                last_made: recipe.last_made,
-                times_made: recipe.times_made,
+                last_planned: recipe.last_planned,
+                times_planned: recipe.times_planned,
                 reason: "Never tried by the selected people".to_string(),
             })
             .collect();

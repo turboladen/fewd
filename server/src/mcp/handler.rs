@@ -109,7 +109,7 @@ impl FewdMcp {
 
     #[tool(
         name = "search_recipes",
-        description = "Find specific recipes when the user names an ingredient, tag, time constraint, rating, or person preference — call BEFORE `create_meal` (to find a slug to schedule) or `create_recipe` (to avoid creating a near-duplicate). Bare calls (no filters / `query='*'`) are rejected — call `list_curated_recipes` for an unfiltered shortlist. Filters: `query` (case-insensitive substring on name); `tags` (case-insensitive exact match, multiple tags = AND); `max_total_time_minutes` (assumes recipe total_time is in minutes — recipes authored in hours won't match, known limitation); `min_rating`; `is_favorite`; `unmade_since_days`; `excludes_for_persons` (named family members whose dislikes exclude matching recipes — substring match on ingredient names, e.g. 'olive oil' is excluded when a person dislikes 'olive'); `includes_ingredient_substrings` (recipes must contain ALL listed substrings in some ingredient name — case-insensitive, multiple values AND together, possibly across different ingredients; use for 'what can I make with spam?' / 'recipes that use leftover rice' / combine with `tags=[\"dinner\"]` for 'dinner recipes with spam'). Returns brief rows — use `get_recipe` with the slug for full details. Unknown person names return an actionable error pointing at `list_people`.",
+        description = "Find specific recipes when the user names an ingredient, tag, time constraint, rating, or person preference — call BEFORE `create_meal` (to find a slug to schedule) or `create_recipe` (to avoid creating a near-duplicate). Bare calls (no filters / `query='*'`) are rejected — call `list_curated_recipes` for an unfiltered shortlist. Filters: `query` (case-insensitive substring on name); `tags` (case-insensitive exact match, multiple tags = AND); `max_total_time_minutes` (assumes recipe total_time is in minutes — recipes authored in hours won't match, known limitation); `min_rating`; `is_favorite`; `unplanned_since_days`; `excludes_for_persons` (named family members whose dislikes exclude matching recipes — substring match on ingredient names, e.g. 'olive oil' is excluded when a person dislikes 'olive'); `includes_ingredient_substrings` (recipes must contain ALL listed substrings in some ingredient name — case-insensitive, multiple values AND together, possibly across different ingredients; use for 'what can I make with spam?' / 'recipes that use leftover rice' / combine with `tags=[\"dinner\"]` for 'dinner recipes with spam'). Returns brief rows — use `get_recipe` with the slug for full details. Unknown person names return an actionable error pointing at `list_people`.",
         input_schema = rmcp::handler::server::common::schema_for_type::<SearchRecipesParams>()
     )]
     async fn search_recipes(
@@ -139,7 +139,7 @@ impl FewdMcp {
             max_total_time_minutes: params.max_total_time_minutes,
             min_rating: params.min_rating,
             is_favorite: params.is_favorite,
-            unmade_since_days: params.unmade_since_days,
+            unplanned_since_days: params.unplanned_since_days,
             excluded_ingredient_substrings,
             included_ingredient_substrings: params.normalized_included_substrings(),
         };
@@ -150,7 +150,7 @@ impl FewdMcp {
         if let Some(err) = enforce_list_cap(
             "search_recipes",
             recipes.len(),
-            "Add another filter (tags, max_total_time_minutes, min_rating, is_favorite, unmade_since_days) or tighten the existing query to narrow the result set.",
+            "Add another filter (tags, max_total_time_minutes, min_rating, is_favorite, unplanned_since_days) or tighten the existing query to narrow the result set.",
         ) {
             return Ok(err);
         }

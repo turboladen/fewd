@@ -57,7 +57,7 @@ impl MealService {
 
         let result = meal.insert(db).await?;
 
-        // Increment times_made for any recipes used in this meal
+        // Increment times_planned for any recipes used in this meal
         increment_recipe_usage(db, &data.servings).await?;
 
         Ok(result)
@@ -140,7 +140,7 @@ fn collect_recipe_ids(servings: &[PersonServingDto]) -> HashSet<String> {
         .collect()
 }
 
-/// Increment times_made and update last_made for each recipe referenced in servings
+/// Increment times_planned and update last_planned for each recipe referenced in servings
 async fn increment_recipe_usage(
     db: &DatabaseConnection,
     servings: &[PersonServingDto],
@@ -150,7 +150,7 @@ async fn increment_recipe_usage(
     increment_recipe_usage_by_ids(db, &id_refs).await
 }
 
-/// Increment times_made and update last_made for specific recipe IDs
+/// Increment times_planned and update last_planned for specific recipe IDs
 async fn increment_recipe_usage_by_ids(
     db: &DatabaseConnection,
     recipe_ids: &[&str],
@@ -159,10 +159,10 @@ async fn increment_recipe_usage_by_ids(
 
     for recipe_id in recipe_ids {
         if let Some(existing) = Recipe::find_by_id(*recipe_id).one(db).await? {
-            let new_times_made = existing.times_made + 1;
+            let new_times_planned = existing.times_planned + 1;
             let mut recipe: recipe::ActiveModel = existing.into();
-            recipe.times_made = Set(new_times_made);
-            recipe.last_made = Set(Some(now));
+            recipe.times_planned = Set(new_times_planned);
+            recipe.last_planned = Set(Some(now));
             recipe.updated_at = Set(now);
             recipe.update(db).await?;
         }
@@ -171,15 +171,15 @@ async fn increment_recipe_usage_by_ids(
     Ok(())
 }
 
-/// Decrement times_made for specific recipe IDs (floor at 0)
+/// Decrement times_planned for specific recipe IDs (floor at 0)
 async fn decrement_recipe_usage(db: &DatabaseConnection, recipe_ids: &[&str]) -> Result<(), DbErr> {
     let now = chrono::Utc::now();
 
     for recipe_id in recipe_ids {
         if let Some(existing) = Recipe::find_by_id(*recipe_id).one(db).await? {
-            let new_times_made = (existing.times_made - 1).max(0);
+            let new_times_planned = (existing.times_planned - 1).max(0);
             let mut recipe: recipe::ActiveModel = existing.into();
-            recipe.times_made = Set(new_times_made);
+            recipe.times_planned = Set(new_times_planned);
             recipe.updated_at = Set(now);
             recipe.update(db).await?;
         }

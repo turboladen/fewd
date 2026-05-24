@@ -981,8 +981,8 @@ export function RecipeDetail({
         {parsed.prep_time && <span>Prep: {formatTime(parsed.prep_time)}</span>}
         {parsed.cook_time && <span>Cook: {formatTime(parsed.cook_time)}</span>}
         {parsed.total_time && <span>Total: {formatTime(parsed.total_time)}</span>}
-        {parsed.times_made > 0 && (
-          <span>Made {parsed.times_made} time{parsed.times_made !== 1 ? 's' : ''}</span>
+        {parsed.times_planned > 0 && (
+          <span>Planned {parsed.times_planned} time{parsed.times_planned !== 1 ? 's' : ''}</span>
         )}
       </div>
 
@@ -1333,9 +1333,9 @@ export function RecipeManager() {
                 </div>
               )}
 
-              {recipe.times_made > 0 && (
+              {recipe.times_planned > 0 && (
                 <p className='text-xs text-stone-400 mt-2'>
-                  Made {recipe.times_made} time{recipe.times_made !== 1 ? 's' : ''}
+                  Planned {recipe.times_planned} time{recipe.times_planned !== 1 ? 's' : ''}
                 </p>
               )}
             </div>

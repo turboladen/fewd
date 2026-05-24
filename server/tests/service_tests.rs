@@ -333,7 +333,7 @@ async fn recipe_create_and_get_all() {
 
     assert_eq!(recipe.name, "Pasta");
     assert!(!recipe.is_favorite);
-    assert_eq!(recipe.times_made, 0);
+    assert_eq!(recipe.times_planned, 0);
     assert_eq!(recipe.servings, 4);
 
     let all = RecipeService::get_all(&db).await.unwrap();
@@ -676,7 +676,7 @@ async fn meal_create_and_query_date_range() {
 }
 
 #[tokio::test]
-async fn meal_increments_recipe_times_made() {
+async fn meal_increments_recipe_times_planned() {
     let db = setup_db().await;
     let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
         .await
@@ -684,7 +684,7 @@ async fn meal_increments_recipe_times_made() {
     let person = PersonService::create(&db, test_person_dto("Alice"))
         .await
         .unwrap();
-    assert_eq!(recipe.times_made, 0);
+    assert_eq!(recipe.times_planned, 0);
 
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
@@ -703,8 +703,8 @@ async fn meal_increments_recipe_times_made() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(updated_recipe.times_made, 1);
-    assert!(updated_recipe.last_made.is_some());
+    assert_eq!(updated_recipe.times_planned, 1);
+    assert!(updated_recipe.last_planned.is_some());
 }
 
 #[tokio::test]
@@ -1192,7 +1192,7 @@ async fn suggestion_forgotten_hits() {
         .await
         .unwrap();
 
-    // Manually set times_made, rating, and an old last_made via update
+    // Manually set times_planned, rating, and an old last_planned via update
     let update = UpdateRecipeDto {
         name: None,
         description: None,
@@ -1214,7 +1214,7 @@ async fn suggestion_forgotten_hits() {
         .await
         .unwrap();
 
-    // We need times_made >= 3. Create 3 meals to trigger increment_recipe_usage.
+    // We need times_planned >= 3. Create 3 meals to trigger increment_recipe_usage.
     let person = PersonService::create(&db, test_person_dto("Alice"))
         .await
         .unwrap();
@@ -1242,15 +1242,15 @@ async fn suggestion_forgotten_hits() {
         .unwrap();
     }
 
-    // increment_recipe_usage sets last_made to Utc::now(), so we need to
+    // increment_recipe_usage sets last_planned to Utc::now(), so we need to
     // manually push it back to 60 days ago for the forgotten-hits filter
-    let old_last_made = chrono::Utc::now() - chrono::Duration::days(60);
+    let old_last_planned = chrono::Utc::now() - chrono::Duration::days(60);
     let fetched = RecipeService::get_by_id(&db, recipe.id.clone())
         .await
         .unwrap()
         .unwrap();
     let mut active: fewd_lib::entities::recipe::ActiveModel = fetched.into_active_model();
-    active.last_made = Set(Some(old_last_made));
+    active.last_planned = Set(Some(old_last_planned));
     fewd_lib::entities::recipe::Entity::update(active)
         .exec(&db)
         .await
@@ -2513,13 +2513,13 @@ mod recipe_discovery {
     }
 
     /// Patch fields the create DTO doesn't expose (`is_favorite`,
-    /// `last_made`, `rating`) so the curated/search tests can construct the
+    /// `last_planned`, `rating`) so the curated/search tests can construct the
     /// scenarios they need without faking dates through the meal pipeline.
     async fn patch(
         db: &DatabaseConnection,
         id: &str,
         is_favorite: Option<bool>,
-        last_made: Option<DateTime<Utc>>,
+        last_planned: Option<DateTime<Utc>>,
         rating: Option<f64>,
     ) {
         let existing = recipe::Entity::find_by_id(id.to_string())
@@ -2531,8 +2531,8 @@ mod recipe_discovery {
         if let Some(b) = is_favorite {
             active.is_favorite = ActiveValue::Set(b);
         }
-        if let Some(dt) = last_made {
-            active.last_made = ActiveValue::Set(Some(dt));
+        if let Some(dt) = last_planned {
+            active.last_planned = ActiveValue::Set(Some(dt));
         }
         if let Some(r) = rating {
             active.rating = ActiveValue::Set(Some(r));
@@ -2628,7 +2628,7 @@ mod recipe_discovery {
                 RecipeService::create(&db, recipe_with(&format!("R{i:02}"), vec![], vec![], None))
                     .await
                     .unwrap();
-            // Stagger dates so ORDER BY last_made DESC is deterministic.
+            // Stagger dates so ORDER BY last_planned DESC is deterministic.
             let when = now - Duration::hours(i as i64);
             patch(&db, &r.id, None, Some(when), None).await;
         }
@@ -2835,7 +2835,7 @@ mod recipe_discovery {
     }
 
     #[tokio::test]
-    async fn search_filtered_unmade_since_days_includes_never_made() {
+    async fn search_filtered_unplanned_since_days_includes_never_planned() {
         let db = setup_db().await;
         let stale = RecipeService::create(&db, recipe_with("Stale", vec![], vec![], None))
             .await
@@ -2854,7 +2854,7 @@ mod recipe_discovery {
         let out = RecipeService::search_filtered(
             &db,
             SearchFilters {
-                unmade_since_days: Some(30),
+                unplanned_since_days: Some(30),
                 ..Default::default()
             },
         )

@@ -89,8 +89,8 @@ export interface Recipe {
   notes: string | null
   icon: string | null
   is_favorite: boolean
-  times_made: number
-  last_made: string | null
+  times_planned: number
+  last_planned: string | null
   rating: number | null
   created_at: string
   updated_at: string
