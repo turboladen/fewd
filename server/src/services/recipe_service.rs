@@ -231,7 +231,7 @@ impl RecipeService {
     /// Bounded shortlist for the MCP `list_curated_recipes` tool.
     ///
     /// Policy: every is_favorite first (never truncated — the user's explicit
-    /// signal), then most-recently-made, then top-rated. Deduped by id. Capped
+    /// signal), then most-recently-planned, then top-rated. Deduped by id. Capped
     /// at `max(CURATED_CAP, favorite_count)` so a family with 50 favorites
     /// gets all 50, while a family with 5 favorites gets a 30-row blend.
     /// Within the favorites bucket, ordered by slug ascending — slugs are

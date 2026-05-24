@@ -79,7 +79,7 @@ impl FewdMcp {
 
     #[tool(
         name = "list_curated_recipes",
-        description = "Use as the default starting point for meal-planning when the user hasn't named a specific dish or ingredient — returns the family's likely-relevant shortlist (every favorite first, then most-recently-made, then top-rated, deduped, ≤30 unless favorites exceed that). For targeted lookups by ingredient, tag, time, rating, or person preference, call `search_recipes` instead. The full archive is intentionally not exposed — the web UI is for human browsing.",
+        description = "Use as the default starting point for meal-planning when the user hasn't named a specific dish or ingredient — returns the family's likely-relevant shortlist (every favorite first, then most-recently-planned, then top-rated, deduped, ≤30 unless favorites exceed that). For targeted lookups by ingredient, tag, time, rating, or person preference, call `search_recipes` instead. The full archive is intentionally not exposed — the web UI is for human browsing.",
         input_schema = rmcp::handler::server::common::schema_for_type::<EmptyParams>()
     )]
     async fn list_curated_recipes(

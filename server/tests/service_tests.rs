@@ -1192,7 +1192,8 @@ async fn suggestion_forgotten_hits() {
         .await
         .unwrap();
 
-    // Manually set times_planned, rating, and an old last_planned via update
+    // Set a high rating via update. times_planned is bumped below by creating
+    // meals; last_planned is backdated below via a direct ActiveModel write.
     let update = UpdateRecipeDto {
         name: None,
         description: None,
