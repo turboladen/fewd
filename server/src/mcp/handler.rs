@@ -272,7 +272,7 @@ impl FewdMcp {
 
     #[tool(
         name = "update_person",
-        description = "Record what you've learned about a family member's preferences this session so future conversations inherit it — call AFTER `list_people` or `get_family_overview` to grab the canonical `name`. Updates any subset of `notes`, `dislikes`, `favorites`, `drink_preferences`, `drink_dislikes`; omitted (or null) fields are left unchanged. For the list fields, passing an explicit empty array (`[]`) REPLACES the existing list with empty — that's the only path to clearing one via this tool. `notes` (a free-form string) has no clear-to-null path in fewd today, neither here nor in the web UI; empty or whitespace-only input is normalized to 'no change' to preserve that invariant. Identification is case-insensitive on `name`. Authorization: any authenticated family member may update any other member (single-household trust model). Changes are visible to subsequent `list_people` / `get_family_overview` calls immediately.",
+        description = "Record what you've learned about a family member's preferences this session so future conversations inherit it — call AFTER `list_people` or `get_family_overview` to grab the canonical `name`. Updates any subset of `notes`, `dislikes`, `favorites`, `drink_preferences`, `drink_dislikes`; omitted (or null) fields are left unchanged. For the list fields, passing an explicit empty array (`[]`) REPLACES the existing list with empty — that's the only path to clearing one via this tool. `notes` (a free-form string) has no clear-to-null path in fewd today, neither here nor in the web UI; empty or whitespace-only input is normalized to 'no change' to preserve that invariant. Identification is case-insensitive on `name`. Authorization: any authenticated family member may update any other member (single-household trust model). Changes are visible to subsequent `list_people` / `get_family_overview` calls immediately. Example: {\"name\":\"Steve\",\"favorites\":[\"tacos\"],\"dislikes\":[]}",
         input_schema = rmcp::handler::server::common::schema_for_type::<UpdatePersonInput>()
     )]
     async fn update_person(
@@ -463,7 +463,7 @@ impl FewdMcp {
 
     #[tool(
         name = "create_recipe",
-        description = "Add a new recipe when the user describes one not already in the catalog — call `search_recipes` FIRST to check for duplicates (the LLM should resolve 'this is the same as carbonara, edit that one' rather than create a near-twin). The slug is auto-generated from the name (with a numeric suffix on collisions). Returns the full created recipe.",
+        description = "Add a new recipe when the user describes one not already in the catalog — call `search_recipes` FIRST to check for duplicates (the LLM should resolve 'this is the same as carbonara, edit that one' rather than create a near-twin). The slug is auto-generated from the name (with a numeric suffix on collisions). Returns the full created recipe. Example: {\"name\":\"Beef Taco Bowls\",\"source\":\"manual\",\"servings\":4,\"instructions\":\"Brown beef; assemble bowls.\",\"ingredients\":[{\"name\":\"ground beef\",\"amount\":{\"kind\":\"single\",\"value\":1.0},\"unit\":\"pound\"}]}",
         input_schema = rmcp::handler::server::common::schema_for_type::<CreateRecipeInput>()
     )]
     async fn create_recipe(
@@ -622,7 +622,7 @@ impl FewdMcp {
 
     #[tool(
         name = "create_meal",
-        description = "Schedule a planned meal — call AFTER `list_meals` (to confirm the slot is empty) and `search_recipes` / `get_recipe` (to find the slug). Each serving assigns one family member to either an existing recipe (by slug) or an ad-hoc ingredient list. Unknown names or slugs return a clear error so the caller can retry with corrected values. Returns the created meal with slugs/names resolved.",
+        description = "Schedule a planned meal — call AFTER `list_meals` (to confirm the slot is empty) and `search_recipes` / `get_recipe` (to find the slug). Each serving assigns one family member to either an existing recipe (by slug) or an ad-hoc ingredient list. Unknown names or slugs return a clear error so the caller can retry with corrected values. Returns the created meal with slugs/names resolved. Example: {\"date\":\"2026-05-25\",\"meal_type\":\"Dinner\",\"servings\":[{\"kind\":\"recipe\",\"person_name\":\"Steve\",\"recipe_slug\":\"beef-taco-bowls\",\"servings_count\":1.0}]}",
         input_schema = rmcp::handler::server::common::schema_for_type::<CreateMealInput>()
     )]
     async fn create_meal(
@@ -2082,5 +2082,42 @@ mod tests {
                 tool.name, INTENT_VERB_ALLOWLIST,
             );
         }
+    }
+
+    // ─── Embedded example payloads (fewd-9d8) ───────────────────────
+    //
+    // Weak local models (gemma-26b class) can't derive the exact JSON
+    // shape from the JsonSchema alone — they hallucinate field names and
+    // miss discriminated-union tags (`kind:"recipe"`, `kind:"single"`).
+    // Each write-side tool description ends with an inline `Example: {…}`
+    // to anchor first-call success. This test keeps those examples honest:
+    // a renamed field or a changed union tag breaks deserialization and
+    // fails here, rather than silently drifting from the live schema.
+
+    #[test]
+    fn embedded_tool_examples_deserialize() {
+        let router = FewdMcp::tool_router();
+        let tools = router.list_all();
+        let example = |name: &str| -> String {
+            let tool = tools
+                .iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("{name} tool missing"));
+            let desc = tool.description.as_deref().unwrap_or("");
+            desc.split("Example: ")
+                .nth(1)
+                .unwrap_or_else(|| {
+                    panic!("{name}: description must end with an `Example: {{…}}` payload")
+                })
+                .trim()
+                .to_string()
+        };
+
+        serde_json::from_str::<CreateMealInput>(&example("create_meal"))
+            .expect("create_meal embedded example must deserialize into CreateMealInput");
+        serde_json::from_str::<CreateRecipeInput>(&example("create_recipe"))
+            .expect("create_recipe embedded example must deserialize into CreateRecipeInput");
+        serde_json::from_str::<UpdatePersonInput>(&example("update_person"))
+            .expect("update_person embedded example must deserialize into UpdatePersonInput");
     }
 }
