@@ -28,6 +28,7 @@ pub(crate) mod errors;
 mod meals;
 mod people;
 pub(crate) mod printable;
+mod prompts;
 mod recipes;
 mod shopping;
 
@@ -42,6 +43,7 @@ pub(super) use people::{
     person_to_prefs, render_family_overview, update_person_input_to_dto, UpdatePersonInput,
 };
 pub(super) use printable::PrintableInput;
+pub(super) use prompts::WeeklyDinnerPlanArgs;
 pub(super) use recipes::{
     create_recipe_input_to_dto, recipe_to_brief, recipe_to_full, CreateRecipeInput,
     ImportRecipeUrlInput, SearchRecipesParams,
