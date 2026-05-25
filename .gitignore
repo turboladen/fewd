@@ -54,6 +54,9 @@ dist-ssr
 
 .claude/settings.local.json
 
+# Git worktrees created by EnterWorktree (parallel multi-bead work)
+.claude/worktrees/
+
 # Playwright MCP runtime artifacts
 .playwright-mcp/
 
