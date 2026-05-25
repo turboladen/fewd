@@ -50,8 +50,19 @@ impl FewdMcp {
                     None,
                 )
             })?;
-        let monday = weekly_dinner_plan::monday_of_week(date);
-        let body = weekly_dinner_plan::render(monday, &args);
+        // `week_bounds` returns None only for dates so near chrono's range
+        // limits that the week math would overflow — reject those rather than
+        // letting the arithmetic panic.
+        let (monday, sunday) = weekly_dinner_plan::week_bounds(date).ok_or_else(|| {
+            McpError::invalid_params(
+                format!(
+                    "week_start_date '{}' is outside the supported calendar range.",
+                    args.week_start_date
+                ),
+                None,
+            )
+        })?;
+        let body = weekly_dinner_plan::render(monday, sunday, &args);
 
         Ok(
             GetPromptResult::new(vec![PromptMessage::new_text(PromptMessageRole::User, body)])

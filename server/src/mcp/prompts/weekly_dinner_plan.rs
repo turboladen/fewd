@@ -12,17 +12,26 @@ use chrono::{Datelike, Duration, NaiveDate};
 
 use crate::mcp::schemas::WeeklyDinnerPlanArgs;
 
-/// Snap any date to the Monday of its week. Mirrors the frontend's
-/// `getMonday()` (`src/utils/dates.ts`): a Sunday belongs to the *prior*
-/// week, so it snaps back to that week's Monday rather than forward.
-pub(crate) fn monday_of_week(date: NaiveDate) -> NaiveDate {
-    date - Duration::days(date.weekday().num_days_from_monday() as i64)
+/// Compute the Monday–Sunday bounds of the week containing `date`. Snapping
+/// mirrors the frontend's `getMonday()` (`src/utils/dates.ts`): a Sunday
+/// belongs to the *prior* week, so it snaps back to that week's Monday rather
+/// than forward.
+///
+/// Returns `None` only for dates within a few days of chrono's representable
+/// range (`NaiveDate::MIN`/`MAX`), where the week arithmetic would overflow.
+/// Using checked arithmetic here keeps the overflow out of `render` (which must
+/// not panic) and lets the caller surface a clean error for such pathological
+/// inputs instead.
+pub(crate) fn week_bounds(date: NaiveDate) -> Option<(NaiveDate, NaiveDate)> {
+    let monday =
+        date.checked_sub_signed(Duration::days(date.weekday().num_days_from_monday() as i64))?;
+    let sunday = monday.checked_add_signed(Duration::days(6))?;
+    Some((monday, sunday))
 }
 
-/// Render the planning prompt for a week starting `monday` (already snapped).
-/// `monday` is trusted to be a Monday; `render` only formats and offsets it.
-pub fn render(monday: NaiveDate, args: &WeeklyDinnerPlanArgs) -> String {
-    let sunday = monday + Duration::days(6);
+/// Render the planning prompt for the given week bounds. Pure formatting — all
+/// date arithmetic lives in [`week_bounds`], so `render` cannot panic.
+pub fn render(monday: NaiveDate, sunday: NaiveDate, args: &WeeklyDinnerPlanArgs) -> String {
     let date_range = format!("{monday} to {sunday}");
 
     let mut out = String::new();
@@ -132,7 +141,7 @@ mod tests {
     /// household workflow genuinely changes.
     #[test]
     fn renders_full_example_verbatim() {
-        let monday = NaiveDate::from_ymd_opt(2026, 5, 25).unwrap();
+        let (monday, sunday) = week_bounds(NaiveDate::from_ymd_opt(2026, 5, 25).unwrap()).unwrap();
         let expected = "Help me plan dinners for the week of Monday 2026-05-25 through Sunday 2026-05-31 using the fewd tools.\n\
 \n\
 This week's context:\n\
@@ -158,15 +167,15 @@ Workflow:\n\
 As you go, tell me if there are fewd tools missing that would help you plan better — that feedback shapes what we build next.\n\
 \n\
 All dates are YYYY-MM-DD.";
-        assert_eq!(render(monday, &full_example_args()), expected);
+        assert_eq!(render(monday, sunday, &full_example_args()), expected);
     }
 
     /// Optional lines are omitted entirely when their arg is absent, but the
     /// required schedule line and the full always-rules / workflow still render.
     #[test]
     fn minimal_args_omit_optional_lines() {
-        let monday = NaiveDate::from_ymd_opt(2026, 5, 25).unwrap();
-        let rendered = render(monday, &minimal_args());
+        let (monday, sunday) = week_bounds(NaiveDate::from_ymd_opt(2026, 5, 25).unwrap()).unwrap();
+        let rendered = render(monday, sunday, &minimal_args());
 
         assert!(rendered.contains("- Family schedule: Normal week, everyone home.\n"));
         assert!(!rendered.contains("Ingredients to use up"));
@@ -182,25 +191,27 @@ All dates are YYYY-MM-DD.";
     /// Whitespace-only optional values are treated as absent.
     #[test]
     fn blank_optional_is_omitted() {
-        let monday = NaiveDate::from_ymd_opt(2026, 5, 25).unwrap();
+        let (monday, sunday) = week_bounds(NaiveDate::from_ymd_opt(2026, 5, 25).unwrap()).unwrap();
         let mut args = minimal_args();
         args.style_or_season = Some("   ".to_string());
-        assert!(!render(monday, &args).contains("Style / season"));
+        assert!(!render(monday, sunday, &args).contains("Style / season"));
     }
 
     #[test]
     fn monday_stays_put() {
         let monday = NaiveDate::from_ymd_opt(2026, 5, 25).unwrap(); // Monday
-        assert_eq!(monday_of_week(monday), monday);
+        assert_eq!(
+            week_bounds(monday),
+            Some((monday, NaiveDate::from_ymd_opt(2026, 5, 31).unwrap()))
+        );
     }
 
     #[test]
     fn midweek_snaps_back_to_monday() {
         let wednesday = NaiveDate::from_ymd_opt(2026, 5, 27).unwrap();
-        assert_eq!(
-            monday_of_week(wednesday),
-            NaiveDate::from_ymd_opt(2026, 5, 25).unwrap()
-        );
+        let (monday, sunday) = week_bounds(wednesday).unwrap();
+        assert_eq!(monday, NaiveDate::from_ymd_opt(2026, 5, 25).unwrap());
+        assert_eq!(sunday, NaiveDate::from_ymd_opt(2026, 5, 31).unwrap());
     }
 
     #[test]
@@ -209,15 +220,25 @@ All dates are YYYY-MM-DD.";
         // preceding Monday, not the next day.
         let sunday = NaiveDate::from_ymd_opt(2026, 5, 24).unwrap();
         assert_eq!(
-            monday_of_week(sunday),
+            week_bounds(sunday).unwrap().0,
             NaiveDate::from_ymd_opt(2026, 5, 18).unwrap()
         );
     }
 
     #[test]
+    fn week_bounds_none_near_chrono_limits() {
+        // Dates within a few days of chrono's range would overflow the week
+        // arithmetic; week_bounds reports None so the caller can error cleanly
+        // instead of panicking. MAX is a Monday (sunday = MAX + 6 overflows);
+        // MIN is a Thursday (monday = MIN - 3 underflows).
+        assert_eq!(week_bounds(NaiveDate::MAX), None);
+        assert_eq!(week_bounds(NaiveDate::MIN), None);
+    }
+
+    #[test]
     fn rendered_range_runs_monday_through_sunday() {
-        let monday = NaiveDate::from_ymd_opt(2026, 5, 25).unwrap();
-        let rendered = render(monday, &minimal_args());
+        let (monday, sunday) = week_bounds(NaiveDate::from_ymd_opt(2026, 5, 25).unwrap()).unwrap();
+        let rendered = render(monday, sunday, &minimal_args());
         assert!(rendered.contains("week of Monday 2026-05-25 through Sunday 2026-05-31"));
         assert!(rendered.contains("get_shopping_list over 2026-05-25 to 2026-05-31"));
     }

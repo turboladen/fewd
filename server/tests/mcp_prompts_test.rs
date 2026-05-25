@@ -208,8 +208,38 @@ async fn prompts_get_rejects_bad_date() {
     )
     .await;
 
+    // Assert it's an actual JSON-RPC error envelope (invalid_params = -32602),
+    // not a 200 with a rendered prompt that happens to contain these tokens.
+    assert!(
+        body.contains("\"error\"") && body.contains("-32602"),
+        "bad date must return a JSON-RPC invalid_params error, not a rendered prompt; got: {body}"
+    );
     assert!(
         body.contains("week_start_date") && body.contains("YYYY-MM-DD"),
-        "bad date must surface an actionable error naming the field and format; got: {body}"
+        "the error must name the field and the expected format; got: {body}"
+    );
+}
+
+/// A syntactically valid but extreme year (near chrono's representable range)
+/// would overflow the week arithmetic. The handler must return a graceful
+/// error envelope rather than panicking the request.
+#[tokio::test]
+async fn prompts_get_rejects_out_of_range_date() {
+    let (db, token) = setup_db_with_token().await;
+    let app = mcp::router(db);
+    let bearer = format!("Bearer {token}");
+    let session_id = handshake(&app, &bearer).await;
+
+    let body = post_rpc(
+        &app,
+        &bearer,
+        &session_id,
+        r#"{"jsonrpc":"2.0","method":"prompts/get","id":5,"params":{"name":"weekly_dinner_plan","arguments":{"week_start_date":"+262142-12-31","family_schedule":"whatever"}}}"#,
+    )
+    .await;
+
+    assert!(
+        body.contains("\"error\"") && body.contains("-32602"),
+        "an out-of-range date must return a graceful invalid_params error, not panic; got: {body}"
     );
 }
