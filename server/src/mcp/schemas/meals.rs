@@ -495,6 +495,30 @@ mod tests {
     }
 
     #[test]
+    fn create_meal_input_honors_explicit_servings_count_from_json() {
+        // The default must never clobber a caller-supplied value: a partial
+        // serving (0.5) sent in JSON must survive unchanged to the DTO.
+        let input: CreateMealInput = serde_json::from_str(
+            r#"{
+                "date": "2026-04-22",
+                "meal_type": "dinner",
+                "servings": [
+                    {"kind": "recipe", "person_name": "Alice", "recipe_slug": "carbonara", "servings_count": 0.5}
+                ]
+            }"#,
+        )
+        .expect("payload with explicit servings_count should deserialize");
+
+        let dto = create_meal_input_to_dto(input, &mk_lookups()).unwrap();
+        match &dto.servings[0] {
+            PersonServingDto::Recipe { servings_count, .. } => {
+                assert_eq!(*servings_count, 0.5);
+            }
+            _ => panic!("expected Recipe serving"),
+        }
+    }
+
+    #[test]
     fn create_meal_input_normalizes_meal_type_to_title_case() {
         // Title Case matches the web UI convention (MealPlanner.tsx does
         // strict `meal_type === 'Dinner'` equality).
