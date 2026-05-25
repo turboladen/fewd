@@ -191,6 +191,18 @@ Fully quit and relaunch Claude Desktop. You should see fewd's tools in the MCP i
 
 **Troubleshooting `Forbidden: Host header is not allowed` (HTTP 403)** — the MCP transport ships with DNS-rebinding protection that allowlists the `Host` header, defaulting to `localhost`/`127.0.0.1`/`::1` only. When Claude Desktop reaches the server at, say, `http://dietpi.local:3000/mcp`, the `Host` header is `dietpi.local:3000` and the server rejects it. Set `MCP_ALLOWED_HOSTS` to whatever address the client uses — that may be an mDNS/DNS name (`dietpi.local`, `homeserver`) **or** a raw IP literal (`192.168.1.42`, `[fe80::1]`). For systemd deployments that's an `Environment=` line in `deploy/fewd.service`. Multiple entries go comma-separated; a bare entry matches any port, `entry:port` matches one port.
 
+### Weekly dinner-planning skill (Claude Desktop)
+
+fewd ships a companion [Agent Skill](https://www.anthropic.com/news/skills) in `skills/weekly-dinner-plan/` that runs the household's canonical weekly dinner-planning workflow on top of the MCP tools above. It mirrors the server's `weekly_dinner_plan` MCP prompt — useful because Claude Desktop advertises MCP prompts but doesn't reliably surface them in its UI — and additionally prompts you for any planning detail you left out (ingredients to use up, seasonal style, effort limits, …).
+
+**Import it into Claude Desktop:**
+
+1. Enable the fewd MCP connector first (see _Enable in Claude Desktop_ above) — the skill calls fewd's tools, so the connector has to be connected.
+2. In Claude's **Settings → Capabilities**, turn on **Skills**. They run in the code-execution sandbox, so that capability must be enabled too; on Team/Enterprise plans an admin has to enable Skills org-wide first.
+3. Add `skills/weekly-dinner-plan/` as a custom skill — zip the folder (with `SKILL.md` at its root) and upload it from the Skills settings. Skills are account-level and shared across Claude.ai, Desktop, and Code. The exact upload affordance moves between versions, so see Anthropic's [Agent Skills docs](https://www.anthropic.com/news/skills) for the current steps.
+
+Then just ask something like "plan dinners for this week" — the skill triggers on weekly meal-planning requests and runs the propose → confirm → schedule → shopping-list → fridge-printable flow, asking about any missing planning detail before it commits anything.
+
 ### Inspect and test with MCP Inspector
 
 For local development — exploring tool surfaces, eyeballing JSON-RPC frames, sanity-checking a change before opening a PR — the official [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is the right tool. It's a hosted web UI that speaks Streamable HTTP and lets you call tools by hand. **It is not a substitute for the automated test suite** (see `server/tests/service_tests.rs` and `server/tests/mcp_auth_plumbing_test.rs`); reach for it when you want to poke at a running server or diagnose a failing test, not to verify a PR.
