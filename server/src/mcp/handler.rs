@@ -4,12 +4,16 @@ use std::sync::Arc;
 use rmcp::handler::server::common::FromContextPart;
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::{
-    AnnotateAble, CallToolResult, Content, Implementation, ListResourcesResult,
-    PaginatedRequestParams, RawResource, ReadResourceRequestParams, ReadResourceResult, Resource,
-    ResourceContents, ResourcesCapability, ServerCapabilities, ServerInfo, ToolsCapability,
+    AnnotateAble, CallToolResult, Content, GetPromptRequestParams, GetPromptResult, Implementation,
+    ListPromptsResult, ListResourcesResult, PaginatedRequestParams, PromptsCapability, RawResource,
+    ReadResourceRequestParams, ReadResourceResult, Resource, ResourceContents, ResourcesCapability,
+    ServerCapabilities, ServerInfo, ToolsCapability,
 };
 use rmcp::service::RequestContext;
-use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler};
+use rmcp::{
+    prompt_handler, tool, tool_handler, tool_router, ErrorData as McpError, RoleServer,
+    ServerHandler,
+};
 use sea_orm::DatabaseConnection;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -647,11 +651,13 @@ impl FewdMcp {
 }
 
 #[tool_handler]
+#[prompt_handler]
 impl ServerHandler for FewdMcp {
     fn get_info(&self) -> ServerInfo {
         let mut capabilities = ServerCapabilities::default();
         capabilities.tools = Some(ToolsCapability::default());
         capabilities.resources = Some(ResourcesCapability::default());
+        capabilities.prompts = Some(PromptsCapability::default());
         ServerInfo::new(capabilities)
             .with_server_info(Implementation::new("fewd-mcp", env!("CARGO_PKG_VERSION")))
             .with_instructions(
