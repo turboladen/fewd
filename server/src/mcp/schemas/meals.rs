@@ -72,7 +72,9 @@ pub enum ServingInput {
         recipe_slug: String,
         /// How many recipe-servings this person is eating (e.g. 1.0 for a
         /// standard serving, 0.5 for half). The shopping-list aggregator
-        /// scales ingredients by this factor.
+        /// scales ingredients by this factor. Defaults to 1.0 (one standard
+        /// serving) when omitted.
+        #[serde(default = "one_f64")]
         servings_count: f64,
         #[serde(default)]
         notes: Option<String>,
@@ -84,6 +86,12 @@ pub enum ServingInput {
         #[serde(default)]
         notes: Option<String>,
     },
+}
+
+/// Serde default for `ServingInput::Recipe::servings_count`: one standard
+/// serving, the overwhelming common case for this household.
+fn one_f64() -> f64 {
+    1.0
 }
 
 // ─── Read side: meal → MealBrief ────────────────────────────────
@@ -459,6 +467,31 @@ mod tests {
             }],
         };
         assert!(create_meal_input_to_dto(input, &mk_lookups()).is_err());
+    }
+
+    #[test]
+    fn create_meal_input_defaults_omitted_servings_count_to_one() {
+        // Weak models routinely omit servings_count. Deserializing from JSON
+        // (not a struct literal — literals can't exercise serde defaults)
+        // must fill it with 1.0 and survive the full input→dto conversion.
+        let input: CreateMealInput = serde_json::from_str(
+            r#"{
+                "date": "2026-04-22",
+                "meal_type": "dinner",
+                "servings": [
+                    {"kind": "recipe", "person_name": "Alice", "recipe_slug": "carbonara"}
+                ]
+            }"#,
+        )
+        .expect("minimal payload without servings_count should deserialize");
+
+        let dto = create_meal_input_to_dto(input, &mk_lookups()).unwrap();
+        match &dto.servings[0] {
+            PersonServingDto::Recipe { servings_count, .. } => {
+                assert_eq!(*servings_count, 1.0);
+            }
+            _ => panic!("expected Recipe serving"),
+        }
     }
 
     #[test]
