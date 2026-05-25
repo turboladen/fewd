@@ -243,3 +243,31 @@ async fn prompts_get_rejects_out_of_range_date() {
         "an out-of-range date must return a graceful invalid_params error, not panic; got: {body}"
     );
 }
+
+/// `family_schedule` is required; a whitespace-only value (which serde accepts
+/// as "present") must be rejected with an actionable error rather than
+/// rendering a blank schedule line.
+#[tokio::test]
+async fn prompts_get_rejects_blank_family_schedule() {
+    let (db, token) = setup_db_with_token().await;
+    let app = mcp::router(db);
+    let bearer = format!("Bearer {token}");
+    let session_id = handshake(&app, &bearer).await;
+
+    let body = post_rpc(
+        &app,
+        &bearer,
+        &session_id,
+        r#"{"jsonrpc":"2.0","method":"prompts/get","id":6,"params":{"name":"weekly_dinner_plan","arguments":{"week_start_date":"2026-05-25","family_schedule":"   "}}}"#,
+    )
+    .await;
+
+    assert!(
+        body.contains("\"error\"") && body.contains("-32602"),
+        "a blank family_schedule must return invalid_params; got: {body}"
+    );
+    assert!(
+        body.contains("family_schedule"),
+        "the error must name the offending field; got: {body}"
+    );
+}

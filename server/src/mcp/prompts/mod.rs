@@ -39,6 +39,15 @@ impl FewdMcp {
         &self,
         Parameters(args): Parameters<WeeklyDinnerPlanArgs>,
     ) -> Result<GetPromptResult, McpError> {
+        // `family_schedule` is required, but serde only enforces presence —
+        // an empty/whitespace-only value would render a useless blank schedule
+        // line. Reject it with the same actionable error other write paths use.
+        if args.family_schedule.trim().is_empty() {
+            return Err(McpError::invalid_params(
+                InputError::EmptyName("family_schedule").to_string(),
+                None,
+            ));
+        }
         let date =
             chrono::NaiveDate::parse_from_str(&args.week_start_date, "%Y-%m-%d").map_err(|_| {
                 McpError::invalid_params(
