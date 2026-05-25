@@ -70,7 +70,32 @@ impl DateRangeParams {
     }
 }
 
-/// Confirm a date string parses as YYYY-MM-DD. Returns the parsed
+/// Parse a strict, canonical `YYYY-MM-DD` date: exactly a 4-digit year,
+/// 2-digit month, and 2-digit day separated by `-`.
+///
+/// chrono's `%Y-%m-%d` parse is too lenient on its own — it accepts non-padded
+/// (`2026-5-3`), short-year (`5-1-1`), and even sign-prefixed (`-0001-01-01`,
+/// which chrono parses *and* re-formats symmetrically) forms that every date
+/// field documents as invalid. So we gate on the exact 4-2-2 ASCII-digit shape
+/// first, then parse to reject impossible calendar dates (`2026-02-30`).
+/// Returns `None` (rather than a concrete error) so callers can attach their
+/// own error type — `InputError` here, a serde `D::Error` in the printable
+/// overlay deserializer.
+pub(super) fn parse_canonical_date(value: &str) -> Option<NaiveDate> {
+    let bytes = value.as_bytes();
+    let canonical_shape = bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[..4].iter().all(u8::is_ascii_digit)
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
+        && bytes[8..].iter().all(u8::is_ascii_digit);
+    if !canonical_shape {
+        return None;
+    }
+    NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()
+}
+
+/// Confirm a date string is a canonical YYYY-MM-DD date. Returns the parsed
 /// `NaiveDate` so callers can do further range checks without re-parsing.
 /// Used by tool handlers to surface bad date formats as a tool-level
 /// error rather than letting them reach the service layer (which
@@ -79,7 +104,7 @@ pub(super) fn validate_date_yyyy_mm_dd(
     value: &str,
     field: &'static str,
 ) -> Result<NaiveDate, InputError> {
-    NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| InputError::InvalidDate {
+    parse_canonical_date(value).ok_or_else(|| InputError::InvalidDate {
         field,
         value: value.to_string(),
     })
@@ -356,6 +381,69 @@ mod tests {
     fn parse_optional_json_errors_on_invalid_content() {
         let r: Result<Option<Vec<String>>, _> = parse_optional_json(Some("not json"), "tags");
         assert!(r.is_err());
+    }
+
+    // ─── Strict canonical YYYY-MM-DD enforcement (fewd-4uf) ──────
+    //
+    // chrono's `%Y-%m-%d` parse is lenient: it accepts non-padded
+    // (`2026-5-3`) and short-year (`5-1-1`) forms. Every date field is
+    // documented as strict YYYY-MM-DD, so reject anything that isn't the
+    // canonical zero-padded 4-2-2 shape — while still rejecting
+    // calendar-impossible dates that happen to match that shape.
+
+    #[test]
+    fn validate_date_accepts_canonical_form() {
+        let d = validate_date_yyyy_mm_dd("2026-05-03", "date").unwrap();
+        assert_eq!(d, NaiveDate::from_ymd_opt(2026, 5, 3).unwrap());
+    }
+
+    #[test]
+    fn validate_date_rejects_non_padded_month_and_day() {
+        assert!(validate_date_yyyy_mm_dd("2026-5-3", "date").is_err());
+    }
+
+    #[test]
+    fn validate_date_rejects_short_year() {
+        assert!(validate_date_yyyy_mm_dd("5-1-1", "date").is_err());
+    }
+
+    #[test]
+    fn validate_date_rejects_signed_year() {
+        // chrono parses AND re-formats a leading sign symmetrically, so a
+        // round-trip check alone would accept this non-canonical 11-char form.
+        // The 4-2-2 ASCII-digit shape gate is what rejects it.
+        assert!(validate_date_yyyy_mm_dd("-0001-01-01", "date").is_err());
+        assert!(validate_date_yyyy_mm_dd("+2026-05-03", "date").is_err());
+    }
+
+    #[test]
+    fn validate_date_rejects_five_digit_year() {
+        // chrono parses years beyond 9999, but the canonical contract is a
+        // 4-digit year; the len-10 shape gate rejects the extra width
+        // (Copilot review on PR #50).
+        assert!(validate_date_yyyy_mm_dd("10000-01-01", "date").is_err());
+    }
+
+    #[test]
+    fn validate_date_rejects_missing_separators() {
+        assert!(validate_date_yyyy_mm_dd("20260101", "date").is_err());
+    }
+
+    #[test]
+    fn validate_date_rejects_wrong_separators() {
+        assert!(validate_date_yyyy_mm_dd("2026/05/03", "date").is_err());
+    }
+
+    #[test]
+    fn validate_date_rejects_canonical_shape_with_impossible_day() {
+        // Matches the 4-2-2 shape but isn't a real date — a byte-shape-only
+        // check would wrongly accept this; parsing must still run.
+        assert!(validate_date_yyyy_mm_dd("2026-02-30", "date").is_err());
+    }
+
+    #[test]
+    fn validate_date_rejects_canonical_shape_with_impossible_month() {
+        assert!(validate_date_yyyy_mm_dd("2026-13-01", "date").is_err());
     }
 
     #[test]

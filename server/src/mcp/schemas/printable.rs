@@ -262,7 +262,10 @@ where
 {
     use serde::de::Error;
     let s = String::deserialize(deserializer)?;
-    NaiveDate::parse_from_str(&s, "%Y-%m-%d").map_err(|_| {
+    // Shares the strict canonical check with `validate_date_yyyy_mm_dd` so
+    // the overlay date can't drift to a non-canonical form (`2026-5-3`) the
+    // rest of the date surface rejects (fewd-4uf).
+    super::common::parse_canonical_date(&s).ok_or_else(|| {
         D::Error::custom(format!(
             "day_overlays[i].date must be YYYY-MM-DD (got '{s}')"
         ))
@@ -534,6 +537,19 @@ mod tests {
         assert!(
             err.to_string().contains("YYYY-MM-DD"),
             "deserialize error should mention the format: {err}"
+        );
+    }
+
+    #[test]
+    fn day_overlay_deserialize_rejects_non_canonical_date() {
+        // Non-padded but chrono-parseable (`2026-5-3`). Shares the strict
+        // canonical check with `validate_date_yyyy_mm_dd` (fewd-4uf) so the
+        // overlay date can't drift to a non-canonical form the helper rejects.
+        let raw = serde_json::json!({ "date": "2026-5-3" });
+        let err = serde_json::from_value::<DayOverlay>(raw).unwrap_err();
+        assert!(
+            err.to_string().contains("day_overlays"),
+            "deserialize error should name the field: {err}"
         );
     }
 
