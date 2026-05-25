@@ -417,6 +417,14 @@ mod tests {
     }
 
     #[test]
+    fn validate_date_rejects_five_digit_year() {
+        // chrono parses years beyond 9999, but the canonical contract is a
+        // 4-digit year; the len-10 shape gate rejects the extra width
+        // (Copilot review on PR #50).
+        assert!(validate_date_yyyy_mm_dd("10000-01-01", "date").is_err());
+    }
+
+    #[test]
     fn validate_date_rejects_missing_separators() {
         assert!(validate_date_yyyy_mm_dd("20260101", "date").is_err());
     }
