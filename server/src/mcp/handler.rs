@@ -2104,13 +2104,14 @@ mod tests {
                 .find(|t| t.name == name)
                 .unwrap_or_else(|| panic!("{name} tool missing"));
             let desc = tool.description.as_deref().unwrap_or("");
-            desc.split("Example: ")
-                .nth(1)
-                .unwrap_or_else(|| {
-                    panic!("{name}: description must end with an `Example: {{…}}` payload")
-                })
-                .trim()
-                .to_string()
+            // Split at the LAST `Example: ` so a description that mentions the
+            // word earlier in its prose still yields the trailing payload;
+            // `rsplit_once` returns None (→ clear panic) when the marker is
+            // absent entirely.
+            let (_, example) = desc.rsplit_once("Example: ").unwrap_or_else(|| {
+                panic!("{name}: description must end with an `Example: {{…}}` payload")
+            });
+            example.trim().to_string()
         };
 
         serde_json::from_str::<CreateMealInput>(&example("create_meal"))
