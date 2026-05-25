@@ -70,17 +70,29 @@ impl DateRangeParams {
     }
 }
 
-/// Parse a strict, canonical zero-padded `YYYY-MM-DD` date.
+/// Parse a strict, canonical `YYYY-MM-DD` date: exactly a 4-digit year,
+/// 2-digit month, and 2-digit day separated by `-`.
 ///
-/// chrono's `%Y-%m-%d` parse is lenient — it accepts non-padded (`2026-5-3`)
-/// and short-year (`5-1-1`) forms that every date field documents as invalid.
-/// We re-format the parsed date and require it to round-trip to the canonical
-/// 4-2-2 shape, rejecting anything that doesn't. Returns `None` (rather than a
-/// concrete error) so callers can attach their own error type — `InputError`
-/// here, a serde `D::Error` in the printable overlay deserializer.
+/// chrono's `%Y-%m-%d` parse is too lenient on its own — it accepts non-padded
+/// (`2026-5-3`), short-year (`5-1-1`), and even sign-prefixed (`-0001-01-01`,
+/// which chrono parses *and* re-formats symmetrically) forms that every date
+/// field documents as invalid. So we gate on the exact 4-2-2 ASCII-digit shape
+/// first, then parse to reject impossible calendar dates (`2026-02-30`).
+/// Returns `None` (rather than a concrete error) so callers can attach their
+/// own error type — `InputError` here, a serde `D::Error` in the printable
+/// overlay deserializer.
 pub(super) fn parse_canonical_date(value: &str) -> Option<NaiveDate> {
-    let parsed = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
-    (parsed.format("%Y-%m-%d").to_string() == value).then_some(parsed)
+    let bytes = value.as_bytes();
+    let canonical_shape = bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[..4].iter().all(u8::is_ascii_digit)
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
+        && bytes[8..].iter().all(u8::is_ascii_digit);
+    if !canonical_shape {
+        return None;
+    }
+    NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()
 }
 
 /// Confirm a date string is a canonical YYYY-MM-DD date. Returns the parsed
@@ -393,6 +405,15 @@ mod tests {
     #[test]
     fn validate_date_rejects_short_year() {
         assert!(validate_date_yyyy_mm_dd("5-1-1", "date").is_err());
+    }
+
+    #[test]
+    fn validate_date_rejects_signed_year() {
+        // chrono parses AND re-formats a leading sign symmetrically, so a
+        // round-trip check alone would accept this non-canonical 11-char form.
+        // The 4-2-2 ASCII-digit shape gate is what rejects it.
+        assert!(validate_date_yyyy_mm_dd("-0001-01-01", "date").is_err());
+        assert!(validate_date_yyyy_mm_dd("+2026-05-03", "date").is_err());
     }
 
     #[test]
