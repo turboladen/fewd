@@ -2096,6 +2096,11 @@ mod tests {
                 "paleo",
                 "low-sodium",
                 "high-protein",
+                "whole30",
+                "mediterranean",
+                "low-fodmap",
+                "halal",
+                "kosher",
             ]
         );
         for (tag, meaning) in DIET_TAGS {

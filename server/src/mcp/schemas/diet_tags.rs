@@ -65,6 +65,26 @@ pub const DIET_TAGS: &[(&str, &str)] = &[
         "high-protein",
         "Notably high protein per serving; suits muscle-gain or satiety goals.",
     ),
+    (
+        "whole30",
+        "No added sugar, grains, dairy, legumes, or alcohol (Whole30 elimination template).",
+    ),
+    (
+        "mediterranean",
+        "Emphasizes vegetables, whole grains, fish, and olive oil; minimal red meat.",
+    ),
+    (
+        "low-fodmap",
+        "Low in fermentable carbs (FODMAPs) that can trigger IBS symptoms.",
+    ),
+    (
+        "halal",
+        "Permissible under Islamic dietary law (no pork or alcohol; meat slaughtered halal).",
+    ),
+    (
+        "kosher",
+        "Conforms to Jewish dietary law (no pork or shellfish; meat and dairy not mixed).",
+    ),
 ];
 
 /// Materialize the vocabulary into the serializable shape the

@@ -137,19 +137,24 @@ The MCP endpoint is mounted at `/mcp` on the same port as the web UI. Transport 
 
 `Person.dietary_goals` is free-form text ("low-carb", "pescatarian", "trying to eat more veggies") and recipe `tags` are free-form too, so there's no structured diet field to match against. Instead, fewd publishes a **conventional diet-tag vocabulary** that the LLM translates free-form goals into, then filters `search_recipes` by `tags`. The tool's own `list_diet_tags` description (and the `fewd://diet-tags` resource) are the machine-discoverable source of truth; this table is the human mirror.
 
-| Tag            | Meaning                                                                |
-| -------------- | ---------------------------------------------------------------------- |
-| `vegetarian`   | No meat, poultry, or seafood. May include dairy and eggs.              |
-| `vegan`        | No animal products at all — no meat, dairy, eggs, or honey.            |
-| `pescatarian`  | No meat or poultry, but seafood is allowed.                            |
-| `gluten-free`  | Contains no wheat, barley, rye, or other gluten sources.               |
-| `dairy-free`   | Contains no milk, cheese, butter, or other dairy.                      |
-| `nut-free`     | Contains no tree nuts or peanuts.                                      |
-| `low-carb`     | Low in carbohydrates; minimizes grains, sugars, and starches.          |
-| `keto`         | Very low carb, high fat — suitable for a ketogenic diet.               |
-| `paleo`        | No grains, legumes, dairy, or refined sugar (paleo template).          |
-| `low-sodium`   | Prepared with little added salt; suitable for sodium-restricted diets. |
-| `high-protein` | Notably high protein per serving; suits muscle-gain or satiety goals.  |
+| Tag             | Meaning                                                                             |
+| --------------- | ----------------------------------------------------------------------------------- |
+| `vegetarian`    | No meat, poultry, or seafood. May include dairy and eggs.                           |
+| `vegan`         | No animal products at all — no meat, dairy, eggs, or honey.                         |
+| `pescatarian`   | No meat or poultry, but seafood is allowed.                                         |
+| `gluten-free`   | Contains no wheat, barley, rye, or other gluten sources.                            |
+| `dairy-free`    | Contains no milk, cheese, butter, or other dairy.                                   |
+| `nut-free`      | Contains no tree nuts or peanuts.                                                   |
+| `low-carb`      | Low in carbohydrates; minimizes grains, sugars, and starches.                       |
+| `keto`          | Very low carb, high fat — suitable for a ketogenic diet.                            |
+| `paleo`         | No grains, legumes, dairy, or refined sugar (paleo template).                       |
+| `low-sodium`    | Prepared with little added salt; suitable for sodium-restricted diets.              |
+| `high-protein`  | Notably high protein per serving; suits muscle-gain or satiety goals.               |
+| `whole30`       | No added sugar, grains, dairy, legumes, or alcohol (Whole30 elimination template).  |
+| `mediterranean` | Emphasizes vegetables, whole grains, fish, and olive oil; minimal red meat.         |
+| `low-fodmap`    | Low in fermentable carbs (FODMAPs) that can trigger IBS symptoms.                   |
+| `halal`         | Permissible under Islamic dietary law (no pork or alcohol; meat slaughtered halal). |
+| `kosher`        | Conforms to Jewish dietary law (no pork or shellfish; meat and dairy not mixed).    |
 
 Enforcement is **soft**: `create_recipe` accepts any tags, but its description encourages applying these when a recipe qualifies. Recipes authored before this convention won't carry diet tags until re-tagged — apply tags going forward (or re-tag via `create_recipe` edits) for the catalog to narrow well by diet.
 
