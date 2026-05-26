@@ -119,17 +119,39 @@ The MCP endpoint is mounted at `/mcp` on the same port as the web UI. Transport 
 | Tool                                                   | Purpose                                                                                                                                                                                                                                                                                            |
 | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `list_curated_recipes`, `search_recipes`, `get_recipe` | Discover existing recipes. `list_curated_recipes` returns a ≤30-row favorites/recent/top-rated shortlist; `search_recipes` requires at least one filter (query, tags, max_total_time_minutes, min_rating, is_favorite, unplanned_since_days, excludes_for_persons, includes_ingredient_substrings) |
+| `list_diet_tags`                                       | Canonical diet-tag vocabulary (tag + meaning). Translate a person's free-form `dietary_goals` into these, then filter `search_recipes` by `tags`. Mirrors the `fewd://diet-tags` resource. See [Diet tags](#diet-tags)                                                                             |
 | `list_people`                                          | Active family members with dietary goals, dislikes, favorites                                                                                                                                                                                                                                      |
 | `get_family_overview`                                  | Markdown summary of all active family members in one block (tool mirror of the resource)                                                                                                                                                                                                           |
 | `list_meals(start_date, end_date)`                     | Meals already scheduled in a range                                                                                                                                                                                                                                                                 |
 | `get_shopping_list(start_date, end_date)`              | Aggregated ingredient list with unit conversion                                                                                                                                                                                                                                                    |
-| `create_recipe(...)`                                   | Add a new recipe. Slug is auto-generated from the name                                                                                                                                                                                                                                             |
+| `create_recipe(...)`                                   | Add a new recipe. Slug is auto-generated from the name. Apply applicable diet tags (see `list_diet_tags`) so the recipe is discoverable by dietary goal                                                                                                                                            |
 | `create_meal(...)`                                     | Schedule a meal — assigns people (by name) to a recipe (by slug) or an ad-hoc ingredient list                                                                                                                                                                                                      |
 | `whoami`                                               | Returns the authenticated family member's name. Useful for verifying your client config                                                                                                                                                                                                            |
 
-### Resource
+### Resources
 
 - `fewd://family/overview` — Markdown summary of every active family member. Clients that auto-load MCP resources will pick this up at conversation start. Mirrored by the `get_family_overview` tool above for clients (e.g. Claude Desktop) that surface resources for user attachment but don't let the LLM fetch them autonomously.
+- `fewd://diet-tags` — Markdown list of the canonical diet-tag vocabulary. Mirrored by the `list_diet_tags` tool above.
+
+### Diet tags
+
+`Person.dietary_goals` is free-form text ("low-carb", "pescatarian", "trying to eat more veggies") and recipe `tags` are free-form too, so there's no structured diet field to match against. Instead, fewd publishes a **conventional diet-tag vocabulary** that the LLM translates free-form goals into, then filters `search_recipes` by `tags`. The tool's own `list_diet_tags` description (and the `fewd://diet-tags` resource) are the machine-discoverable source of truth; this table is the human mirror.
+
+| Tag            | Meaning                                                                |
+| -------------- | ---------------------------------------------------------------------- |
+| `vegetarian`   | No meat, poultry, or seafood. May include dairy and eggs.              |
+| `vegan`        | No animal products at all — no meat, dairy, eggs, or honey.            |
+| `pescatarian`  | No meat or poultry, but seafood is allowed.                            |
+| `gluten-free`  | Contains no wheat, barley, rye, or other gluten sources.               |
+| `dairy-free`   | Contains no milk, cheese, butter, or other dairy.                      |
+| `nut-free`     | Contains no tree nuts or peanuts.                                      |
+| `low-carb`     | Low in carbohydrates; minimizes grains, sugars, and starches.          |
+| `keto`         | Very low carb, high fat — suitable for a ketogenic diet.               |
+| `paleo`        | No grains, legumes, dairy, or refined sugar (paleo template).          |
+| `low-sodium`   | Prepared with little added salt; suitable for sodium-restricted diets. |
+| `high-protein` | Notably high protein per serving; suits muscle-gain or satiety goals.  |
+
+Enforcement is **soft**: `create_recipe` accepts any tags, but its description encourages applying these when a recipe qualifies. Recipes authored before this convention won't carry diet tags until re-tagged — apply tags going forward (or re-tag via `create_recipe` edits) for the catalog to narrow well by diet.
 
 ### Authentication and threat model
 

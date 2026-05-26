@@ -24,6 +24,7 @@
 //! `use super::schemas::{…}` import.
 
 mod common;
+pub(crate) mod diet_tags;
 pub(crate) mod errors;
 mod meals;
 mod people;
@@ -37,6 +38,7 @@ mod shopping;
 // is the exception: the renderer lives in `services::printable_service` and
 // imports the input types directly through this re-export.
 pub(super) use common::{DateRangeParams, EmptyParams, GetRecipeParams};
+pub(super) use diet_tags::{diet_tags_payload, render_diet_tags_markdown};
 pub(super) use errors::CreateMealError;
 pub(super) use meals::{create_meal_input_to_dto, meal_to_brief, CreateMealInput};
 pub(super) use people::{
