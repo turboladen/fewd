@@ -7,6 +7,8 @@
 //!   bidirectional value types (`IngredientOut`, `TimeOut`, …), and the
 //!   low-level conversion helpers both directions use.
 //! - [`recipes`] — recipe list/full payloads and `create_recipe` input.
+//! - [`diet_tags`] — canonical diet-tag vocabulary backing the
+//!   `list_diet_tags` tool and the `fewd://diet-tags` resource.
 //! - [`meals`] — meal list payload, `create_meal` input, and the
 //!   slug/name → id resolvers.
 //! - [`people`] — family-member payload + the `fewd://family/overview`

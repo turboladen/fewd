@@ -244,4 +244,8 @@ async fn read_resource_unknown_uri_returns_invalid_params() {
         body.contains("fewd://does-not-exist"),
         "the error must echo the offending uri; got: {body}"
     );
+    assert!(
+        body.contains("resources/list"),
+        "the error must point at resources/list so the caller can recover; got: {body}"
+    );
 }

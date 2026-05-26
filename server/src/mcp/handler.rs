@@ -754,7 +754,11 @@ impl ServerHandler for FewdMcp {
             DIET_TAGS_URI => render_diet_tags_markdown(),
             other => {
                 return Err(McpError::invalid_params(
-                    format!("unknown resource uri: {other}"),
+                    format!(
+                        "unknown resource uri: {other}. Known resources: \
+                         {FAMILY_OVERVIEW_URI}, {DIET_TAGS_URI}. Call resources/list \
+                         to enumerate them."
+                    ),
                     None,
                 ));
             }
