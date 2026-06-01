@@ -28,7 +28,7 @@ const router = createBrowserRouter([
     path: '/',
     element: <RootLayout />,
     children: [
-      { index: true, element: <Navigate to='/family' replace /> },
+      { index: true, element: <Navigate to='/recipes' replace /> },
       { path: 'family', element: <FamilyManager /> },
       { path: 'meals', element: <Navigate to='/meals/planner' replace /> },
       { path: 'meals/planner', element: <MealPlanner /> },
