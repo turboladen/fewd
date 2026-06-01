@@ -7,6 +7,7 @@ import {
   useTestConnection,
   useTokenUsage,
 } from '../hooks/useSettings'
+import { copyToClipboard } from '../utils/clipboard'
 import { IconCheck, IconChevronDown, IconChevronRight, IconClose, IconRefresh, IconX } from './Icon'
 import { useToast } from './Toast'
 
@@ -348,7 +349,7 @@ function McpTokensSection({
         setRevealed({ personId, personName, plaintext: data.token })
       },
       onError: (err) => {
-        toast(`Failed to provision token: ${String(err)}`)
+        toast(`Failed to provision token: ${String(err)}`, 'error')
       },
     })
   }
@@ -360,7 +361,7 @@ function McpTokensSection({
         setConfirmingRevokeId(null)
       },
       onError: (err) => {
-        toast(`Failed to revoke token: ${String(err)}`)
+        toast(`Failed to revoke token: ${String(err)}`, 'error')
         setConfirmingRevokeId(null)
       },
     })
@@ -369,10 +370,10 @@ function McpTokensSection({
   const handleCopy = async () => {
     if (!revealed) return
     try {
-      await navigator.clipboard.writeText(revealed.plaintext)
+      await copyToClipboard(revealed.plaintext)
       toast('Token copied to clipboard')
     } catch {
-      toast('Copy failed — select the text manually')
+      toast('Copy failed — select the text manually', 'error')
     }
   }
 
