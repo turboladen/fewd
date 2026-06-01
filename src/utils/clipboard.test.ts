@@ -7,22 +7,42 @@ import { copyToClipboard } from './clipboard'
  * must fall back to the legacy execCommand path. See fewd-ejb.
  */
 
+// `Object.defineProperty` overrides are NOT reverted by vi.restoreAllMocks()
+// (that only restores vi.fn/vi.spyOn). Record the original descriptors and
+// restore them ourselves so stubs can't leak between tests or files.
+const overrides: Array<[object, string, PropertyDescriptor | undefined]> = []
+
+function override(obj: object, prop: string, value: unknown) {
+  if (!overrides.some(([o, p]) => o === obj && p === prop)) {
+    overrides.push([obj, prop, Object.getOwnPropertyDescriptor(obj, prop)])
+  }
+  Object.defineProperty(obj, prop, { value, configurable: true })
+}
+
 function setSecureContext(value: boolean) {
-  Object.defineProperty(window, 'isSecureContext', { value, configurable: true })
+  override(window, 'isSecureContext', value)
 }
 
 function setClipboard(value: unknown) {
-  Object.defineProperty(navigator, 'clipboard', { value, configurable: true })
+  override(navigator, 'clipboard', value)
 }
 
 /** jsdom has no execCommand; install a mock and return it for assertions. */
 function setExecCommand(result: boolean) {
   const exec = vi.fn().mockReturnValue(result)
-  Object.defineProperty(document, 'execCommand', { value: exec, configurable: true })
+  override(document, 'execCommand', exec)
   return exec
 }
 
 afterEach(() => {
+  for (const [obj, prop, descriptor] of overrides.reverse()) {
+    if (descriptor) {
+      Object.defineProperty(obj, prop, descriptor)
+    } else {
+      delete (obj as Record<string, unknown>)[prop]
+    }
+  }
+  overrides.length = 0
   vi.restoreAllMocks()
 })
 
@@ -79,5 +99,25 @@ describe('copyToClipboard', () => {
     setExecCommand(false)
 
     await expect(copyToClipboard('secret-token')).rejects.toThrow()
+  })
+
+  it('removes the transient textarea after a successful fallback copy', async () => {
+    setSecureContext(false)
+    setClipboard(undefined)
+    setExecCommand(true)
+
+    await copyToClipboard('secret-token')
+
+    expect(document.querySelector('textarea')).toBeNull()
+  })
+
+  it('removes the transient textarea even when the fallback copy fails', async () => {
+    setSecureContext(false)
+    setClipboard(undefined)
+    setExecCommand(false)
+
+    await expect(copyToClipboard('secret-token')).rejects.toThrow()
+
+    expect(document.querySelector('textarea')).toBeNull()
   })
 })
