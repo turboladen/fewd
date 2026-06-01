@@ -30,15 +30,16 @@ use crate::services::shopping_service::ShoppingService;
 use super::lookups::MealLookups;
 use super::schemas::errors::{InputError, ResolveError};
 use super::schemas::{
-    create_meal_input_to_dto, create_recipe_input_to_dto, meal_to_brief, person_to_prefs,
-    recipe_to_brief, recipe_to_full, render_family_overview, shopping_item_from_dto,
-    update_person_input_to_dto, CreateMealError, CreateMealInput, CreateRecipeInput,
-    DateRangeParams, EmptyParams, GetRecipeParams, ImportRecipeUrlInput, PrintableInput,
-    SearchRecipesParams, UpdatePersonInput,
+    create_meal_input_to_dto, create_recipe_input_to_dto, diet_tags_payload, meal_to_brief,
+    person_to_prefs, recipe_to_brief, recipe_to_full, render_diet_tags_markdown,
+    render_family_overview, shopping_item_from_dto, update_person_input_to_dto, CreateMealError,
+    CreateMealInput, CreateRecipeInput, DateRangeParams, EmptyParams, GetRecipeParams,
+    ImportRecipeUrlInput, PrintableInput, SearchRecipesParams, UpdatePersonInput,
 };
 use super::AuthenticatedPerson;
 
 pub const FAMILY_OVERVIEW_URI: &str = "fewd://family/overview";
+pub const DIET_TAGS_URI: &str = "fewd://diet-tags";
 
 /// Per-call upper bound on the row count any list-returning tool will
 /// surface. Defense-in-depth against an LLM-driven wide query
@@ -113,7 +114,7 @@ impl FewdMcp {
 
     #[tool(
         name = "search_recipes",
-        description = "Find specific recipes when the user names an ingredient, tag, time constraint, rating, or person preference — call BEFORE `create_meal` (to find a slug to schedule) or `create_recipe` (to avoid creating a near-duplicate). Bare calls (no filters / `query='*'`) are rejected — call `list_curated_recipes` for an unfiltered shortlist. Filters: `query` (case-insensitive substring on name); `tags` (case-insensitive exact match, multiple tags = AND); `max_total_time_minutes` (assumes recipe total_time is in minutes — recipes authored in hours won't match, known limitation); `min_rating`; `is_favorite`; `unplanned_since_days`; `excludes_for_persons` (named family members whose dislikes exclude matching recipes — substring match on ingredient names, e.g. 'olive oil' is excluded when a person dislikes 'olive'); `includes_ingredient_substrings` (recipes must contain ALL listed substrings in some ingredient name — case-insensitive, multiple values AND together, possibly across different ingredients; use for 'what can I make with spam?' / 'recipes that use leftover rice' / combine with `tags=[\"dinner\"]` for 'dinner recipes with spam'). Returns brief rows — use `get_recipe` with the slug for full details. Unknown person names return an actionable error pointing at `list_people`.",
+        description = "Find specific recipes when the user names an ingredient, tag, time constraint, rating, or person preference — call BEFORE `create_meal` (to find a slug to schedule) or `create_recipe` (to avoid creating a near-duplicate). Bare calls (no filters / `query='*'`) are rejected — call `list_curated_recipes` for an unfiltered shortlist. Filters: `query` (case-insensitive substring on name); `tags` (case-insensitive exact match, multiple tags = AND); `max_total_time_minutes` (assumes recipe total_time is in minutes — recipes authored in hours won't match, known limitation); `min_rating`; `is_favorite`; `unplanned_since_days`; `excludes_for_persons` (named family members whose dislikes exclude matching recipes — substring match on ingredient names, e.g. 'olive oil' is excluded when a person dislikes 'olive'); `includes_ingredient_substrings` (recipes must contain ALL listed substrings in some ingredient name — case-insensitive, multiple values AND together, possibly across different ingredients; use for 'what can I make with spam?' / 'recipes that use leftover rice' / combine with `tags=[\"dinner\"]` for 'dinner recipes with spam'). Returns brief rows — use `get_recipe` with the slug for full details. Unknown person names return an actionable error pointing at `list_people`. To plan around dietary goals, read each person's free-form `dietary_goals` (via `get_family_overview` / `list_people`), map them to diet tags with `list_diet_tags`, then filter via `tags` — search once per diet constraint, since multiple `tags` AND together (a single multi-tag call narrows hard).",
         input_schema = rmcp::handler::server::common::schema_for_type::<SearchRecipesParams>()
     )]
     async fn search_recipes(
@@ -164,6 +165,21 @@ impl FewdMcp {
             .collect::<Result<Vec<_>, _>>()
             .map_err(internal_error)?;
         tool_json_result(&out)
+    }
+
+    #[tool(
+        name = "list_diet_tags",
+        description = "Translate a family member's free-form dietary goals into the recipe tags `search_recipes` understands — call BEFORE `search_recipes` when planning around diets. Returns the canonical diet-tag vocabulary (each tag with a one-line meaning). Workflow: read each person's `dietary_goals` (via `list_people` / `get_family_overview`), map it onto one or more tags here, then call `search_recipes(tags=[...])` once per constraint — multiple tags AND together, so search per-person-constraint and intersect the results yourself rather than one over-narrow multi-tag call. Apply the same tags on `create_recipe` so new recipes are discoverable this way. Equivalent to the `fewd://diet-tags` resource.",
+        input_schema = rmcp::handler::server::common::schema_for_type::<EmptyParams>()
+    )]
+    async fn list_diet_tags(
+        &self,
+        params: LenientParameters<EmptyParams>,
+    ) -> Result<CallToolResult, McpError> {
+        if let Err(e) = params.into_tool_input("list_diet_tags") {
+            return Ok(e);
+        }
+        tool_json_result(&diet_tags_payload())
     }
 
     /// Resolve `excludes_for_persons` (a list of family-member names) into the
@@ -463,7 +479,7 @@ impl FewdMcp {
 
     #[tool(
         name = "create_recipe",
-        description = "Add a new recipe when the user describes one not already in the catalog — call `search_recipes` FIRST to check for duplicates (the LLM should resolve 'this is the same as carbonara, edit that one' rather than create a near-twin). The slug is auto-generated from the name (with a numeric suffix on collisions). Returns the full created recipe. Example: {\"name\":\"Beef Taco Bowls\",\"source\":\"manual\",\"servings\":4,\"instructions\":\"Brown beef; assemble bowls.\",\"ingredients\":[{\"name\":\"ground beef\",\"amount\":{\"kind\":\"single\",\"value\":1.0},\"unit\":\"pound\"}]}",
+        description = "Add a new recipe when the user describes one not already in the catalog — call `search_recipes` FIRST to check for duplicates (the LLM should resolve 'this is the same as carbonara, edit that one' rather than create a near-twin). The slug is auto-generated from the name (with a numeric suffix on collisions). Apply any applicable diet tags from `list_diet_tags` (e.g. `vegetarian`, `gluten-free`, `low-carb`) to `tags` so the recipe is later discoverable by dietary goal via `search_recipes`. Returns the full created recipe. Example: {\"name\":\"Beef Taco Bowls\",\"source\":\"manual\",\"servings\":4,\"instructions\":\"Brown beef; assemble bowls.\",\"ingredients\":[{\"name\":\"ground beef\",\"amount\":{\"kind\":\"single\",\"value\":1.0},\"unit\":\"pound\"}]}",
         input_schema = rmcp::handler::server::common::schema_for_type::<CreateRecipeInput>()
     )]
     async fn create_recipe(
@@ -668,7 +684,9 @@ impl ServerHandler for FewdMcp {
                  (2) PLAN recipes — `list_curated_recipes` for the family shortlist; \
                  `search_recipes` with filters (tags, max time, ingredient, \
                  excludes_for_persons, …) for targeted lookups; `get_recipe` for full \
-                 details on a slug; `create_recipe` only when nothing matches. \
+                 details on a slug; `create_recipe` only when nothing matches. To plan \
+                 around dietary goals, map each member's `dietary_goals` to tags via \
+                 `list_diet_tags`, then filter `search_recipes` by `tags`. \
                  (3) CHECK existing schedule — `list_meals` over the target date range \
                  to see what's already booked and avoid duplicates. \
                  (4) SCHEDULE meals — `create_meal` per date+slot, assigning family \
@@ -693,14 +711,26 @@ impl ServerHandler for FewdMcp {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, McpError> {
-        let mut raw = RawResource::new(FAMILY_OVERVIEW_URI, "family-overview");
-        raw.description = Some(
-            "Markdown summary of every active family member: dietary goals, dislikes, favorites, \
-             and notes. Auto-load at conversation start for context."
-                .into(),
-        );
-        raw.mime_type = Some("text/markdown".into());
-        let resources: Vec<Resource> = vec![raw.no_annotation()];
+        fn md_resource(uri: &str, name: &str, description: &str) -> Resource {
+            let mut raw = RawResource::new(uri, name);
+            raw.description = Some(description.into());
+            raw.mime_type = Some("text/markdown".into());
+            raw.no_annotation()
+        }
+        let resources: Vec<Resource> = vec![
+            md_resource(
+                FAMILY_OVERVIEW_URI,
+                "family-overview",
+                "Markdown summary of every active family member: dietary goals, dislikes, \
+                 favorites, and notes. Auto-load at conversation start for context.",
+            ),
+            md_resource(
+                DIET_TAGS_URI,
+                "diet-tags",
+                "Markdown list of fewd's canonical diet-tag vocabulary (tag + meaning). \
+                 Attach when planning around dietary goals.",
+            ),
+        ];
         Ok(ListResourcesResult::with_all_items(resources))
     }
 
@@ -709,21 +739,30 @@ impl ServerHandler for FewdMcp {
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, McpError> {
-        if request.uri != FAMILY_OVERVIEW_URI {
-            return Err(McpError::invalid_params(
-                format!("unknown resource uri: {}", request.uri),
-                None,
-            ));
-        }
-        // Intentionally NOT capped via `enforce_list_cap` — see the
-        // matching note in `get_family_overview`. MCP resources are
-        // application-controlled (host-mediated user attachment) per
-        // the spec's resource semantics, so the LLM-bypass concern
-        // that drove the cap on `list_people` / `get_family_overview`
-        // doesn't apply here. A user explicitly attaching the family
-        // overview wants the whole thing.
-        let people = PersonService::get_all(&self.db).await.map_err(db_error)?;
-        let markdown = render_family_overview(&people).map_err(internal_error)?;
+        let markdown = match request.uri.as_str() {
+            FAMILY_OVERVIEW_URI => {
+                // Intentionally NOT capped via `enforce_list_cap` — see the
+                // matching note in `get_family_overview`. MCP resources are
+                // application-controlled (host-mediated user attachment) per
+                // the spec's resource semantics, so the LLM-bypass concern
+                // that drove the cap on `list_people` / `get_family_overview`
+                // doesn't apply here. A user explicitly attaching the family
+                // overview wants the whole thing.
+                let people = PersonService::get_all(&self.db).await.map_err(db_error)?;
+                render_family_overview(&people).map_err(internal_error)?
+            }
+            DIET_TAGS_URI => render_diet_tags_markdown(),
+            other => {
+                return Err(McpError::invalid_params(
+                    format!(
+                        "unknown resource uri: {other}. Known resources: \
+                         {FAMILY_OVERVIEW_URI}, {DIET_TAGS_URI}. Call resources/list \
+                         to enumerate them."
+                    ),
+                    None,
+                ));
+            }
+        };
         Ok(ReadResourceResult::new(vec![ResourceContents::text(
             markdown,
             &request.uri,
@@ -2032,6 +2071,79 @@ mod tests {
         assert!(mcp_err.data.is_none(), "data must not carry detail");
     }
 
+    // ─── Diet-tag vocabulary (fewd-08x) ─────────────────────────────
+    //
+    // `DIET_TAGS` is the single source of truth the `list_diet_tags` tool
+    // and the `fewd://diet-tags` resource both serve, and recipes are tagged
+    // against these exact strings. Pin the set so adding/removing a tag is a
+    // deliberate edit here (and a reminder to mirror it in the README), and
+    // enforce the storage invariants the `search_recipes` `tags` filter
+    // relies on: lowercase (the filter LOWER()s both sides, but stored tags
+    // should match) and hyphenated, never spaced.
+
+    #[test]
+    fn diet_tags_vocabulary_is_stable_and_well_formed() {
+        use super::super::schemas::diet_tags::DIET_TAGS;
+
+        let tags: Vec<&str> = DIET_TAGS.iter().map(|(t, _)| *t).collect();
+        assert_eq!(
+            tags,
+            vec![
+                "vegetarian",
+                "vegan",
+                "pescatarian",
+                "gluten-free",
+                "dairy-free",
+                "nut-free",
+                "low-carb",
+                "keto",
+                "paleo",
+                "low-sodium",
+                "high-protein",
+                "whole30",
+                "mediterranean",
+                "low-fodmap",
+                "halal",
+                "kosher",
+            ]
+        );
+        for (tag, meaning) in DIET_TAGS {
+            assert_eq!(*tag, tag.to_lowercase(), "tag must be lowercase: {tag}");
+            assert!(
+                !tag.contains(' '),
+                "tag must be hyphenated, not spaced: {tag}"
+            );
+            assert!(!meaning.trim().is_empty(), "meaning required for {tag}");
+        }
+    }
+
+    #[tokio::test]
+    async fn list_diet_tags_returns_full_vocabulary() {
+        use super::super::schemas::diet_tags::DIET_TAGS;
+
+        let mcp = setup_test_mcp().await;
+        let result = mcp
+            .list_diet_tags(LenientParameters::for_test(EmptyParams {}))
+            .await
+            .expect("Ok(CallToolResult)");
+        assert_ne!(
+            result.is_error,
+            Some(true),
+            "listing the vocabulary is a success path, not a tool error"
+        );
+        let serialized = serde_json::to_string(&result).expect("CallToolResult serializes");
+        for (tag, meaning) in DIET_TAGS {
+            assert!(
+                serialized.contains(tag),
+                "payload must list the tag {tag:?}: {serialized}"
+            );
+            assert!(
+                serialized.contains(meaning),
+                "payload must include the meaning for {tag:?}: {serialized}"
+            );
+        }
+    }
+
     // ─── Tool-description discoverability (fewd-tqx) ────────────────
     //
     // MCP clients like Claude Desktop use embedding-similarity tool_search
@@ -2050,18 +2162,19 @@ mod tests {
         // (or extending it with intent — never with mechanics like
         // "Return", "Generate", "List", "Fetch").
         const INTENT_VERB_ALLOWLIST: &[&str] = &[
-            "Verify",   // whoami
-            "Use",      // list_curated_recipes
-            "Find",     // search_recipes
-            "Read",     // get_recipe
-            "Look",     // list_people
-            "Record",   // update_person
-            "Ground",   // get_family_overview
-            "Check",    // list_meals
-            "Produce",  // get_shopping_list
-            "Add",      // create_recipe
-            "Import",   // import_recipe_url
-            "Schedule", // create_meal
+            "Verify",    // whoami
+            "Use",       // list_curated_recipes
+            "Find",      // search_recipes
+            "Translate", // list_diet_tags
+            "Read",      // get_recipe
+            "Look",      // list_people
+            "Record",    // update_person
+            "Ground",    // get_family_overview
+            "Check",     // list_meals
+            "Produce",   // get_shopping_list
+            "Add",       // create_recipe
+            "Import",    // import_recipe_url
+            "Schedule",  // create_meal
         ];
 
         let router = FewdMcp::tool_router();
