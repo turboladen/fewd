@@ -54,6 +54,9 @@ dist-ssr
 
 .claude/settings.local.json
 
+# Scheduled-tasks runtime lock (local agent scheduler state)
+.claude/scheduled_tasks.lock
+
 # Git worktrees created by EnterWorktree (parallel multi-bead work)
 .claude/worktrees/
 
