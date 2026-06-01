@@ -16,7 +16,7 @@ Environment="PORT=3000"
 # before `just deploy`. Leave unset to allow only localhost. See README →
 # MCP Server troubleshooting.
 Environment="MCP_ALLOWED_HOSTS=dietpi.local"
-Restart=on-failure
+Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
