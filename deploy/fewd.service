@@ -16,6 +16,12 @@ Environment="PORT=3000"
 # before `just deploy`. Leave unset to allow only localhost. See README →
 # MCP Server troubleshooting.
 Environment="MCP_ALLOWED_HOSTS=dietpi.local"
+# Without this, tracing_subscriber::fmt::init() defaults to ERROR-only and the
+# server emits NO app/request logs — leaving the journal blank but for systemd's
+# own lifecycle lines. `tower_http=debug` surfaces TraceLayer's per-request
+# method/path/status/latency for /mcp and all routes. Drop to just `info` if the
+# request logs get noisy on the low-RAM box.
+Environment="RUST_LOG=info,tower_http=debug"
 Restart=always
 RestartSec=5
 StandardOutput=journal
