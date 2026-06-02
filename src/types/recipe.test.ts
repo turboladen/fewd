@@ -6,6 +6,7 @@ import {
   formatRatio,
   formatTime,
   ingredientRatio,
+  parseInstructionSections,
   parseInstructionSteps,
   parseRecipe,
 } from './recipe'
@@ -233,6 +234,28 @@ describe('parseInstructionSteps', () => {
     ])
   })
 
+  it('splits a contiguous numbered list even when a blank line follows it', () => {
+    // Regression: a numbered list (no blanks between items) followed by a
+    // blank-separated trailing block must not collapse into one merged step.
+    const input = '1. Whisk the eggs.\n2. Stir in milk.\n\n- Garnish with mint'
+    const steps = parseInstructionSteps(input)
+    expect(steps[0]).toBe('Whisk the eggs.')
+    expect(steps[1]).toBe('Stir in milk.')
+    expect(steps.some((s) => s.includes('2.'))).toBe(false)
+  })
+
+  it('does not mistake a decimal quantity for a leading list marker', () => {
+    // stripMarker requires whitespace after the marker, so "1.5" stays intact
+    // instead of being read as a "1." list marker (which would yield "5 cups").
+    const steps = parseInstructionSteps('Mix dry goods.\n\n1.5 cups flour, then stir')
+    expect(steps).toEqual(['Mix dry goods.', '1.5 cups flour, then stir'])
+  })
+
+  it('strips leading bullet markers so cook-mode cards do not double-mark', () => {
+    const steps = parseInstructionSteps('- Garnish with mint\n- Serve immediately')
+    expect(steps).toEqual(['Garnish with mint', 'Serve immediately'])
+  })
+
   it('normalizes CRLF line endings before splitting', () => {
     const input = 'Heat oil in a pan\r\nover medium heat.\r\n\r\nAdd onions.'
     const steps = parseInstructionSteps(input)
@@ -240,6 +263,62 @@ describe('parseInstructionSteps', () => {
       'Heat oil in a pan over medium heat.',
       'Add onions.',
     ])
+  })
+})
+
+describe('parseInstructionSections', () => {
+  it('returns a single null-heading section when there are no headings', () => {
+    const sections = parseInstructionSections('1. Boil water.\n2. Add pasta.')
+    expect(sections).toEqual([
+      { heading: null, steps: ['Boil water.', 'Add pasta.'] },
+    ])
+  })
+
+  it('groups steps under each markdown heading and strips the # markers', () => {
+    const input = [
+      '## Caramelized Pineapple',
+      '1. Melt butter.',
+      '2. Add pineapple.',
+      '',
+      '## Custard Base',
+      '1. Whisk eggs.',
+      '2. Temper with cream.',
+    ].join('\n')
+    expect(parseInstructionSections(input)).toEqual([
+      { heading: 'Caramelized Pineapple', steps: ['Melt butter.', 'Add pineapple.'] },
+      { heading: 'Custard Base', steps: ['Whisk eggs.', 'Temper with cream.'] },
+    ])
+  })
+
+  it('keeps pre-heading steps as a leading null-heading section', () => {
+    const input = 'Preheat the oven.\n\n## Filling\n1. Mix.\n2. Pour.'
+    expect(parseInstructionSections(input)).toEqual([
+      { heading: null, steps: ['Preheat the oven.'] },
+      { heading: 'Filling', steps: ['Mix.', 'Pour.'] },
+    ])
+  })
+
+  it('never leaks a literal ## marker into a step', () => {
+    const input = '## Section A\n1. Do a thing.\n### Sub\n- bullet item'
+    const sections = parseInstructionSections(input)
+    const allSteps = sections.flatMap((s) => s.steps)
+    expect(allSteps.some((step) => step.includes('#'))).toBe(false)
+    expect(sections.map((s) => s.heading)).toEqual(['Section A', 'Sub'])
+  })
+
+  it('drops a heading that has no steps instead of emitting an empty section', () => {
+    const sections = parseInstructionSections('## Empty Section\n## Real\n1. Step')
+    expect(sections).toEqual([{ heading: 'Real', steps: ['Step'] }])
+  })
+
+  it('strips the ATX closing # sequence from heading text', () => {
+    const sections = parseInstructionSections('## Custard Base ##\n1. Whisk.')
+    expect(sections).toEqual([{ heading: 'Custard Base', steps: ['Whisk.'] }])
+  })
+
+  it('returns an empty array for empty input', () => {
+    expect(parseInstructionSections('')).toEqual([])
+    expect(parseInstructionSections('   \n  \n')).toEqual([])
   })
 })
 

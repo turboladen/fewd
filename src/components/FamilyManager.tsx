@@ -4,6 +4,7 @@ import type { CreatePersonDto, UpdatePersonDto } from '../types/person'
 import { parsePerson } from '../types/person'
 import { EmptyState } from './EmptyState'
 import { IconEdit, IconPlus, IconTrash } from './Icon'
+import { RecipeMarkdown } from './RecipeMarkdown'
 import { TagInput } from './TagInput'
 import { useToast } from './Toast'
 
@@ -394,9 +395,9 @@ export function FamilyManager() {
                 </div>
               )}
               {person.notes && (
-                <p className='text-sm text-stone-500 mt-2 italic'>
-                  {person.notes}
-                </p>
+                <div className='mt-2'>
+                  <RecipeMarkdown markdown={person.notes} variant='notes' />
+                </div>
               )}
             </div>
           )

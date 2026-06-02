@@ -166,6 +166,30 @@ describe('CookingView', () => {
     expect(bold.tagName).toBe('STRONG')
   })
 
+  it('renders ## section headings as dividers and never leaks literal markers', () => {
+    const parsed = parseRecipe(makeRecipe({
+      instructions: [
+        '## Caramelized Pineapple',
+        '1. Melt butter.',
+        '2. Add pineapple.',
+        '',
+        '## Custard Base',
+        '1. Whisk eggs.',
+      ].join('\n'),
+    }))
+    renderCookingView(parsed)
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Caramelized Pineapple' }))
+      .toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Custard Base' })).toBeInTheDocument()
+
+    // Steps render without their markdown markers...
+    expect(screen.getByText('Melt butter.')).toBeInTheDocument()
+    expect(screen.getByText('Whisk eggs.')).toBeInTheDocument()
+    // ...and no literal '##' survives into the rendered output.
+    expect(screen.queryByText(/##/)).not.toBeInTheDocument()
+  })
+
   it('hides chrome on mount and restores it on unmount', () => {
     const states: boolean[] = []
     function Probe() {
