@@ -451,10 +451,14 @@ sqlite3 <path-to-fewd.db>
 - ✅ TypeScript: `dprint check`, `bun run lint`, `bun run test`
 - ✅ Typos: `typos --config .typos.toml`
 
-**`.github/workflows/build.yml`** - Runs on tags (releases):
+**`.github/workflows/auto-format.yml`** - Auto-formats code on push.
 
-- Builds macOS universal binary (Intel + Apple Silicon), Windows, Linux
-- Uploads artifacts to GitHub Release (draft)
+There is **no tag-triggered build workflow**. Releases are notes-only: an
+annotated tag (`vYYYY-MM-DD`, with a `.N` suffix for same-day hotfixes —
+`v2026-06-01`, `v2026-06-01.1`, …) plus a hand-written release via
+`gh release create <tag> --title <tag> --notes-file <f> --latest`. No binaries
+are attached; the dietpi box builds from source at deploy time. Tag on `main`
+after the work is merged + synced with origin.
 
 ### Running CI Locally
 
@@ -467,6 +471,19 @@ cargo fmt --check && cargo clippy -- -D warnings && cargo test
 dprint check && bun run lint && bun run test
 typos
 ```
+
+### Deploying to the dietpi box
+
+`just deploy <user>@<host>` is the whole deploy. It depends on `build-arm64`
+(runs `bun run build`, then `cargo build --release --target aarch64-...`), so a
+single binary push carries **frontend changes too** — the frontend is embedded
+via `rust-embed` (`server/src/main.rs`: `#[folder = "../dist"]`). There is no
+separate `dist/` sync; if `dist/` is stale the binary is stale.
+
+The recipe copies `deploy/fewd.service` to **both** `/opt/fewd/` and
+`/etc/systemd/system/`, then `daemon-reload` + restart — so unit-file edits
+(`RUST_LOG`, `Restart=always`, `MCP_ALLOWED_HOSTS`) propagate. Don't hand-roll a
+partial deploy; omitting the `/etc` copy caused the `fewd-82e` 403 regression.
 
 ## Common Tasks
 
