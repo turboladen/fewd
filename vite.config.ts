@@ -14,7 +14,7 @@ export default defineConfig({
   },
   build: {
     // Tailwind v4 requires a modern baseline (Safari 16.4+, Chrome 111+, Firefox 128+).
-    target: ['chrome111', 'edge111', 'firefox128', 'safari16'],
+    target: ['chrome111', 'edge111', 'firefox128', 'safari16.4'],
     sourcemap: false,
   },
 })
