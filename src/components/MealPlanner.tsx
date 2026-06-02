@@ -82,7 +82,7 @@ function PersonServingEditor({
   }
 
   return (
-    <div className='border border-stone-200 rounded p-3 bg-stone-50'>
+    <div className='border border-stone-200 rounded-sm p-3 bg-stone-50'>
       <div className='flex items-center gap-3 mb-2'>
         <span className='font-medium text-sm w-24'>{person.name}</span>
         <div className='flex gap-1'>
@@ -245,7 +245,7 @@ function TemplateRow({
   onCancelDelete: () => void
 }) {
   return (
-    <div className='flex items-center justify-between bg-white border border-stone-200 rounded p-2'>
+    <div className='flex items-center justify-between bg-white border border-stone-200 rounded-sm p-2'>
       <button
         onClick={() => onApply(template)}
         className='flex-1 text-left text-sm hover:text-primary-700'

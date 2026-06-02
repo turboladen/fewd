@@ -31,7 +31,7 @@ export function DrinkRecipeDetail({
       {/* Header */}
       <div className='flex items-start justify-between gap-2'>
         <div className='flex items-center gap-2 min-w-0'>
-          <span className='text-2xl flex-shrink-0'>{recipe.icon || '🍸'}</span>
+          <span className='text-2xl shrink-0'>{recipe.icon || '🍸'}</span>
           <div className='min-w-0'>
             <h2 className='text-xl font-semibold text-stone-900'>{recipe.name}</h2>
             {recipe.description && <p className='text-sm text-stone-600'>{recipe.description}</p>}
@@ -39,7 +39,7 @@ export function DrinkRecipeDetail({
         </div>
         <button
           onClick={onToggleFavorite}
-          className='text-amber-500 hover:text-amber-600 flex-shrink-0'
+          className='text-amber-500 hover:text-amber-600 shrink-0'
           aria-label={recipe.is_favorite ? 'Unfavorite' : 'Favorite'}
         >
           {recipe.is_favorite

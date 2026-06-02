@@ -885,7 +885,7 @@ export function RecipeDetail({
             )}
           <button
             onClick={onClose}
-            className='ml-auto p-1 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded'
+            className='ml-auto p-1 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded-sm'
             title='Back to list'
           >
             <IconClose className='w-5 h-5' />

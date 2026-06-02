@@ -126,7 +126,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     <div className='fixed inset-0 z-50 flex items-center justify-center'>
       {/* Backdrop */}
       <div
-        className='absolute inset-0 bg-black bg-opacity-30 animate-backdrop'
+        className='absolute inset-0 bg-black/30 animate-backdrop'
         onClick={onClose}
       />
 
@@ -402,7 +402,7 @@ function McpTokensSection({
             Token for <strong>{revealed.personName}</strong> — copy now, shown only once:
           </p>
           <div className='flex gap-2 items-center'>
-            <code className='flex-1 text-xs bg-white px-2 py-1 rounded border border-stone-300 break-all font-mono'>
+            <code className='flex-1 text-xs bg-white px-2 py-1 rounded-sm border border-stone-300 break-all font-mono'>
               {revealed.plaintext}
             </code>
             <button

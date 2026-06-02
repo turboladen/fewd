@@ -40,7 +40,7 @@ export function CookingView({ parsed, onExit, enhancedInstructions }: Props) {
         type='button'
         onClick={onExit}
         aria-label='Exit cooking mode'
-        className='btn-ghost fixed top-4 right-4 z-10 inline-flex items-center gap-1.5 bg-white/80 backdrop-blur-sm shadow-soft'
+        className='btn-ghost fixed top-4 right-4 z-10 inline-flex items-center gap-1.5 bg-white/80 backdrop-blur-xs shadow-soft'
       >
         <IconClose className='w-4 h-4' />
         <span className='hidden sm:inline'>Exit cooking mode</span>

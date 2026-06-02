@@ -437,7 +437,7 @@ export function CocktailSuggester() {
                         onClick={() => setExpandedIndex(isExpanded ? null : i)}
                         className='flex items-center gap-3 w-full text-left'
                       >
-                        <span className='text-2xl flex-shrink-0'>
+                        <span className='text-2xl shrink-0'>
                           {suggestion.icon || '🍸'}
                         </span>
                         <div className='flex-1 min-w-0'>
@@ -574,7 +574,7 @@ export function CocktailSuggester() {
       {/* API key check (hidden in recipes-only mode) */}
       {!hasApiKey && !apiKeyQuery.isLoading && suggestionSource !== 'recipes-only' && (
         <div className='panel-warning flex items-start gap-2'>
-          <IconWarning className='w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5' />
+          <IconWarning className='w-5 h-5 text-amber-600 shrink-0 mt-0.5' />
           <p className='text-sm text-amber-800'>
             No API key configured. Set your Anthropic API key in Settings to use AI suggestions.
           </p>
@@ -810,7 +810,7 @@ export function CocktailSuggester() {
               onClick={() => setSuggestionSource(key)}
               className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                 suggestionSource === key
-                  ? 'bg-white text-primary-700 shadow-sm'
+                  ? 'bg-white text-primary-700 shadow-xs'
                   : 'text-stone-500 hover:text-stone-700'
               }`}
             >
@@ -883,7 +883,7 @@ function RecipeMatchCard({
         onClick={onToggle}
         className='flex items-center gap-3 w-full text-left'
       >
-        <span className='text-2xl flex-shrink-0'>{recipe.icon || '🍸'}</span>
+        <span className='text-2xl shrink-0'>{recipe.icon || '🍸'}</span>
         <div className='flex-1 min-w-0'>
           <h3 className='font-semibold text-stone-900'>{recipe.name}</h3>
           {recipe.description && (
