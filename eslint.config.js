@@ -11,7 +11,9 @@ export default tseslint.config(
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     languageOptions: {
       ecmaVersion: 2020,
-      globals: globals.browser,
+      // Mirror the old eslintrc `env: { browser: true, es2020: true }`: browser
+      // DOM globals + the ES2020 built-ins (Promise, Map, Set, globalThis, …).
+      globals: { ...globals.browser, ...globals.es2020 },
     },
     plugins: {
       'react-hooks': reactHooks,
