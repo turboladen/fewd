@@ -34,7 +34,7 @@ function SubNav({ tabs }: { tabs: readonly { to: string; label: string }[] }) {
             className={({ isActive }) =>
               `px-2 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors ${
                 isActive
-                  ? 'bg-white text-primary-700 shadow-sm'
+                  ? 'bg-white text-primary-700 shadow-xs'
                   : 'text-stone-500 hover:text-stone-700'
               }`}
           >
@@ -57,7 +57,7 @@ export function RootLayout() {
   return (
     <div className='h-screen flex flex-col bg-surface'>
       {!isChromeHidden && (
-        <nav className='flex-none bg-white/95 backdrop-blur-sm border-b border-stone-200/80 shadow-soft'>
+        <nav className='flex-none bg-white/95 backdrop-blur-xs border-b border-stone-200/80 shadow-soft'>
           <div className='flex pl-2'>
             {topTabs.map(({ to, label }) => (
               <NavLink

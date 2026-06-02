@@ -1,8 +1,9 @@
+import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   clearScreen: false,
   server: {
     port: 5173,
@@ -12,7 +13,8 @@ export default defineConfig({
     },
   },
   build: {
-    target: ['es2021', 'chrome100', 'safari13'],
+    // Tailwind v4 requires a modern baseline (Safari 16.4+, Chrome 111+, Firefox 128+).
+    target: ['chrome111', 'edge111', 'firefox128', 'safari16'],
     sourcemap: false,
   },
 })

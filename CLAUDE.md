@@ -201,11 +201,20 @@ export function MyComponent({ onSave }: Props) {
 
 ### Frontend Design System
 
-**Typography:** Self-hosted variable fonts in `public/fonts/`:
-- Headings: Playfair Display (serif) — configured as `fontFamily.heading` in Tailwind
-- Body: DM Sans (sans-serif) — configured as `fontFamily.sans` override in Tailwind
+**Tailwind v4 (CSS-first).** There is no `tailwind.config.js` — the theme lives in an
+`@theme { … }` block in `src/index.css`, the build uses the `@tailwindcss/vite` plugin
+(no PostCSS/autoprefixer), and `src/index.css` starts with `@import 'tailwindcss'`.
+Design tokens are defined with the v4 `@utility` directive (not `@layer components`).
+Two v4 compatibility shims live in `index.css`: a global `border-color: gray-200`
+rule (v4 defaults bare `border` to `currentColor`) and a `button { cursor: pointer }`
+rule (v4 Preflight defaults buttons to `cursor: default`). The browser baseline is
+Safari 16.4+ / Chrome 111+ / Firefox 128+ (set in `vite.config.ts` `build.target`).
 
-**Design Tokens (`src/index.css` `@layer components`):**
+**Typography:** Self-hosted variable fonts in `public/fonts/`:
+- Headings: Playfair Display (serif) — `--font-heading` in the `@theme` block (`font-heading`)
+- Body: DM Sans (sans-serif) — `--font-sans` override in the `@theme` block
+
+**Design Tokens (`src/index.css`, defined via `@utility`):**
 
 | Token | Usage |
 |-------|-------|
@@ -216,7 +225,7 @@ export function MyComponent({ onSave }: Props) {
 | `.tag` | Rounded-full pills for labels |
 | `.panel-primary`/`.panel-secondary`/`.panel-warning`/`.panel-error` | Colored card variants |
 
-**Animation Utilities (`src/index.css` `@layer utilities`):**
+**Animation Utilities (`src/index.css`, defined via `@utility`; keyframes in `@layer utilities`):**
 - `animate-fade-in`, `animate-slide-up`, `animate-slide-down`, `animate-scale-in`, `animate-backdrop` — opacity + transform, GPU-composited
 - `animate-expand` — height-based accordion reveal using `grid-template-rows: 0fr → 1fr`
 
@@ -232,7 +241,7 @@ export function MyComponent({ onSave }: Props) {
 | `IngredientInput.tsx` | Reusable ingredient list editor (name, amount, unit, notes). Shared by food and drink recipe forms |
 | `DrinkRecipeForm.tsx` | Drink recipe add/edit form. Reuses `IngredientInput` + `TagInput`. Types live in `src/types/drinkRecipe.ts` (not the component file) to satisfy `react-refresh/only-export-components` |
 
-**Color Palette** (in `tailwind.config.js`):
+**Color Palette** (`@theme` CSS variables in `src/index.css`, e.g. `--color-primary-600`):
 - `primary` — earthy greens (forest/sage tones)
 - `secondary` — warm terracotta/copper
 - `accent` — gold/amber highlights

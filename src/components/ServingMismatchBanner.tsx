@@ -37,7 +37,7 @@ export function ServingMismatchBanner({
           <div className='mt-2 flex gap-2'>
             <button
               onClick={onAdjust}
-              className='text-xs bg-amber-100 border border-amber-300 text-amber-800 px-2 py-1 rounded hover:bg-amber-200'
+              className='text-xs bg-amber-100 border border-amber-300 text-amber-800 px-2 py-1 rounded-sm hover:bg-amber-200'
             >
               Adjust to Full Recipe ({perPersonLabel}/person)
             </button>
