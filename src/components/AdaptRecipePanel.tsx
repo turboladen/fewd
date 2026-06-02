@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { usePeople } from '../hooks/usePeople'
 import { useAdaptRecipe, useCreateRecipe } from '../hooks/useRecipes'
 import { useSetting } from '../hooks/useSettings'
@@ -39,21 +39,20 @@ export function AdaptRecipePanel({
   // Per-person toggle state
   const [personToggles, setPersonToggles] = useState<Record<string, PersonToggleState>>({})
 
-  // Initialize toggles when people data loads
-  useEffect(() => {
-    if (activePeople.length > 0 && Object.keys(personToggles).length === 0) {
-      const initial: Record<string, PersonToggleState> = {}
-      for (const person of activePeople) {
-        initial[person.id] = {
-          selected: true,
-          include_dietary_goals: true,
-          include_dislikes: true,
-          include_favorites: true,
-        }
+  // Initialize toggles once people data loads (adjust-state-during-render; the empty-map
+  // guard prevents re-running, so this can't loop).
+  if (activePeople.length > 0 && Object.keys(personToggles).length === 0) {
+    const initial: Record<string, PersonToggleState> = {}
+    for (const person of activePeople) {
+      initial[person.id] = {
+        selected: true,
+        include_dietary_goals: true,
+        include_dislikes: true,
+        include_favorites: true,
       }
-      setPersonToggles(initial)
     }
-  }, [activePeople.length]) // eslint-disable-line react-hooks/exhaustive-deps
+    setPersonToggles(initial)
+  }
 
   const [instructions, setInstructions] = useState('')
   const [draft, setDraft] = useState<CreateRecipeDto | null>(null)

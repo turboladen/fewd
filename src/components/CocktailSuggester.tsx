@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useBarItems } from '../hooks/useBarItems'
 import { useAiSuggestCocktails } from '../hooks/useCocktailSuggestions'
@@ -155,21 +155,17 @@ export function CocktailSuggester() {
   const [barInitialized, setBarInitialized] = useState(false)
   const [peopleInitialized, setPeopleInitialized] = useState(false)
 
-  // Initialize selections when data loads
-  useEffect(() => {
-    if (barItems && !barInitialized) {
-      setSelectedBarIds(new Set(barItems.map((i) => i.id)))
-      setBarInitialized(true)
-    }
-  }, [barItems, barInitialized])
-
-  useEffect(() => {
-    if (people && !peopleInitialized) {
-      const ofAge = people.filter((p) => computeAge(p.birthdate) >= 21)
-      setSelectedPersonIds(new Set(ofAge.map((p) => p.id)))
-      setPeopleInitialized(true)
-    }
-  }, [people, peopleInitialized])
+  // Initialize selections once the async data arrives (adjust-state-during-render; the
+  // *Initialized flags guard against re-running, so this can't loop).
+  if (barItems && !barInitialized) {
+    setSelectedBarIds(new Set(barItems.map((i) => i.id)))
+    setBarInitialized(true)
+  }
+  if (people && !peopleInitialized) {
+    const ofAge = people.filter((p) => computeAge(p.birthdate) >= 21)
+    setSelectedPersonIds(new Set(ofAge.map((p) => p.id)))
+    setPeopleInitialized(true)
+  }
 
   const [selectedStyles, setSelectedStyles] = useState<Set<string>>(new Set(['Ancestrals']))
   const [customMoodText, setCustomMoodText] = useState('')
