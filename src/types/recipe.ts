@@ -268,8 +268,18 @@ export function parseInstructionSteps(instructions: string): string[] {
   const trimmed = instructions.replace(/\r\n?/g, '\n').trim()
   if (trimmed.length === 0) return []
 
-  const stripMarker = (chunk: string) => chunk.replace(/^\s*\d+[.)]\s*/, '').trim()
+  const markerBoundary = /\n(?=[ \t]*\d+[.)][ \t]+)/
+  const countMarkers = (text: string) => (text.match(/(?:^|\n)[ \t]*\d+[.)][ \t]+/g) ?? []).length
+  // Strip a leading list marker — numbered (`1.`/`2)`) or bullet (`-`/`*`/`+`) —
+  // so the renderer supplies its own numbering. The trailing `\s+` (not `\s*`)
+  // requires whitespace after the marker, so a decimal quantity like "1.5 cups"
+  // is left intact rather than parsed as a "1." list marker.
+  const stripMarker = (chunk: string) => chunk.replace(/^\s*(?:\d+[.)]|[-*+])\s+/, '').trim()
   const joinSoftWrap = (chunk: string) => chunk.replace(/\s*\n\s*/g, ' ').trim()
+  // A blank-line "paragraph" may itself hold a contiguous numbered list (no
+  // blanks between items) — split those out so each numbered step stays distinct.
+  const splitByMarkers = (chunk: string) =>
+    countMarkers(chunk) >= 2 ? chunk.split(markerBoundary) : [chunk]
   const finalize = (chunks: string[]) =>
     chunks
       .map(joinSoftWrap)
@@ -277,16 +287,63 @@ export function parseInstructionSteps(instructions: string): string[] {
       .filter((s) => s.length > 0)
 
   if (/\n[ \t]*\n/.test(trimmed)) {
-    return finalize(trimmed.split(/\n[ \t]*\n+/))
+    return finalize(trimmed.split(/\n[ \t]*\n+/).flatMap(splitByMarkers))
   }
 
-  const markerCount = (trimmed.match(/(?:^|\n)[ \t]*\d+[.)][ \t]+/g) ?? []).length
-  if (markerCount >= 2) {
-    return finalize(trimmed.split(/\n(?=[ \t]*\d+[.)][ \t]+)/))
+  if (countMarkers(trimmed) >= 2) {
+    return finalize(trimmed.split(markerBoundary))
   }
 
   return trimmed
     .split('\n')
     .map(stripMarker)
     .filter((s) => s.length > 0)
+}
+
+/** A markdown `##` section heading paired with the steps that follow it. */
+export interface InstructionSection {
+  /** Heading text (markers stripped), or `null` for steps before the first heading. */
+  heading: string | null
+  steps: string[]
+}
+
+/**
+ * Group instructions into sections by markdown headings (`#`–`######`) for
+ * cook mode, so sub-recipe components ("## Custard Base") render as section
+ * dividers between step-card groups instead of leaking literal `##` into a step.
+ *
+ * Each section's body is segmented by {@link parseInstructionSteps}, so steps
+ * split (and numbered markers strip) exactly as in a single-section recipe.
+ * Steps before any heading become a leading section with `heading: null`.
+ * Only sections that actually contain steps are emitted — a heading with no
+ * body would otherwise render a divider above an empty list in cook mode.
+ */
+export function parseInstructionSections(instructions: string): InstructionSection[] {
+  const headingRe = /^[ \t]*#{1,6}[ \t]+(.*)$/
+  const sections: InstructionSection[] = []
+  let heading: string | null = null
+  let body: string[] = []
+
+  const flush = () => {
+    const steps = parseInstructionSteps(body.join('\n'))
+    if (steps.length > 0) {
+      sections.push({ heading, steps })
+    }
+    body = []
+  }
+
+  for (const line of instructions.replace(/\r\n?/g, '\n').split('\n')) {
+    const match = line.match(headingRe)
+    if (match) {
+      flush()
+      // Strip the optional ATX closing sequence ("## Base ##" -> "Base"), and
+      // treat a bare `## ` with no title as no heading rather than `heading: ''`.
+      heading = match[1].replace(/[ \t]+#+[ \t]*$/, '').trim() || null
+    } else {
+      body.push(line)
+    }
+  }
+  flush()
+
+  return sections
 }

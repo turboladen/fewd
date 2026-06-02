@@ -43,6 +43,7 @@ import {
 import { IngredientInput } from './IngredientInput'
 import { IngredientLineText } from './IngredientLineText'
 import { NumberInput } from './NumberInput'
+import { RecipeMarkdown } from './RecipeMarkdown'
 import { StarRating } from './StarRating'
 import { TagInput } from './TagInput'
 import { useToast } from './Toast'
@@ -766,54 +767,6 @@ export function ScaleRecipePanel({
   )
 }
 
-// --- Enhanced Instructions Renderer ---
-
-function EnhancedInstructions({ text }: { text: string }) {
-  // Render **bold** markdown as <strong> elements
-  const renderLine = (line: string, lineIdx: number) => {
-    const parts: React.ReactNode[] = []
-    let remaining = line
-    let key = 0
-
-    while (remaining.length > 0) {
-      const boldStart = remaining.indexOf('**')
-      if (boldStart === -1) {
-        parts.push(remaining)
-        break
-      }
-      const boldEnd = remaining.indexOf('**', boldStart + 2)
-      if (boldEnd === -1) {
-        parts.push(remaining)
-        break
-      }
-      // Text before bold
-      if (boldStart > 0) {
-        parts.push(remaining.slice(0, boldStart))
-      }
-      // Bold text
-      parts.push(
-        <strong key={`${lineIdx}-${key++}`} className='text-primary-700 font-semibold'>
-          {remaining.slice(boldStart + 2, boldEnd)}
-        </strong>,
-      )
-      remaining = remaining.slice(boldEnd + 2)
-    }
-
-    return parts
-  }
-
-  return (
-    <>
-      {text.split('\n').map((line, i) => (
-        <span key={i}>
-          {renderLine(line, i)}
-          {i < text.split('\n').length - 1 && '\n'}
-        </span>
-      ))}
-    </>
-  )
-}
-
 // --- Recipe Detail View ---
 
 export function RecipeDetail({
@@ -1031,11 +984,10 @@ export function RecipeDetail({
           </div>
           {parsed.instructions
             ? (
-              <div className='text-sm whitespace-pre-wrap leading-relaxed'>
-                {enhancedMode && enhancedText
-                  ? <EnhancedInstructions text={enhancedText} />
-                  : parsed.instructions}
-              </div>
+              <RecipeMarkdown
+                markdown={enhancedMode && enhancedText ? enhancedText : parsed.instructions}
+                variant='detail'
+              />
             )
             : <p className='text-sm text-stone-400'>No instructions</p>}
           {enhanceMutation.error && (
@@ -1085,7 +1037,7 @@ export function RecipeDetail({
       {parsed.notes && (
         <div className='mt-4 pt-4 border-t border-stone-100'>
           <h3 className='font-semibold mb-1'>Notes</h3>
-          <p className='text-sm text-stone-600 italic'>{parsed.notes}</p>
+          <RecipeMarkdown markdown={parsed.notes} variant='notes' />
         </div>
       )}
     </div>
