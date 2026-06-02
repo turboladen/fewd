@@ -20,12 +20,11 @@ export default tseslint.config(
       'react-refresh': reactRefresh,
     },
     rules: {
-      // Mirror the pre-migration ruleset (eslint-plugin-react-hooks v4 `recommended`).
-      // react-hooks v7's `recommended-latest` adds the React Compiler rule family
-      // (set-state-in-effect, purity, immutability, …) — adopting those + fixing the
-      // sites they surface is tracked in fewd-6h2 so this stays a pure tooling migration.
-      'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/exhaustive-deps': 'warn',
+      // react-hooks v7's `recommended-latest` is the React Compiler rule family
+      // (set-state-in-effect, purity, immutability, set-state-in-render, …) plus the
+      // classic rules-of-hooks/exhaustive-deps. The two rules below are kept explicitly
+      // because that config doesn't provide them (they're not react-hooks rules).
+      ...reactHooks.configs['recommended-latest'].rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     },

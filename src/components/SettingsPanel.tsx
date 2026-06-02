@@ -29,6 +29,18 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [showCostCalc, setShowCostCalc] = useState(false)
   const [inputPrice, setInputPrice] = useState('')
   const [outputPrice, setOutputPrice] = useState('')
+  // Seed the editable price fields from saved settings once the query resolves, and
+  // re-seed if the saved value later changes — without an effect (adjust-state-during-render).
+  const [lastInputData, setLastInputData] = useState(inputPriceQuery.data)
+  if (inputPriceQuery.data !== lastInputData) {
+    setLastInputData(inputPriceQuery.data)
+    if (inputPriceQuery.data) setInputPrice(inputPriceQuery.data)
+  }
+  const [lastOutputData, setLastOutputData] = useState(outputPriceQuery.data)
+  if (outputPriceQuery.data !== lastOutputData) {
+    setLastOutputData(outputPriceQuery.data)
+    if (outputPriceQuery.data) setOutputPrice(outputPriceQuery.data)
+  }
   // Lifted from McpTokensSection so the parent's Escape handler can
   // dismiss the inline revoke-confirm step BEFORE closing the whole
   // panel (matches FamilyManager.tsx's deepest-modal-first pattern).
@@ -38,14 +50,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   // Only pre-fill when the user hasn't started typing yet.
   const maskedKey = apiKeyQuery.data ?? ''
   const hasExistingKey = !!maskedKey
-
-  useEffect(() => {
-    if (inputPriceQuery.data) setInputPrice(inputPriceQuery.data)
-  }, [inputPriceQuery.data])
-
-  useEffect(() => {
-    if (outputPriceQuery.data) setOutputPrice(outputPriceQuery.data)
-  }, [outputPriceQuery.data])
 
   // Close on Escape — but if an inline confirm is open (e.g. revoke),
   // dismiss that step first instead of the whole panel. Mirrors the

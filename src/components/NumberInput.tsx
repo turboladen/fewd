@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 interface NumberInputProps {
   value: number
@@ -21,11 +21,14 @@ export function NumberInput({
   title,
   'aria-label': ariaLabel,
 }: NumberInputProps) {
+  // `raw` is a string buffer that allows in-progress edits ("1.", ""); resync it when
+  // the `value` prop changes externally via React's adjust-state-during-render pattern.
   const [raw, setRaw] = useState(String(value))
-
-  useEffect(() => {
+  const [lastValue, setLastValue] = useState(value)
+  if (value !== lastValue) {
+    setLastValue(value)
     setRaw(String(value))
-  }, [value])
+  }
 
   const parse = (s: string) => {
     return step !== undefined ? parseFloat(s) : parseInt(s)
