@@ -205,10 +205,12 @@ export function MyComponent({ onSave }: Props) {
 `@theme { … }` block in `src/index.css`, the build uses the `@tailwindcss/vite` plugin
 (no PostCSS/autoprefixer), and `src/index.css` starts with `@import 'tailwindcss'`.
 Design tokens are defined with the v4 `@utility` directive (not `@layer components`).
-Two v4 compatibility shims live in `index.css`: a global `border-color: gray-200`
-rule (v4 defaults bare `border` to `currentColor`) and a `button { cursor: pointer }`
-rule (v4 Preflight defaults buttons to `cursor: default`). The browser baseline is
-Safari 16.4+ / Chrome 111+ / Firefox 128+ (set in `vite.config.ts` `build.target`).
+Every border in the app carries an explicit `border-*` color (tokens and component
+classes alike), so v4's "bare `border` defaults to `currentColor`" change is a no-op
+here — no border-color compatibility shim is needed. One Preflight shim remains in
+`index.css`: a `button { cursor: pointer }` rule (v4 defaults buttons to
+`cursor: default`). The browser baseline is Safari 16.4+ / Chrome 111+ / Firefox 128+
+(set in `vite.config.ts` `build.target`).
 
 **Typography:** Self-hosted variable fonts in `public/fonts/`:
 - Headings: Playfair Display (serif) — `--font-heading` in the `@theme` block (`font-heading`)
