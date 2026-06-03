@@ -130,6 +130,8 @@ describe('RecipeManager', () => {
       // Sorting still works even though the persistence write throws and is swallowed.
       fireEvent.change(screen.getByLabelText('Sort recipes'), { target: { value: 'name-desc' } })
       expect(renderedRecipeOrder(['Apple', 'Banana'])).toEqual(['Banana', 'Apple'])
+      // Pin the write-path contract: the change attempts a (swallowed) persist.
+      expect(setItem).toHaveBeenCalledWith('fewd.recipes.sortBy', 'name-desc')
     } finally {
       getItem.mockRestore()
       setItem.mockRestore()
