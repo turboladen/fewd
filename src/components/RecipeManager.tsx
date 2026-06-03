@@ -1245,7 +1245,8 @@ export function RecipeManager() {
           <select
             aria-label='Sort recipes'
             value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as RecipeSortBy)}
+            onChange={(e) =>
+              setSortBy(isRecipeSortBy(e.target.value) ? e.target.value : DEFAULT_RECIPE_SORT)}
             className='input w-full md:w-56'
           >
             {RECIPE_SORT_OPTIONS.map((opt) => (
