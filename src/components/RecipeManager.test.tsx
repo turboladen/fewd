@@ -17,7 +17,17 @@ beforeEach(() => {
 afterEach(() => {
   resetFetchMock()
   resetStreamMock()
+  localStorage.clear()
 })
+
+/** Recipe-name buttons in DOM order — the card title is the only button bearing the name. */
+function renderedRecipeOrder(names: string[]): string[] {
+  const want = new Set(names)
+  return screen
+    .getAllByRole('button')
+    .map((b) => b.textContent?.trim() ?? '')
+    .filter((t) => want.has(t))
+}
 
 describe('RecipeManager', () => {
   it('renders recipes and filters the list client-side by search query', async () => {
@@ -42,6 +52,58 @@ describe('RecipeManager', () => {
     expect(screen.queryByText('Pasta')).not.toBeInTheDocument()
     expect(screen.queryByText('Salad')).not.toBeInTheDocument()
     expect(vi.mocked(fetch).mock.calls.length).toBe(callsBefore)
+  })
+
+  it('sorts by highest rating when the sort dropdown changes, unrated last', async () => {
+    const mid = makeRecipe({ id: 'r1', name: 'Mid', rating: 3 })
+    const unrated = makeRecipe({ id: 'r2', name: 'Unrated', rating: null })
+    const top = makeRecipe({ id: 'r3', name: 'Top', rating: 5 })
+    mockJson('GET', '/api/recipes', [mid, unrated, top])
+
+    renderWithProviders(<RecipeManager />, { initialPath: '/recipes' })
+    await waitFor(() => expect(screen.getByText('Mid')).toBeInTheDocument())
+
+    // Default name-asc.
+    expect(renderedRecipeOrder(['Mid', 'Unrated', 'Top'])).toEqual(['Mid', 'Top', 'Unrated'])
+
+    fireEvent.change(screen.getByLabelText('Sort recipes'), { target: { value: 'rating-desc' } })
+
+    expect(renderedRecipeOrder(['Mid', 'Unrated', 'Top'])).toEqual(['Top', 'Mid', 'Unrated'])
+  })
+
+  it('bubbles never-planned recipes to the top for "Not planned in a while"', async () => {
+    const recent = makeRecipe({ id: 'r1', name: 'Recent', last_planned: '2026-05-01T00:00:00Z' })
+    const never = makeRecipe({ id: 'r2', name: 'Never', last_planned: null })
+    const old = makeRecipe({ id: 'r3', name: 'Old', last_planned: '2026-01-01T00:00:00Z' })
+    mockJson('GET', '/api/recipes', [recent, never, old])
+
+    renderWithProviders(<RecipeManager />, { initialPath: '/recipes' })
+    await waitFor(() => expect(screen.getByText('Never')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('Sort recipes'), {
+      target: { value: 'last_planned-asc' },
+    })
+
+    expect(renderedRecipeOrder(['Recent', 'Never', 'Old'])).toEqual(['Never', 'Old', 'Recent'])
+  })
+
+  it('persists the chosen sort across remounts via localStorage', async () => {
+    const mid = makeRecipe({ id: 'r1', name: 'Mid', rating: 3 })
+    const top = makeRecipe({ id: 'r3', name: 'Top', rating: 5 })
+    mockJson('GET', '/api/recipes', [mid, top])
+
+    const first = renderWithProviders(<RecipeManager />, { initialPath: '/recipes' })
+    await waitFor(() => expect(screen.getByText('Mid')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Sort recipes'), { target: { value: 'rating-desc' } })
+    first.unmount()
+
+    // Fresh mount reads the persisted preference.
+    mockJson('GET', '/api/recipes', [mid, top])
+    renderWithProviders(<RecipeManager />, { initialPath: '/recipes' })
+    await waitFor(() => expect(screen.getByText('Top')).toBeInTheDocument())
+
+    expect(screen.getByLabelText('Sort recipes')).toHaveValue('rating-desc')
+    expect(renderedRecipeOrder(['Mid', 'Top'])).toEqual(['Top', 'Mid'])
   })
 
   it('clicking a recipe card navigates to its detail page by slug', async () => {
