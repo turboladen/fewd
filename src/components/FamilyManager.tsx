@@ -365,7 +365,7 @@ export function FamilyManager() {
               {parsed.favorites.length > 0 && (
                 <div className='mt-2'>
                   <span className='text-sm font-medium'>Favorites:</span>
-                  <span className='text-sm text-stone-600'>
+                  <span className='text-sm text-stone-600 ml-1'>
                     {parsed.favorites.join(', ')}
                   </span>
                 </div>
@@ -373,7 +373,7 @@ export function FamilyManager() {
               {parsed.dislikes.length > 0 && (
                 <div className='mt-1'>
                   <span className='text-sm font-medium'>Dislikes:</span>
-                  <span className='text-sm text-stone-600'>
+                  <span className='text-sm text-stone-600 ml-1'>
                     {parsed.dislikes.join(', ')}
                   </span>
                 </div>
@@ -381,7 +381,7 @@ export function FamilyManager() {
               {parsed.drink_preferences.length > 0 && (
                 <div className='mt-1'>
                   <span className='text-sm font-medium'>Drink Prefs:</span>
-                  <span className='text-sm text-stone-600'>
+                  <span className='text-sm text-stone-600 ml-1'>
                     {parsed.drink_preferences.join(', ')}
                   </span>
                 </div>
@@ -389,7 +389,7 @@ export function FamilyManager() {
               {parsed.drink_dislikes.length > 0 && (
                 <div className='mt-1'>
                   <span className='text-sm font-medium'>Drink Dislikes:</span>
-                  <span className='text-sm text-stone-600'>
+                  <span className='text-sm text-stone-600 ml-1'>
                     {parsed.drink_dislikes.join(', ')}
                   </span>
                 </div>
