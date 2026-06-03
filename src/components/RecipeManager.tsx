@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   useCreateRecipe,
@@ -28,6 +28,13 @@ import {
   ingredientRatio,
   parseRecipe,
 } from '../types/recipe'
+import {
+  DEFAULT_RECIPE_SORT,
+  isRecipeSortBy,
+  RECIPE_SORT_OPTIONS,
+  type RecipeSortBy,
+  sortRecipes,
+} from '../utils/recipeSort'
 import { EmptyState } from './EmptyState'
 import {
   IconArrowRight,
@@ -47,6 +54,9 @@ import { RecipeMarkdown } from './RecipeMarkdown'
 import { StarRating } from './StarRating'
 import { TagInput } from './TagInput'
 import { useToast } from './Toast'
+
+/** localStorage key for the Recipes-tab sort preference. */
+const SORT_STORAGE_KEY = 'fewd.recipes.sortBy'
 
 // --- Sub-components ---
 
@@ -1059,6 +1069,26 @@ export function RecipeManager() {
 
   const [searchQuery, setSearchQuery] = useState('')
   const [viewMode, setViewMode] = useState<'list' | 'add' | 'import'>('list')
+  const [sortBy, setSortBy] = useState<RecipeSortBy>(() => {
+    // localStorage access throws (SecurityError) when site storage is blocked —
+    // e.g. Safari "Block All Cookies". Reading it during render would otherwise
+    // crash the whole app via the root ErrorBoundary, so fall back silently.
+    try {
+      const saved = localStorage.getItem(SORT_STORAGE_KEY)
+      return isRecipeSortBy(saved) ? saved : DEFAULT_RECIPE_SORT
+    } catch {
+      return DEFAULT_RECIPE_SORT
+    }
+  })
+
+  useEffect(() => {
+    // Persistence is best-effort; ignore storage-denied / quota errors.
+    try {
+      localStorage.setItem(SORT_STORAGE_KEY, sortBy)
+    } catch {
+      // no-op
+    }
+  }, [sortBy])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1070,9 +1100,11 @@ export function RecipeManager() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [viewMode])
 
-  const filteredRecipes = recipes?.filter((r) =>
-    r.name.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredRecipes = useMemo(() => {
+    if (!recipes) return undefined
+    const matched = recipes.filter((r) => r.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    return sortRecipes(matched, sortBy)
+  }, [recipes, searchQuery, sortBy])
 
   const handleCreate = (formData: RecipeFormData) => {
     const dto: CreateRecipeDto = {
@@ -1202,7 +1234,7 @@ export function RecipeManager() {
       )}
 
       {viewMode === 'list' && (
-        <div className='mb-4'>
+        <div className='mb-4 flex flex-wrap items-center gap-2'>
           <input
             type='text'
             value={searchQuery}
@@ -1210,6 +1242,19 @@ export function RecipeManager() {
             placeholder='Search recipes...'
             className='input w-full md:w-64'
           />
+          <select
+            aria-label='Sort recipes'
+            value={sortBy}
+            onChange={(e) =>
+              setSortBy(isRecipeSortBy(e.target.value) ? e.target.value : DEFAULT_RECIPE_SORT)}
+            className='input w-full md:w-56'
+          >
+            {RECIPE_SORT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
       )}
 
