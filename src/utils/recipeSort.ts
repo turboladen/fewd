@@ -67,6 +67,7 @@ function compareNullable<T extends number | string>(
 }
 
 const COMPARATORS: Record<RecipeSortBy, Comparator> = {
+  // Name sorts need no tiebreaker — name IS the primary key.
   'name-asc': byNameAsc,
   'name-desc': (a, b) => byNameAsc(b, a),
   'rating-desc': withNameTiebreaker((a, b) => compareNullable(a.rating, b.rating, 'desc', 'last')),

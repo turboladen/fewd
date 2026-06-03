@@ -106,6 +106,36 @@ describe('RecipeManager', () => {
     expect(renderedRecipeOrder(['Mid', 'Top'])).toEqual(['Top', 'Mid'])
   })
 
+  it('falls back to default sort (no crash) when localStorage access is blocked', async () => {
+    // Safari "Block All Cookies" (and sandboxed iframes) make Storage throw
+    // SecurityError on access. Reading it during render would otherwise crash
+    // the whole app via the root ErrorBoundary.
+    const blocked = () => {
+      throw new DOMException('The operation is insecure.', 'SecurityError')
+    }
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(blocked)
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(blocked)
+    try {
+      const apple = makeRecipe({ id: 'r1', name: 'Apple' })
+      const banana = makeRecipe({ id: 'r2', name: 'Banana' })
+      mockJson('GET', '/api/recipes', [banana, apple])
+
+      renderWithProviders(<RecipeManager />, { initialPath: '/recipes' })
+      await waitFor(() => expect(screen.getByText('Apple')).toBeInTheDocument())
+
+      // Rendered fine at the default sort despite the throwing storage.
+      expect(screen.getByLabelText('Sort recipes')).toHaveValue('name-asc')
+      expect(renderedRecipeOrder(['Apple', 'Banana'])).toEqual(['Apple', 'Banana'])
+
+      // Sorting still works even though the persistence write throws and is swallowed.
+      fireEvent.change(screen.getByLabelText('Sort recipes'), { target: { value: 'name-desc' } })
+      expect(renderedRecipeOrder(['Apple', 'Banana'])).toEqual(['Banana', 'Apple'])
+    } finally {
+      getItem.mockRestore()
+      setItem.mockRestore()
+    }
+  })
+
   it('clicking a recipe card navigates to its detail page by slug', async () => {
     // Mount both routes so navigate() from the card actually resolves.
     const pasta = makeRecipe({ id: 'r1', slug: 'pasta', name: 'Pasta' })

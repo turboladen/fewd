@@ -1070,12 +1070,24 @@ export function RecipeManager() {
   const [searchQuery, setSearchQuery] = useState('')
   const [viewMode, setViewMode] = useState<'list' | 'add' | 'import'>('list')
   const [sortBy, setSortBy] = useState<RecipeSortBy>(() => {
-    const saved = localStorage.getItem(SORT_STORAGE_KEY)
-    return isRecipeSortBy(saved) ? saved : DEFAULT_RECIPE_SORT
+    // localStorage access throws (SecurityError) when site storage is blocked —
+    // e.g. Safari "Block All Cookies". Reading it during render would otherwise
+    // crash the whole app via the root ErrorBoundary, so fall back silently.
+    try {
+      const saved = localStorage.getItem(SORT_STORAGE_KEY)
+      return isRecipeSortBy(saved) ? saved : DEFAULT_RECIPE_SORT
+    } catch {
+      return DEFAULT_RECIPE_SORT
+    }
   })
 
   useEffect(() => {
-    localStorage.setItem(SORT_STORAGE_KEY, sortBy)
+    // Persistence is best-effort; ignore storage-denied / quota errors.
+    try {
+      localStorage.setItem(SORT_STORAGE_KEY, sortBy)
+    } catch {
+      // no-op
+    }
   }, [sortBy])
 
   useEffect(() => {
@@ -1089,8 +1101,9 @@ export function RecipeManager() {
   }, [viewMode])
 
   const filteredRecipes = useMemo(() => {
-    const matched = recipes?.filter((r) => r.name.toLowerCase().includes(searchQuery.toLowerCase()))
-    return matched && sortRecipes(matched, sortBy)
+    if (!recipes) return undefined
+    const matched = recipes.filter((r) => r.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    return sortRecipes(matched, sortBy)
   }, [recipes, searchQuery, sortBy])
 
   const handleCreate = (formData: RecipeFormData) => {
@@ -1233,7 +1246,7 @@ export function RecipeManager() {
             aria-label='Sort recipes'
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as RecipeSortBy)}
-            className='input md:w-56'
+            className='input w-full md:w-56'
           >
             {RECIPE_SORT_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
