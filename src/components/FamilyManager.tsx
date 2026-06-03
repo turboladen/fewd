@@ -30,6 +30,15 @@ const emptyForm: PersonFormData = {
   drink_dislikes: [],
 }
 
+function renderPrefRow(label: string, values: string[], margin = 'mt-1') {
+  return values.length > 0 && (
+    <div className={margin}>
+      <span className='text-sm font-medium'>{label}:</span>
+      <span className='text-sm text-stone-600 ml-1'>{values.join(', ')}</span>
+    </div>
+  )
+}
+
 function PersonForm({
   initialData,
   onSubmit,
@@ -362,38 +371,10 @@ export function FamilyManager() {
                   <span className='font-medium'>Goals:</span> {person.dietary_goals}
                 </p>
               )}
-              {parsed.favorites.length > 0 && (
-                <div className='mt-2'>
-                  <span className='text-sm font-medium'>Favorites:</span>
-                  <span className='text-sm text-stone-600 ml-1'>
-                    {parsed.favorites.join(', ')}
-                  </span>
-                </div>
-              )}
-              {parsed.dislikes.length > 0 && (
-                <div className='mt-1'>
-                  <span className='text-sm font-medium'>Dislikes:</span>
-                  <span className='text-sm text-stone-600 ml-1'>
-                    {parsed.dislikes.join(', ')}
-                  </span>
-                </div>
-              )}
-              {parsed.drink_preferences.length > 0 && (
-                <div className='mt-1'>
-                  <span className='text-sm font-medium'>Drink Prefs:</span>
-                  <span className='text-sm text-stone-600 ml-1'>
-                    {parsed.drink_preferences.join(', ')}
-                  </span>
-                </div>
-              )}
-              {parsed.drink_dislikes.length > 0 && (
-                <div className='mt-1'>
-                  <span className='text-sm font-medium'>Drink Dislikes:</span>
-                  <span className='text-sm text-stone-600 ml-1'>
-                    {parsed.drink_dislikes.join(', ')}
-                  </span>
-                </div>
-              )}
+              {renderPrefRow('Favorites', parsed.favorites, 'mt-2')}
+              {renderPrefRow('Dislikes', parsed.dislikes)}
+              {renderPrefRow('Drink Prefs', parsed.drink_preferences)}
+              {renderPrefRow('Drink Dislikes', parsed.drink_dislikes)}
               {person.notes && (
                 <div className='mt-2'>
                   <RecipeMarkdown markdown={person.notes} variant='notes' />
