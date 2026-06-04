@@ -15,12 +15,12 @@ rounded-square ("squircle") background. Chosen direction "A2" from
 brainstorming (selected by the family; squircle preferred over a floating
 circle because it fills the tab and reads larger at 16px).
 
-| Element        | Value                | Palette source              |
-| -------------- | -------------------- | --------------------------- |
-| Background     | sage `#4a7a4a`       | `--color-primary-600`       |
-| Plate ring     | gold `#deb321` stroke| `--color-accent-400`        |
-| Cutlery        | cream `#fdfaf6`      | `--color-surface`           |
-| Corner radius  | ~22% of viewBox      | iOS-app-icon feel           |
+| Element       | Value                 | Palette source        |
+| ------------- | --------------------- | --------------------- |
+| Background    | sage `#4a7a4a`        | `--color-primary-600` |
+| Plate ring    | gold `#deb321` stroke | `--color-accent-400`  |
+| Cutlery       | cream `#fdfaf6`       | `--color-surface`     |
+| Corner radius | ~22% of viewBox       | iOS-app-icon feel     |
 
 Approved composition (`favicon.svg`, the canonical source — `viewBox="0 0 100 100"`):
 
@@ -108,7 +108,7 @@ Pipeline (sketch — finalize flags in the plan):
 2. `favicon-16.png` + `favicon-32.png` → `favicon.ico` via `bun scripts/pack-ico.mjs`
    (lean PNG-frame ICO; png-to-ico rejected for its bloated upscaled 256×256 frame)
 3. apple-touch source SVG → `apple-touch-icon.png` (180×180) via `bunx sharp-cli`
-4. Clean up intermediate PNGs
+4. Clean up intermediate PNG files
 
 `favicon.svg` is committed as-authored (not generated). The script regenerates
 `.ico` and `.png` from the SVG source(s).
