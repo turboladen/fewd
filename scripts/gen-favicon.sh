@@ -19,6 +19,7 @@ bunx png-to-ico "$TMP/favicon-16.png" "$TMP/favicon-32.png" > public/favicon.ico
 
 # apple-touch: square corners (rx=0), full-bleed sage — iOS masks its own rounding.
 echo "→ deriving square apple-touch source"
+grep -q 'rx="22"' "$SVG" || { echo "ERROR: rx=\"22\" not found in $SVG — cannot derive square apple-touch source" >&2; exit 1; }
 sed 's/rx="22"/rx="0"/' "$SVG" > "$TMP/apple-touch.svg"
 
 echo "→ rasterizing apple-touch-icon.png (180x180)"
