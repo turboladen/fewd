@@ -35,7 +35,8 @@ describe('RecipeDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Pasta' })).toBeInTheDocument())
     // Factory default includes "Tomato" in ingredients.
     expect(screen.getByText('Tomato')).toBeInTheDocument()
-    expect(screen.getByText('Boil water, add pasta.')).toBeInTheDocument()
+    // Instructions render through the lazy-loaded RecipeMarkdown.
+    expect(await screen.findByText('Boil water, add pasta.')).toBeInTheDocument()
     // Structural headings confirm we're in RecipeDetail, not the fallback.
     expect(screen.getByRole('heading', { name: 'Ingredients' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Instructions' })).toBeInTheDocument()
