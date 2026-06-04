@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Regenerate favicon.ico and apple-touch-icon.png from public/favicon.svg.
-# No permanent deps: uses `bunx` (sharp-cli = libvips rasterizer, png-to-ico).
+# No permanent deps: bunx (sharp-cli rasterizer) + python3 stdlib (ICO packing).
 # Run from repo root:  ./scripts/gen-favicon.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -14,8 +14,12 @@ echo "→ rasterizing 16px / 32px PNG frames for the .ico"
 bunx sharp-cli --density 600 -i "$SVG" -o "$TMP/favicon-16.png" resize 16 16
 bunx sharp-cli --density 600 -i "$SVG" -o "$TMP/favicon-32.png" resize 32 32
 
+# Pack a lean PNG-frame ICO (16 + 32). png-to-ico is avoided: it upscales to a
+# fixed size ladder incl. a 256x256 frame (~270 KB, blurry). Our browser baseline
+# (Safari 16.4+/Chrome 111+/FF 128+) supports PNG-compressed ICO frames, and the
+# .ico is only a legacy fallback behind favicon.svg.
 echo "→ packing favicon.ico (16 + 32)"
-bunx png-to-ico "$TMP/favicon-16.png" "$TMP/favicon-32.png" > public/favicon.ico
+python3 scripts/pack_ico.py "$TMP/favicon-16.png" "$TMP/favicon-32.png" public/favicon.ico
 
 # apple-touch: square corners (rx=0), full-bleed sage — iOS masks its own rounding.
 echo "→ deriving square apple-touch source"

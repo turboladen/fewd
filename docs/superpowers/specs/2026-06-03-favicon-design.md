@@ -91,15 +91,21 @@ SVG inputs:
 ## Asset Generation
 
 No SVG rasterizer is installed system-wide (no ImageMagick/rsvg/inkscape).
-Generate via `bunx` — no permanent dependencies added, identical output quality
-to installing `sharp`/`png-to-ico` locally (same libraries). Capture the exact
-commands in a committed **`scripts/gen-favicon.sh`** so the assets are
-reproducible if the design changes.
+Rasterizing is done via `bunx sharp-cli` — no permanent dependencies added,
+identical output quality to installing `sharp` locally (same library). ICO
+packing is done by a committed **`scripts/pack_ico.py`** (python3 stdlib only),
+not `bunx png-to-ico`: png-to-ico upscales inputs into a fixed size ladder that
+includes a 256×256 frame, bloating `favicon.ico` to ~270 KB and blurring the
+mark. The python packer emits PNG-compressed ICO frames (supported by the
+browser baseline) at exactly the sizes given, producing a lean ~1.7 KB file.
+Capture the exact commands in a committed **`scripts/gen-favicon.sh`** so the
+assets are reproducible if the design changes.
 
 Pipeline (sketch — finalize flags in the plan):
 
 1. `favicon.svg` → `favicon-16.png`, `favicon-32.png` via `bunx sharp-cli`
-2. `favicon-16.png` + `favicon-32.png` → `favicon.ico` via `bunx png-to-ico`
+2. `favicon-16.png` + `favicon-32.png` → `favicon.ico` via `python3 scripts/pack_ico.py`
+   (lean PNG-frame ICO; png-to-ico rejected for its bloated upscaled 256×256 frame)
 3. apple-touch source SVG → `apple-touch-icon.png` (180×180) via `bunx sharp-cli`
 4. Clean up intermediate PNGs
 
