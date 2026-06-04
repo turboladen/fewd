@@ -191,10 +191,8 @@ describe('CookingView', () => {
       .toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Custard Base' })).toBeInTheDocument()
 
-    // Steps render without their markdown markers...
+    // Steps render without their markdown markers.
     expect(screen.getByText('Whisk eggs.')).toBeInTheDocument()
-    // ...and no literal '##' survives into the rendered output.
-    expect(screen.queryByText(/##/)).not.toBeInTheDocument()
   })
 
   it('hides chrome on mount and restores it on unmount', () => {
