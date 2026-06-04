@@ -39,6 +39,16 @@ describe('ErrorBoundary', () => {
     expect(screen.getByRole('button', { name: /reload app/i })).toBeTruthy()
   })
 
+  it('renders a custom inline fallback instead of the full-screen page when provided', () => {
+    render(
+      <ErrorBoundary fallback={<p>inline fallback</p>}>
+        <Bomb />
+      </ErrorBoundary>,
+    )
+    expect(screen.getByText('inline fallback')).toBeTruthy()
+    expect(screen.queryByText('Something went wrong')).toBeNull()
+  })
+
   it('logs the caught error via console.error', () => {
     render(
       <ErrorBoundary>
