@@ -63,6 +63,9 @@ dist-ssr
 # Playwright MCP runtime artifacts
 .playwright-mcp/
 
+# Superpowers brainstorm visual-companion scratch
+.superpowers/
+
 # Beads, Dolt database files (added by bd init)
 .beads/metadata.json
 .dolt/
