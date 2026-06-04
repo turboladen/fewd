@@ -25,7 +25,7 @@ export interface Props {
  * two heading scales (every `#`–`######` level maps onto one of them); `list` is
  * the shared `<ol>`/`<ul>` body — the factory prepends `list-decimal`/`list-disc`.
  * The bold-callout `<strong>` style is identical across variants, so it lives in
- * the factory rather than the table.
+ * the shared `STRONG_CLASS` constant rather than the per-variant table.
  */
 interface VariantClasses {
   heading2: string
@@ -33,6 +33,9 @@ interface VariantClasses {
   body: string
   list: string
 }
+
+/** Bold-callout style — identical across variants, used by every `makeComponents` map. */
+const STRONG_CLASS = 'text-primary-700 font-semibold'
 
 function makeComponents({ heading2, heading3, body, list }: VariantClasses): Components {
   return {
@@ -45,8 +48,7 @@ function makeComponents({ heading2, heading3, body, list }: VariantClasses): Com
     p: ({ children }) => <p className={body}>{children}</p>,
     ol: ({ children }) => <ol className={`list-decimal ${list}`}>{children}</ol>,
     ul: ({ children }) => <ul className={`list-disc ${list}`}>{children}</ul>,
-    strong: ({ children }) => <strong className='text-primary-700 font-semibold'>{children}
-    </strong>,
+    strong: ({ children }) => <strong className={STRONG_CLASS}>{children}</strong>,
   }
 }
 
