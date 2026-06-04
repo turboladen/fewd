@@ -3,6 +3,13 @@ import type { ErrorInfo, ReactNode } from 'react'
 
 interface Props {
   children: ReactNode
+  /**
+   * Inline fallback rendered in place of the full-screen error page. Use for
+   * localized, non-catastrophic failures (e.g. a lazy chunk that failed to
+   * load) where the rest of the app should keep working. When omitted, the
+   * boundary shows the full-screen "Something went wrong" page.
+   */
+  fallback?: ReactNode
 }
 
 interface State {
@@ -27,6 +34,9 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      if (this.props.fallback !== undefined) {
+        return this.props.fallback
+      }
       return (
         <div className='h-screen flex items-center justify-center bg-surface'>
           <div className='text-center max-w-md px-6'>

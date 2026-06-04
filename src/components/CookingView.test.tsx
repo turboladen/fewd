@@ -23,7 +23,7 @@ describe('CookingView', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Pasta' })).toBeInTheDocument()
   })
 
-  it('renders every ingredient and every instruction step', () => {
+  it('renders every ingredient and every instruction step', async () => {
     const parsed = parseRecipe(makeRecipe({
       name: 'Spaghetti aglio e olio',
       ingredients: JSON.stringify([
@@ -37,7 +37,8 @@ describe('CookingView', () => {
     expect(screen.getByText('Spaghetti')).toBeInTheDocument()
     expect(screen.getByText('Garlic')).toBeInTheDocument()
 
-    expect(screen.getByText('Boil water.')).toBeInTheDocument()
+    // Steps render through the lazy-loaded RecipeMarkdown, so await the first.
+    expect(await screen.findByText('Boil water.')).toBeInTheDocument()
     expect(screen.getByText('Add pasta.')).toBeInTheDocument()
     expect(screen.getByText('Stir.')).toBeInTheDocument()
   })
@@ -105,7 +106,7 @@ describe('CookingView', () => {
     expect(screen.getByText(/\bor\b/)).toBeInTheDocument()
   })
 
-  it('renders enhancedInstructions in place of parsed.instructions when provided', () => {
+  it('renders enhancedInstructions in place of parsed.instructions when provided', async () => {
     const parsed = parseRecipe(makeRecipe({
       instructions: 'Original step.',
     }))
@@ -119,12 +120,12 @@ describe('CookingView', () => {
       </ChromeProvider>,
     )
 
+    expect(await screen.findByText('Enhanced step one.')).toBeInTheDocument()
     expect(screen.queryByText('Original step.')).not.toBeInTheDocument()
-    expect(screen.getByText('Enhanced step one.')).toBeInTheDocument()
     expect(screen.getByText('Enhanced step two.')).toBeInTheDocument()
   })
 
-  it('renders soft-wrapped enhanced paragraphs as one step per paragraph, not per line', () => {
+  it('renders soft-wrapped enhanced paragraphs as one step per paragraph, not per line', async () => {
     const parsed = parseRecipe(makeRecipe())
     const enhanced = [
       'Heat 4 tbsp olive oil in a large pot. Add onion,',
@@ -143,6 +144,9 @@ describe('CookingView', () => {
       </ChromeProvider>,
     )
 
+    // Step bodies render through the lazy RecipeMarkdown, so await one before
+    // reading the (synchronously-present) step <li> textContent.
+    await screen.findByText('Add garlic and cook 1 minute more.')
     const steps = screen.getAllByRole('listitem').filter((li) => li.closest('ol'))
     expect(steps).toHaveLength(2)
     expect(steps[0].textContent).toContain('Heat 4 tbsp olive oil')
@@ -150,7 +154,7 @@ describe('CookingView', () => {
     expect(steps[1].textContent).toContain('Add garlic and cook 1 minute more.')
   })
 
-  it('renders **bold** markdown in enhanced instructions as <strong> elements', () => {
+  it('renders **bold** markdown in enhanced instructions as <strong> elements', async () => {
     const parsed = parseRecipe(makeRecipe())
     render(
       <ChromeProvider>
@@ -162,11 +166,11 @@ describe('CookingView', () => {
       </ChromeProvider>,
     )
 
-    const bold = screen.getByText('butter')
+    const bold = await screen.findByText('butter')
     expect(bold.tagName).toBe('STRONG')
   })
 
-  it('renders ## section headings as dividers and never leaks literal markers', () => {
+  it('renders ## section headings as dividers and never leaks literal markers', async () => {
     const parsed = parseRecipe(makeRecipe({
       instructions: [
         '## Caramelized Pineapple',
@@ -179,12 +183,15 @@ describe('CookingView', () => {
     }))
     renderCookingView(parsed)
 
+    // Await a markdown-rendered step so the lazy chunk has fully rendered before
+    // we assert no literal markers leaked.
+    expect(await screen.findByText('Melt butter.')).toBeInTheDocument()
+
     expect(screen.getByRole('heading', { level: 2, name: 'Caramelized Pineapple' }))
       .toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Custard Base' })).toBeInTheDocument()
 
     // Steps render without their markdown markers...
-    expect(screen.getByText('Melt butter.')).toBeInTheDocument()
     expect(screen.getByText('Whisk eggs.')).toBeInTheDocument()
     // ...and no literal '##' survives into the rendered output.
     expect(screen.queryByText(/##/)).not.toBeInTheDocument()

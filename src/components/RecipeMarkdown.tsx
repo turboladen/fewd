@@ -1,73 +1,35 @@
-import Markdown, { type Components } from 'react-markdown'
+import { lazy, Suspense } from 'react'
+import { ErrorBoundary } from './ErrorBoundary'
+import type { Props } from './RecipeMarkdownImpl'
 
 /**
- * Renders recipe instruction markdown (headers, ordered/unordered lists, inline
- * **bold**) styled with the app's design tokens, so authored markdown displays
- * as formatted content instead of raw markers.
+ * Lazy boundary for the markdown renderer. `react-markdown` and its parser tree
+ * (micromark/mdast/unified — the bulk of the JS bundle) are deferred behind a
+ * dynamic import so they split into a separate chunk that only loads when a
+ * recipe/notes/cook view first renders, not on initial page load (fewd-0fq).
  *
- * Shared by the Recipe detail view (`detail`, small text), cook mode (`cook`,
- * large text), and the recipe/person Notes sections (`notes`, muted italic) so
- * they render consistently. Only inline + list/heading markdown is supported
- * (no raw HTML — react-markdown omits it by default).
+ * The public name + import path are unchanged, so every callsite stays the same.
  */
-interface Props {
-  markdown: string
-  variant?: 'detail' | 'cook' | 'notes'
-}
+const RecipeMarkdownImpl = lazy(() => import('./RecipeMarkdownImpl'))
 
 /**
- * Per-variant Tailwind classes for each element. `heading2`/`heading3` cover the
- * two heading scales (every `#`–`######` level maps onto one of them); `list` is
- * the shared `<ol>`/`<ul>` body — the factory prepends `list-decimal`/`list-disc`.
- * The bold-callout `<strong>` style is identical across variants, so it lives in
- * the factory rather than the table.
+ * `Suspense` covers the chunk's *loading* state, but not a *failed* load — a
+ * rejected dynamic import (e.g. a stale chunk hash after a redeploy with a tab
+ * open) throws past Suspense to the nearest error boundary. Without a local one
+ * that would be the app-root `ErrorBoundary`, white-screening the whole app just
+ * because one recipe's markdown chunk 404'd. The inline `ErrorBoundary` here
+ * degrades to the raw markdown text instead, so the recipe stays readable.
+ *
+ * `Suspense fallback={null}`: content is already in memory and the chunk loads
+ * fast, so a momentary blank beats flashing raw markers. Once the chunk resolves
+ * it is cached, so later instances (e.g. cook mode's per-step renders) are sync.
  */
-interface VariantClasses {
-  heading2: string
-  heading3: string
-  body: string
-  list: string
-}
-
-function makeComponents({ heading2, heading3, body, list }: VariantClasses): Components {
-  return {
-    h1: ({ children }) => <h1 className={heading2}>{children}</h1>,
-    h2: ({ children }) => <h2 className={heading2}>{children}</h2>,
-    h3: ({ children }) => <h3 className={heading3}>{children}</h3>,
-    h4: ({ children }) => <h4 className={heading3}>{children}</h4>,
-    h5: ({ children }) => <h5 className={heading3}>{children}</h5>,
-    h6: ({ children }) => <h6 className={heading3}>{children}</h6>,
-    p: ({ children }) => <p className={body}>{children}</p>,
-    ol: ({ children }) => <ol className={`list-decimal ${list}`}>{children}</ol>,
-    ul: ({ children }) => <ul className={`list-disc ${list}`}>{children}</ul>,
-    strong: ({ children }) => <strong className='text-primary-700 font-semibold'>{children}
-    </strong>,
-  }
-}
-
-const VARIANTS: Record<NonNullable<Props['variant']>, Components> = {
-  detail: makeComponents({
-    heading2: 'font-heading text-lg font-semibold text-stone-900 mt-4 mb-1 first:mt-0',
-    heading3: 'font-heading text-base font-semibold text-stone-800 mt-3 mb-1',
-    body: 'text-sm text-stone-700 leading-relaxed mb-2 last:mb-0',
-    list: 'pl-5 space-y-1 text-sm text-stone-700 leading-relaxed mb-2 last:mb-0',
-  }),
-  cook: makeComponents({
-    heading2: 'font-heading text-2xl md:text-3xl font-semibold text-stone-900 mt-2 mb-3',
-    heading3: 'font-heading text-xl md:text-2xl font-semibold text-stone-800 mt-2 mb-2',
-    body: 'text-lg md:text-xl leading-relaxed text-stone-800',
-    list: 'pl-6 space-y-2 text-lg md:text-xl leading-relaxed text-stone-800',
-  }),
-  // Muted + italic to match the Notes section's existing voice; headings stay
-  // upright so a noted section label still reads as a label.
-  notes: makeComponents({
-    heading2: 'font-heading text-base font-semibold text-stone-700 mt-3 mb-1 first:mt-0',
-    heading3: 'font-heading text-sm font-semibold text-stone-700 mt-2 mb-1',
-    body: 'text-sm text-stone-600 italic leading-relaxed mb-2 last:mb-0',
-    list: 'pl-5 space-y-1 text-sm text-stone-600 italic leading-relaxed mb-2 last:mb-0',
-  }),
-}
-
-export function RecipeMarkdown({ markdown, variant = 'detail' }: Props) {
-  return <Markdown components={VARIANTS[variant]}>{markdown}</Markdown>
+export function RecipeMarkdown(props: Props) {
+  return (
+    <ErrorBoundary fallback={<p className='whitespace-pre-wrap'>{props.markdown}</p>}>
+      <Suspense fallback={null}>
+        <RecipeMarkdownImpl {...props} />
+      </Suspense>
+    </ErrorBoundary>
+  )
 }
