@@ -89,7 +89,7 @@ impl ShoppingService {
                                     source_name: Some(recipe.name.clone()),
                                     meal_id: meal.id.clone(),
                                     meal_date: meal_date.clone(),
-                                    meal_type: meal.meal_type.clone(),
+                                    meal_type: meal.meal_type.to_string(),
                                     recipe_servings: Some(recipe.servings),
                                     person_servings: Some(*servings_count),
                                 };
@@ -110,7 +110,7 @@ impl ShoppingService {
                                 source_name: None,
                                 meal_id: meal.id.clone(),
                                 meal_date: meal_date.clone(),
-                                meal_type: meal.meal_type.clone(),
+                                meal_type: meal.meal_type.to_string(),
                                 recipe_servings: None,
                                 person_servings: None,
                             };

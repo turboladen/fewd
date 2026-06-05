@@ -6,12 +6,13 @@ import {
 } from '../hooks/useMealTemplates'
 import { usePeople } from '../hooks/usePeople'
 import { useRecipes } from '../hooks/useRecipes'
+import type { MealType } from '../types/meal'
 import type { ParsedMealTemplate } from '../types/mealTemplate'
 import { parseMealTemplate } from '../types/mealTemplate'
 import { EmptyState } from './EmptyState'
 import { useToast } from './Toast'
 
-const MEAL_TYPES = ['Breakfast', 'Lunch', 'Dinner', 'Snack']
+const MEAL_TYPES: MealType[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack']
 
 export function TemplateManager() {
   const { data: rawTemplates, isLoading, error } = useMealTemplates()
@@ -24,7 +25,7 @@ export function TemplateManager() {
   const [search, setSearch] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
-  const [editMealType, setEditMealType] = useState('')
+  const [editMealType, setEditMealType] = useState<MealType>('Dinner')
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -185,7 +186,7 @@ export function TemplateManager() {
                               />
                               <select
                                 value={editMealType}
-                                onChange={(e) => setEditMealType(e.target.value)}
+                                onChange={(e) => setEditMealType(e.target.value as MealType)}
                                 className='input-sm'
                               >
                                 {MEAL_TYPES.map((mt) => <option key={mt} value={mt}>{mt}</option>)}

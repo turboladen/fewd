@@ -1652,8 +1652,9 @@ mod tests {
         assert_eq!(meals.len(), 1, "exactly one meal should round-trip");
         // The two invariants MealPlanner.tsx pins with strict equality.
         assert_eq!(
-            meals[0].meal_type, "Dinner",
-            "lowercase 'dinner' must persist as canonical Title-Case 'Dinner'"
+            meals[0].meal_type,
+            crate::dto::MealType::Dinner,
+            "lowercase 'dinner' must persist as canonical Title-Case Dinner"
         );
         assert_eq!(
             meals[0].order_index, 2,

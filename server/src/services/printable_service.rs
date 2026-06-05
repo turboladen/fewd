@@ -46,7 +46,7 @@ use std::fmt::Write as _;
 
 use chrono::{Datelike, NaiveDate};
 
-use crate::dto::{PersonServingDto, TimeValueDto};
+use crate::dto::{MealType, PersonServingDto, TimeValueDto};
 use crate::entities::{meal, recipe};
 use crate::mcp::schemas::printable::{DayOverlay, DontForgetItem, PrintableInput, ValidatedRange};
 
@@ -72,12 +72,12 @@ pub fn render(
     validated: &ValidatedRange,
     input: &PrintableInput,
 ) -> String {
-    let included_slots: std::collections::HashSet<&str> =
-        validated.include.iter().map(String::as_str).collect();
+    let included_slots: std::collections::HashSet<MealType> =
+        validated.include.iter().copied().collect();
 
     let visible_meals: Vec<&meal::Model> = meals
         .iter()
-        .filter(|m| included_slots.contains(m.meal_type.as_str()))
+        .filter(|m| included_slots.contains(&m.meal_type))
         .collect();
 
     let overlay_by_date: HashMap<NaiveDate, &DayOverlay> = input
@@ -567,14 +567,9 @@ fn format_week_label(start: NaiveDate, end: NaiveDate) -> String {
 /// Single-slot defaults to that slot ("Dinner", "Breakfast"); multi-slot
 /// gets a generic "Meal" wrapper so the title doesn't read awkwardly
 /// ("Breakfast + Dinner Plan" would force layout work this v1 doesn't do).
-fn slot_label(include: &[String]) -> &'static str {
+fn slot_label(include: &[MealType]) -> &'static str {
     match include {
-        [one] => match one.as_str() {
-            "Breakfast" => "Breakfast",
-            "Lunch" => "Lunch",
-            "Snack" => "Snack",
-            _ => "Dinner",
-        },
+        [one] => one.as_str(),
         _ => "Meal",
     }
 }
@@ -583,7 +578,7 @@ fn slot_label(include: &[String]) -> &'static str {
 /// this reads "This Week's / Dinners" (matches Steve's reference design).
 /// Other single-slot variants read "This Week's / Breakfasts" etc.
 /// Multi-slot widens to "This Week's / Meals" so the layout still balances.
-fn title_lines(include: &[String]) -> (&'static str, String) {
+fn title_lines(include: &[MealType]) -> (&'static str, String) {
     let bottom = match include {
         [one] => format!("{one}s"), // "Dinners", "Breakfasts", "Lunches"... acceptable for v1
         _ => "Meals".to_string(),
@@ -593,10 +588,10 @@ fn title_lines(include: &[String]) -> (&'static str, String) {
 
 fn default_foot_note(validated: &ValidatedRange) -> String {
     let slot_summary = match validated.include.as_slice() {
-        [one] => one.to_lowercase() + "s only",
+        [one] => one.as_str().to_lowercase() + "s only",
         many => many
             .iter()
-            .map(|s| s.to_lowercase())
+            .map(|s| s.as_str().to_lowercase())
             .collect::<Vec<_>>()
             .join(" + "),
     };
@@ -684,7 +679,7 @@ mod tests {
         meal::Model {
             id: id.into(),
             date: d,
-            meal_type: "Dinner".into(),
+            meal_type: MealType::Dinner,
             order_index: 2,
             servings: serde_json::to_string(&servings).unwrap(),
             created_at: Utc::now(),
@@ -798,7 +793,7 @@ mod tests {
         let breakfast = meal::Model {
             id: "mb".into(),
             date: date(2026, 5, 11),
-            meal_type: "Breakfast".into(),
+            meal_type: MealType::Breakfast,
             order_index: 0,
             servings: serde_json::to_string(&vec![serving_recipe("alice", "r-gyoza", None)])
                 .unwrap(),
@@ -1119,7 +1114,7 @@ mod tests {
         let corrupt = meal::Model {
             id: "m-bad".into(),
             date: date(2026, 5, 11),
-            meal_type: "Dinner".into(),
+            meal_type: MealType::Dinner,
             order_index: 2,
             servings: "{not valid json".into(),
             created_at: Utc::now(),

@@ -1,5 +1,9 @@
 import type { Ingredient } from './recipe'
 
+/** Mirrors the backend `MealType` enum. The planner renders per-day slots by strict
+ * equality on these exact Title-Case values; the backend rejects anything else. */
+export type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack'
+
 export type PersonServing =
   | {
     food_type: 'recipe'
@@ -18,7 +22,7 @@ export type PersonServing =
 export interface Meal {
   id: string
   date: string
-  meal_type: string
+  meal_type: MealType
   order_index: number
   servings: string // JSON string of PersonServing[]
   created_at: string
@@ -31,14 +35,14 @@ export interface ParsedMeal extends Omit<Meal, 'servings'> {
 
 export interface CreateMealDto {
   date: string
-  meal_type: string
+  meal_type: MealType
   order_index: number
   servings: PersonServing[]
 }
 
 export interface UpdateMealDto {
   date?: string
-  meal_type?: string
+  meal_type?: MealType
   order_index?: number
   servings?: PersonServing[]
 }

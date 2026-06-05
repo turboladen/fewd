@@ -3,7 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::dto::{CreateMealDto, PersonServingDto};
+use crate::dto::{CreateMealDto, MealType, PersonServingDto};
 use crate::entities::meal;
 
 use crate::mcp::lookups::MealLookups;
@@ -11,7 +11,7 @@ use crate::mcp::lookups::MealLookups;
 use super::common::{
     ingredient_in, ingredient_out, parse_json, validate_date_yyyy_mm_dd, IngredientOut,
 };
-use super::errors::{CreateMealError, InputError, ResolveError, VALID_MEAL_TYPES};
+use super::errors::{CreateMealError, InputError, ResolveError};
 
 /// One serving within a meal. The `kind` discriminator distinguishes a recipe
 /// assignment from an ad-hoc item list.
@@ -105,7 +105,7 @@ pub fn meal_to_brief(meal: &meal::Model, lookups: &MealLookups) -> Result<MealBr
     Ok(MealBrief {
         id: meal.id.clone(),
         date: meal.date.format("%Y-%m-%d").to_string(),
-        meal_type: meal.meal_type.clone(),
+        meal_type: meal.meal_type.to_string(),
         order_index: meal.order_index,
         servings: servings_out,
     })
@@ -192,8 +192,13 @@ pub fn create_meal_input_to_dto(
 ) -> Result<CreateMealDto, CreateMealError> {
     validate_date_yyyy_mm_dd(&input.date, "date")?;
 
-    let meal_type = canonical_meal_type(&input.meal_type)
-        .ok_or_else(|| InputError::UnknownMealType(input.meal_type.clone()))?;
+    // The MCP schema keeps meal_type as a lenient String (the LLM sends lowercase);
+    // MealType::from_str absorbs the old canonical_meal_type normalizer and the
+    // actionable error is preserved via InputError::UnknownMealType.
+    let meal_type: MealType = input
+        .meal_type
+        .parse()
+        .map_err(|_| InputError::UnknownMealType(input.meal_type.clone()))?;
 
     for s in &input.servings {
         if let ServingInput::Recipe { servings_count, .. } = s {
@@ -205,7 +210,7 @@ pub fn create_meal_input_to_dto(
 
     let order_index = input
         .order_index
-        .unwrap_or_else(|| default_order_index(&meal_type));
+        .unwrap_or_else(|| default_order_index(meal_type));
 
     let servings = input
         .servings
@@ -226,31 +231,13 @@ pub fn create_meal_input_to_dto(
 /// order_index === Y` equality, so a Dinner at order 0 would silently not
 /// appear in any slot even though it's in the data. Snack has no slot in
 /// the current UI — it gets 3 as a stable non-colliding default.
-fn default_order_index(canonical_meal_type: &str) -> i32 {
-    match canonical_meal_type {
-        "Breakfast" => 0,
-        "Lunch" => 1,
-        "Dinner" => 2,
-        "Snack" => 3,
-        _ => 0,
+fn default_order_index(meal_type: MealType) -> i32 {
+    match meal_type {
+        MealType::Breakfast => 0,
+        MealType::Lunch => 1,
+        MealType::Dinner => 2,
+        MealType::Snack => 3,
     }
-}
-
-/// Normalize an LLM-supplied meal_type to the canonical Title-Case form the
-/// rest of fewd uses. Accepts any case (`"dinner"`, `"DINNER"`, `"Dinner"`)
-/// plus leading/trailing whitespace. Returns `None` for unknown types so the
-/// caller can surface a user-facing error.
-///
-/// Why this matters: the web UI in `MealPlanner.tsx` renders per-day cells
-/// by strict equality on `meal_type` (`meal.meal_type === 'Dinner'`), so any
-/// MCP-created meal stored as `"dinner"` silently disappears from the
-/// planner even though it's visible in the shopping-list aggregation.
-pub(super) fn canonical_meal_type(input: &str) -> Option<String> {
-    let trimmed = input.trim().to_lowercase();
-    VALID_MEAL_TYPES
-        .iter()
-        .find(|canonical| canonical.to_lowercase() == trimmed)
-        .map(|s| s.to_string())
 }
 
 fn serving_input_to_dto(
@@ -531,8 +518,9 @@ mod tests {
             };
             let dto = create_meal_input_to_dto(input, &mk_lookups()).unwrap();
             assert_eq!(
-                dto.meal_type, "Dinner",
-                "expected {variant:?} to normalize to 'Dinner'"
+                dto.meal_type,
+                MealType::Dinner,
+                "expected {variant:?} to normalize to Dinner"
             );
         }
     }
@@ -540,10 +528,10 @@ mod tests {
     #[test]
     fn create_meal_input_normalizes_all_four_meal_types() {
         for (input_value, expected) in [
-            ("breakfast", "Breakfast"),
-            ("lunch", "Lunch"),
-            ("dinner", "Dinner"),
-            ("snack", "Snack"),
+            ("breakfast", MealType::Breakfast),
+            ("lunch", MealType::Lunch),
+            ("dinner", MealType::Dinner),
+            ("snack", MealType::Snack),
         ] {
             let input = CreateMealInput {
                 date: "2026-04-22".into(),
@@ -561,7 +549,7 @@ mod tests {
         let meal = meal::Model {
             id: "meal-1".into(),
             date: NaiveDate::from_ymd_opt(2026, 4, 24).unwrap(),
-            meal_type: "dinner".into(),
+            meal_type: MealType::Dinner,
             order_index: 0,
             servings: serde_json::to_string(&[PersonServingDto::Recipe {
                 person_id: "alice-id".into(),
@@ -601,7 +589,7 @@ mod tests {
         let meal = meal::Model {
             id: "meal-2".into(),
             date: NaiveDate::from_ymd_opt(2026, 4, 24).unwrap(),
-            meal_type: "dinner".into(),
+            meal_type: MealType::Dinner,
             order_index: 0,
             servings: serde_json::to_string(&[PersonServingDto::Recipe {
                 person_id: "ghost".into(),
