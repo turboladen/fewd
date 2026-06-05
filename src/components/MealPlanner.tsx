@@ -13,7 +13,7 @@ import {
 import { usePeople } from '../hooks/usePeople'
 import { useRecipes } from '../hooks/useRecipes'
 import type { CreateMealDto, MealType, ParsedMeal, PersonServing } from '../types/meal'
-import { parseMeal } from '../types/meal'
+import { MEAL_TYPES, parseMeal } from '../types/meal'
 import type { ParsedMealTemplate } from '../types/mealTemplate'
 import { parseMealTemplate } from '../types/mealTemplate'
 import type { Person } from '../types/person'
@@ -38,9 +38,6 @@ const DEFAULT_MEALS: { type: MealType; order: number }[] = [
   { type: 'Lunch', order: 1 },
   { type: 'Dinner', order: 2 },
 ]
-
-/** The canonical meal types a custom slot can be labeled with. */
-const MEAL_TYPE_OPTIONS: MealType[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack']
 
 // --- PersonServingEditor ---
 
@@ -610,7 +607,7 @@ function MealEditor({
                   onChange={(e) => setCustomMealType(e.target.value as MealType)}
                   className='input text-lg font-semibold'
                 >
-                  {MEAL_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                  {MEAL_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               )
               : mealType}

@@ -125,4 +125,33 @@ mod tests {
         let parsed: MealType = serde_json::from_str("\"Lunch\"").unwrap();
         assert_eq!(parsed, MealType::Lunch);
     }
+
+    /// `meal_type` is spelled out as a literal in four independent places: the
+    /// DeriveActiveEnum `string_value` (DB), the `#[serde(rename)]` (HTTP wire), the
+    /// `as_str` match, and the `FromStr` match. If any drifts from the others, a meal
+    /// writes one string to the DB but serializes another to the planner — the exact
+    /// invisible-meal bug this enum exists to kill. Assert all four agree, for every
+    /// variant (so a newly-added variant can't be half-wired).
+    #[test]
+    fn all_string_representations_agree_for_every_variant() {
+        use sea_orm::{ActiveEnum, Iterable};
+        for variant in MealType::iter() {
+            let canonical = variant.as_str();
+            assert_eq!(
+                variant.to_value(),
+                canonical,
+                "DB string_value != as_str for {variant:?}"
+            );
+            assert_eq!(
+                serde_json::to_string(&variant).unwrap(),
+                format!("\"{canonical}\""),
+                "serde value != as_str for {variant:?}",
+            );
+            assert_eq!(
+                canonical.parse::<MealType>(),
+                Ok(variant),
+                "FromStr != as_str for {variant:?}"
+            );
+        }
+    }
 }

@@ -59,11 +59,22 @@ async fn normalize(manager: &SchemaManager<'_>, table: &str) -> Result<(), DbErr
         .map(|(_, u)| format!("'{u}'"))
         .collect::<Vec<_>>()
         .join(", ");
-    db.execute(Statement::from_string(
-        DatabaseBackend::Sqlite,
-        format!("UPDATE {table} SET meal_type = 'Dinner' WHERE UPPER(TRIM(meal_type)) NOT IN ({upper_list})"),
-    ))
-    .await?;
+    let coerced = db
+        .execute(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            format!("UPDATE {table} SET meal_type = 'Dinner' WHERE UPPER(TRIM(meal_type)) NOT IN ({upper_list})"),
+        ))
+        .await?;
+
+    // Coercing unknown values rewrites real user data, so make it observable rather than
+    // silent (this runs at startup; stderr lands in the systemd journal). The migration
+    // crate intentionally has no tracing dep, hence eprintln.
+    if coerced.rows_affected() > 0 {
+        eprintln!(
+            "migration m20260605_000018: coerced {} row(s) in `{table}` with an unrecognized meal_type to 'Dinner'",
+            coerced.rows_affected(),
+        );
+    }
 
     Ok(())
 }

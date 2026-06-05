@@ -7,12 +7,11 @@ import {
 import { usePeople } from '../hooks/usePeople'
 import { useRecipes } from '../hooks/useRecipes'
 import type { MealType } from '../types/meal'
+import { MEAL_TYPES } from '../types/meal'
 import type { ParsedMealTemplate } from '../types/mealTemplate'
 import { parseMealTemplate } from '../types/mealTemplate'
 import { EmptyState } from './EmptyState'
 import { useToast } from './Toast'
-
-const MEAL_TYPES: MealType[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack']
 
 export function TemplateManager() {
   const { data: rawTemplates, isLoading, error } = useMealTemplates()

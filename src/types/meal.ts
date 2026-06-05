@@ -4,6 +4,10 @@ import type { Ingredient } from './recipe'
  * equality on these exact Title-Case values; the backend rejects anything else. */
 export type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack'
 
+/** All meal types in canonical slot order. Single source of truth for selectors so a
+ * new type can't be added to the union but silently missing from a dropdown. */
+export const MEAL_TYPES: readonly MealType[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack']
+
 export type PersonServing =
   | {
     food_type: 'recipe'
