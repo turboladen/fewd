@@ -45,18 +45,20 @@ async fn every_pooled_connection_has_busy_timeout() {
     // Pin one connection, then open a second while the first is held. The pool must
     // therefore hand out two *distinct* physical connections. The fix's whole point is
     // that the second one — opened lazily, after init's PRAGMA already ran — still
-    // carries busy_timeout. A bounded wait keeps the failure fast and legible when the
-    // pool is capped at a single connection (the pre-fix default).
+    // carries busy_timeout. The bound only exists to turn a pool-of-1 regression (which
+    // would otherwise hang forever, since `cargo test` has no per-test timeout) into a
+    // fast, legible failure; it's set generously so a merely-busy CI runner opening a
+    // genuine second connection never trips it.
     let mut first = pool
         .acquire()
         .await
         .expect("acquire first connection failed");
-    let mut second = tokio::time::timeout(Duration::from_secs(2), pool.acquire())
+    let mut second = tokio::time::timeout(Duration::from_secs(10), pool.acquire())
         .await
         .expect(
-            "could not open a second concurrent connection within 2s — pool is capped at one \
-             connection, so pragmas cannot be guaranteed across the concurrent UI + MCP load \
-             this fix targets",
+            "could not open a second concurrent connection within 10s — the pool is almost \
+             certainly capped at a single connection, so pragmas cannot be guaranteed across \
+             the concurrent UI + MCP load this fix targets",
         )
         .expect("acquire second connection failed");
 
@@ -68,8 +70,9 @@ async fn every_pooled_connection_has_busy_timeout() {
             .get(0);
         assert_eq!(
             timeout, 5000,
-            "{label} pooled connection has busy_timeout={timeout}, expected 5000 — \
-             pragmas were not applied to every connection",
+            "{label} pooled connection has busy_timeout={timeout}, expected 5000 (the value \
+             db::init configures) — the pragma did not reach this connection (or the \
+             configured busy_timeout changed)",
         );
     }
 }
