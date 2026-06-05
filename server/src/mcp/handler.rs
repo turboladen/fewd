@@ -1568,6 +1568,99 @@ mod tests {
         assert_tool_user_error(result, &["Bob", "list_people"]);
     }
 
+    use crate::dto::CreateRecipeDto;
+    use crate::entities::recipe;
+
+    async fn seed_recipe(mcp: &FewdMcp, name: &str) -> recipe::Model {
+        RecipeService::create(
+            &mcp.db,
+            CreateRecipeDto {
+                name: name.into(),
+                description: None,
+                source: "manual".into(),
+                source_url: None,
+                parent_recipe_id: None,
+                prep_time: None,
+                cook_time: None,
+                total_time: None,
+                servings: 4,
+                portion_size: None,
+                instructions: "Mix and cook".into(),
+                ingredients: vec![],
+                nutrition_per_serving: None,
+                tags: vec![],
+                notes: None,
+                icon: None,
+            },
+        )
+        .await
+        .expect("seed recipe")
+    }
+
+    /// Cross-boundary regression guard (fewd-lb2): a meal created through the
+    /// real MCP `create_meal` tool with a *non-canonical* `meal_type` and an
+    /// omitted `order_index` must read back — via the same service the
+    /// `/api/meals` route uses — in the exact Title-Case + slot shape the web
+    /// planner renders with strict equality (`meal_type === 'Dinner' &&
+    /// order_index === 2` in MealPlanner.tsx). Feeding lowercase "dinner" means
+    /// this fails if `canonical_meal_type`/`default_order_index` ever regress —
+    /// the class of bug that made meals silently invisible in commit db20f56.
+    #[tokio::test]
+    async fn create_meal_lowercase_type_round_trips_to_canonical_planner_shape() {
+        let mcp = setup_test_mcp().await;
+        seed_person(&mcp, "Alice").await;
+        let recipe = seed_recipe(&mcp, "Pasta").await;
+
+        // ServingInput lives in a private submodule, so build the input via
+        // JSON to avoid widening the schemas public surface (same idiom as the
+        // unknown-person test above). meal_type is lowercase and order_index is
+        // omitted on purpose: both must be normalized by the MCP write path.
+        let input: CreateMealInput = serde_json::from_str(&format!(
+            r#"{{
+                "date": "2026-06-10",
+                "meal_type": "dinner",
+                "servings": [{{
+                    "kind": "recipe",
+                    "person_name": "Alice",
+                    "recipe_slug": "{}",
+                    "servings_count": 1.0
+                }}]
+            }}"#,
+            recipe.slug,
+        ))
+        .expect("CreateMealInput JSON shape");
+
+        let result = mcp
+            .create_meal(LenientParameters::for_test(input))
+            .await
+            .expect("create_meal returns Ok");
+        assert_ne!(
+            result.is_error,
+            Some(true),
+            "happy-path create_meal must not be a tool-level error: {result:?}"
+        );
+
+        // Read back through the exact path routes::meals::list calls.
+        let meals = MealService::get_all_for_date_range(
+            &mcp.db,
+            "2026-06-10".to_string(),
+            "2026-06-10".to_string(),
+        )
+        .await
+        .expect("read meals back");
+
+        assert_eq!(meals.len(), 1, "exactly one meal should round-trip");
+        // The two invariants MealPlanner.tsx pins with strict equality.
+        assert_eq!(
+            meals[0].meal_type, "Dinner",
+            "lowercase 'dinner' must persist as canonical Title-Case 'Dinner'"
+        );
+        assert_eq!(
+            meals[0].order_index, 2,
+            "omitted order_index must default to the Dinner slot (2), not 0"
+        );
+    }
+
     // ─── update_person ──────────────────────────────────────────────
     //
     // Tools that mutate state need a happy-path test that re-reads the
