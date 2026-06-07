@@ -603,6 +603,7 @@ function MealEditor({
             {isCustom
               ? (
                 <select
+                  aria-label='Meal type'
                   value={customMealType}
                   onChange={(e) => setCustomMealType(e.target.value as MealType)}
                   className='input text-lg font-semibold'
