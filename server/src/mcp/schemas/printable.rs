@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer};
 
 use super::common::validate_date_yyyy_mm_dd;
 use super::errors::InputError;
-use super::meals::canonical_meal_type;
+use crate::dto::MealType;
 
 /// Hard cap on the date span for a single printable. The template is sized
 /// to fit a US Letter portrait sheet at default print scale; loosening this
@@ -140,7 +140,7 @@ pub struct ValidatedRange {
     pub end: NaiveDate,
     /// Canonical Title-Case slot names ("Breakfast" / "Lunch" / "Dinner"
     /// / "Snack"). Deduped while preserving first-seen order.
-    pub include: Vec<String>,
+    pub include: Vec<MealType>,
 }
 
 impl PrintableInput {
@@ -167,14 +167,15 @@ impl PrintableInput {
         }
 
         let include = if self.include.is_empty() {
-            vec!["Dinner".to_string()]
+            vec![MealType::Dinner]
         } else {
             let mut seen = std::collections::HashSet::new();
             let mut out = Vec::with_capacity(self.include.len());
             for slot in &self.include {
-                let canonical = canonical_meal_type(slot)
-                    .ok_or_else(|| InputError::UnknownMealType(slot.clone()))?;
-                if seen.insert(canonical.clone()) {
+                let canonical: MealType = slot
+                    .parse()
+                    .map_err(|_| InputError::UnknownMealType(slot.clone()))?;
+                if seen.insert(canonical) {
                     out.push(canonical);
                 }
             }
@@ -297,7 +298,7 @@ mod tests {
         assert_eq!(v.start, NaiveDate::from_ymd_opt(2026, 5, 11).unwrap());
         assert_eq!(v.end, NaiveDate::from_ymd_opt(2026, 5, 17).unwrap());
         // Empty `include` defaults to Dinner-only.
-        assert_eq!(v.include, vec!["Dinner".to_string()]);
+        assert_eq!(v.include, vec![MealType::Dinner]);
     }
 
     #[test]
@@ -368,7 +369,7 @@ mod tests {
         let v = p.validate().unwrap();
         assert_eq!(
             v.include,
-            vec!["Dinner".to_string(), "Breakfast".into(), "Lunch".into()]
+            vec![MealType::Dinner, MealType::Breakfast, MealType::Lunch]
         );
     }
 
@@ -377,7 +378,7 @@ mod tests {
         let mut p = input("2026-05-11", "2026-05-17");
         p.include = vec!["Dinner".into(), "dinner".into(), "DINNER".into()];
         let v = p.validate().unwrap();
-        assert_eq!(v.include, vec!["Dinner".to_string()]);
+        assert_eq!(v.include, vec![MealType::Dinner]);
     }
 
     #[test]
@@ -394,7 +395,7 @@ mod tests {
     #[test]
     fn validate_empty_include_defaults_to_dinner() {
         let v = input("2026-05-11", "2026-05-17").validate().unwrap();
-        assert_eq!(v.include, vec!["Dinner".to_string()]);
+        assert_eq!(v.include, vec![MealType::Dinner]);
     }
 
     // ─── Overlay collection-size caps ──────────────────────────────────

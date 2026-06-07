@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+/// Re-exported so callers can use `dto::MealType`; the canonical definition lives with
+/// the entities (the lower layer that owns the column).
+pub use crate::entities::sea_orm_active_enums::MealType;
+
 // ─── Shared helper ──────────────────────────────────────────────
 
 /// Deserialize an f64 that may be null (AI sometimes returns null for "to taste" amounts)
@@ -220,7 +224,7 @@ pub enum PersonServingDto {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateMealDto {
     pub date: String,
-    pub meal_type: String,
+    pub meal_type: MealType,
     pub order_index: i32,
     pub servings: Vec<PersonServingDto>,
 }
@@ -228,7 +232,7 @@ pub struct CreateMealDto {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UpdateMealDto {
     pub date: Option<String>,
-    pub meal_type: Option<String>,
+    pub meal_type: Option<MealType>,
     pub order_index: Option<i32>,
     pub servings: Option<Vec<PersonServingDto>>,
 }
@@ -238,14 +242,14 @@ pub struct UpdateMealDto {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateMealTemplateDto {
     pub name: String,
-    pub meal_type: String,
+    pub meal_type: MealType,
     pub servings: Vec<PersonServingDto>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UpdateMealTemplateDto {
     pub name: Option<String>,
-    pub meal_type: Option<String>,
+    pub meal_type: Option<MealType>,
     pub servings: Option<Vec<PersonServingDto>>,
 }
 

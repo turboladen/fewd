@@ -5,14 +5,6 @@
 //! clients, with the message dropped — tool-level errors carry the
 //! actionable text through to the LLM.
 
-/// Canonical values for `Meal.meal_type` as stored in the DB — Title Case
-/// to match the convention used by the rest of the app (the web UI does
-/// strict `meal_type === 'Dinner'` equality in `MealPlanner.tsx`). MCP
-/// input is matched case-insensitively against this list and then
-/// normalized to the canonical form before storage — see
-/// [`canonical_meal_type`](super::meals::canonical_meal_type).
-pub const VALID_MEAL_TYPES: &[&str] = &["Breakfast", "Lunch", "Dinner", "Snack"];
-
 /// Error returned when a `create_meal` input references a person name or
 /// recipe slug that doesn't exist. The tool handler routes this through
 /// `tool_user_error` so the Display string reaches the LLM as actionable

@@ -1,9 +1,9 @@
-import type { PersonServing } from './meal'
+import type { MealType, PersonServing } from './meal'
 
 export interface MealTemplate {
   id: string
   name: string
-  meal_type: string
+  meal_type: MealType
   servings: string // JSON string of PersonServing[]
   created_at: string
   updated_at: string
@@ -15,13 +15,13 @@ export interface ParsedMealTemplate extends Omit<MealTemplate, 'servings'> {
 
 export interface CreateMealTemplateDto {
   name: string
-  meal_type: string
+  meal_type: MealType
   servings: PersonServing[]
 }
 
 export interface UpdateMealTemplateDto {
   name?: string
-  meal_type?: string
+  meal_type?: MealType
   servings?: PersonServing[]
 }
 

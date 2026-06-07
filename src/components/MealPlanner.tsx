@@ -12,8 +12,8 @@ import {
 } from '../hooks/useMealTemplates'
 import { usePeople } from '../hooks/usePeople'
 import { useRecipes } from '../hooks/useRecipes'
-import type { CreateMealDto, ParsedMeal, PersonServing } from '../types/meal'
-import { parseMeal } from '../types/meal'
+import type { CreateMealDto, MealType, ParsedMeal, PersonServing } from '../types/meal'
+import { MEAL_TYPES, parseMeal } from '../types/meal'
 import type { ParsedMealTemplate } from '../types/mealTemplate'
 import { parseMealTemplate } from '../types/mealTemplate'
 import type { Person } from '../types/person'
@@ -33,7 +33,7 @@ import { ServingMismatchBanner } from './ServingMismatchBanner'
 import { SuggestionPanel } from './SuggestionPanel'
 import { useToast } from './Toast'
 
-const DEFAULT_MEALS = [
+const DEFAULT_MEALS: { type: MealType; order: number }[] = [
   { type: 'Breakfast', order: 0 },
   { type: 'Lunch', order: 1 },
   { type: 'Dinner', order: 2 },
@@ -422,7 +422,7 @@ function MealEditor({
   onDeleteTemplate,
 }: {
   date: string
-  mealType: string
+  mealType: MealType
   orderIndex: number
   existingMeal: ParsedMeal | undefined
   people: Person[]
@@ -602,13 +602,14 @@ function MealEditor({
           <h3 className='font-semibold text-lg'>
             {isCustom
               ? (
-                <input
-                  type='text'
+                <select
+                  aria-label='Meal type'
                   value={customMealType}
-                  onChange={(e) => setCustomMealType(e.target.value)}
+                  onChange={(e) => setCustomMealType(e.target.value as MealType)}
                   className='input text-lg font-semibold'
-                  placeholder='Meal name (e.g. Snack)'
-                />
+                >
+                  {MEAL_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
               )
               : mealType}
           </h3>
@@ -781,7 +782,7 @@ export function MealPlanner() {
   const [editingSlot, setEditingSlot] = useState<
     {
       date: string
-      mealType: string
+      mealType: MealType
       orderIndex: number
     } | null
   >(null)

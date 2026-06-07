@@ -10,7 +10,7 @@
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
 use fewd_lib::dto::{
-    CreateMealDto, CreatePersonDto, CreateRecipeDto, IngredientAmountDto, IngredientDto,
+    CreateMealDto, CreatePersonDto, CreateRecipeDto, IngredientAmountDto, IngredientDto, MealType,
     PersonServingDto, TimeValueDto,
 };
 use fewd_lib::mcp;
@@ -84,7 +84,7 @@ async fn setup_seeded_db_with_token() -> (DatabaseConnection, String, String) {
         &db,
         CreateMealDto {
             date: "2026-05-11".into(),
-            meal_type: "Dinner".into(),
+            meal_type: MealType::Dinner,
             order_index: 2,
             servings: vec![PersonServingDto::Recipe {
                 person_id: alice.id.clone(),

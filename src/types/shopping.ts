@@ -1,3 +1,4 @@
+import type { MealType } from './meal'
 import type { IngredientAmount } from './recipe'
 
 export interface IngredientSource {
@@ -7,7 +8,7 @@ export interface IngredientSource {
   source_name: string | null
   meal_id: string
   meal_date: string
-  meal_type: string
+  meal_type: MealType
   recipe_servings: number | null
   person_servings: number | null
 }

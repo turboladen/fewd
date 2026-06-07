@@ -1,6 +1,6 @@
 use fewd_lib::dto::{
     CreateMealDto, CreateMealTemplateDto, CreatePersonDto, CreateRecipeDto, IngredientAmountDto,
-    IngredientDto, PersonServingDto, ShoppingListSplitDto, TimeValueDto, UpdateRecipeDto,
+    IngredientDto, MealType, PersonServingDto, ShoppingListSplitDto, TimeValueDto, UpdateRecipeDto,
 };
 use fewd_lib::services::meal_service::MealService;
 use fewd_lib::services::meal_template_service::MealTemplateService;
@@ -642,7 +642,7 @@ async fn meal_create_and_query_date_range() {
 
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
-        meal_type: "Dinner".to_string(),
+        meal_type: MealType::Dinner,
         order_index: 2,
         servings: vec![PersonServingDto::Recipe {
             person_id: person.id.clone(),
@@ -662,7 +662,7 @@ async fn meal_create_and_query_date_range() {
     .await
     .unwrap();
     assert_eq!(meals.len(), 1);
-    assert_eq!(meals[0].meal_type, "Dinner");
+    assert_eq!(meals[0].meal_type, MealType::Dinner);
 
     // Query that misses this date
     let meals = MealService::get_all_for_date_range(
@@ -688,7 +688,7 @@ async fn meal_increments_recipe_times_planned() {
 
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
-        meal_type: "Dinner".to_string(),
+        meal_type: MealType::Dinner,
         order_index: 2,
         servings: vec![PersonServingDto::Recipe {
             person_id: person.id,
@@ -716,7 +716,7 @@ async fn meal_with_adhoc_items() {
 
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
-        meal_type: "Breakfast".to_string(),
+        meal_type: MealType::Breakfast,
         order_index: 0,
         servings: vec![PersonServingDto::Adhoc {
             person_id: person.id,
@@ -732,7 +732,7 @@ async fn meal_with_adhoc_items() {
         }],
     };
     let meal = MealService::create(&db, meal_dto).await.unwrap();
-    assert_eq!(meal.meal_type, "Breakfast");
+    assert_eq!(meal.meal_type, MealType::Breakfast);
 }
 
 #[tokio::test]
@@ -744,7 +744,7 @@ async fn meal_delete() {
 
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
-        meal_type: "Lunch".to_string(),
+        meal_type: MealType::Lunch,
         order_index: 1,
         servings: vec![PersonServingDto::Adhoc {
             person_id: person.id,
@@ -783,7 +783,7 @@ async fn shopping_list_aggregates_recipe_ingredients() {
     // Create a meal with 1 serving (recipe has 4 servings, so scale = 0.25)
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
-        meal_type: "Dinner".to_string(),
+        meal_type: MealType::Dinner,
         order_index: 2,
         servings: vec![PersonServingDto::Recipe {
             person_id: person.id,
@@ -818,7 +818,7 @@ async fn shopping_list_includes_adhoc() {
 
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
-        meal_type: "Breakfast".to_string(),
+        meal_type: MealType::Breakfast,
         order_index: 0,
         servings: vec![PersonServingDto::Adhoc {
             person_id: person.id,
@@ -993,7 +993,7 @@ async fn meal_template_create_and_get_all() {
 
     let dto = CreateMealTemplateDto {
         name: "Weeknight Pasta".to_string(),
-        meal_type: "Dinner".to_string(),
+        meal_type: MealType::Dinner,
         servings: vec![PersonServingDto::Recipe {
             person_id: person.id.clone(),
             recipe_id: recipe.id.clone(),
@@ -1003,7 +1003,7 @@ async fn meal_template_create_and_get_all() {
     };
     let template = MealTemplateService::create(&db, dto).await.unwrap();
     assert_eq!(template.name, "Weeknight Pasta");
-    assert_eq!(template.meal_type, "Dinner");
+    assert_eq!(template.meal_type, MealType::Dinner);
 
     let all = MealTemplateService::get_all(&db).await.unwrap();
     assert_eq!(all.len(), 1);
@@ -1019,7 +1019,7 @@ async fn meal_template_update() {
 
     let dto = CreateMealTemplateDto {
         name: "Quick Brekkie".to_string(),
-        meal_type: "Breakfast".to_string(),
+        meal_type: MealType::Breakfast,
         servings: vec![PersonServingDto::Adhoc {
             person_id: person.id.clone(),
             adhoc_items: vec![IngredientDto {
@@ -1044,7 +1044,7 @@ async fn meal_template_update() {
         .await
         .unwrap();
     assert_eq!(updated.name, "Sunday Brekkie");
-    assert_eq!(updated.meal_type, "Breakfast");
+    assert_eq!(updated.meal_type, MealType::Breakfast);
 }
 
 #[tokio::test]
@@ -1053,7 +1053,7 @@ async fn meal_template_delete() {
 
     let dto = CreateMealTemplateDto {
         name: "To Delete".to_string(),
-        meal_type: "Lunch".to_string(),
+        meal_type: MealType::Lunch,
         servings: vec![],
     };
     let template = MealTemplateService::create(&db, dto).await.unwrap();
@@ -1079,7 +1079,7 @@ async fn meal_template_create_from_meal() {
     // Create a meal first
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
-        meal_type: "Dinner".to_string(),
+        meal_type: MealType::Dinner,
         order_index: 2,
         servings: vec![PersonServingDto::Recipe {
             person_id: person.id.clone(),
@@ -1095,7 +1095,7 @@ async fn meal_template_create_from_meal() {
         .await
         .unwrap();
     assert_eq!(template.name, "Pasta Night");
-    assert_eq!(template.meal_type, "Dinner");
+    assert_eq!(template.meal_type, MealType::Dinner);
 
     // Verify servings were copied correctly
     let servings: Vec<PersonServingDto> = serde_json::from_str(&template.servings).unwrap();
@@ -1145,7 +1145,7 @@ async fn suggestion_recent_favorites() {
             &db,
             CreateMealDto {
                 date: date.clone(),
-                meal_type: "Dinner".to_string(),
+                meal_type: MealType::Dinner,
                 order_index: 2,
                 servings: vec![PersonServingDto::Recipe {
                     person_id: person.id.clone(),
@@ -1162,7 +1162,7 @@ async fn suggestion_recent_favorites() {
         &db,
         CreateMealDto {
             date: yesterday.clone(),
-            meal_type: "Lunch".to_string(),
+            meal_type: MealType::Lunch,
             order_index: 1,
             servings: vec![PersonServingDto::Recipe {
                 person_id: person.id.clone(),
@@ -1229,7 +1229,7 @@ async fn suggestion_forgotten_hits() {
             &db,
             CreateMealDto {
                 date: old_date.clone(),
-                meal_type: "Dinner".to_string(),
+                meal_type: MealType::Dinner,
                 order_index: i,
                 servings: vec![PersonServingDto::Recipe {
                     person_id: person.id.clone(),
@@ -1288,7 +1288,7 @@ async fn suggestion_untried() {
         &db,
         CreateMealDto {
             date: today_str,
-            meal_type: "Dinner".to_string(),
+            meal_type: MealType::Dinner,
             order_index: 2,
             servings: vec![PersonServingDto::Recipe {
                 person_id: alice.id.clone(),
@@ -1440,7 +1440,7 @@ async fn prompt_builder_meal_history_context() {
 
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
-        meal_type: "Dinner".to_string(),
+        meal_type: MealType::Dinner,
         order_index: 2,
         servings: vec![PersonServingDto::Recipe {
             person_id: person.id.clone(),
@@ -1657,7 +1657,7 @@ async fn shopping_list_recipe_source_has_serving_info() {
 
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
-        meal_type: "Dinner".to_string(),
+        meal_type: MealType::Dinner,
         order_index: 2,
         servings: vec![PersonServingDto::Recipe {
             person_id: person.id,
@@ -1691,7 +1691,7 @@ async fn shopping_list_adhoc_source_has_no_serving_info() {
 
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
-        meal_type: "Snack".to_string(),
+        meal_type: MealType::Snack,
         order_index: 3,
         servings: vec![PersonServingDto::Adhoc {
             person_id: person.id,
@@ -1733,7 +1733,7 @@ async fn shopping_list_multiple_people_same_recipe() {
 
     let meal_dto = CreateMealDto {
         date: "2025-06-10".to_string(),
-        meal_type: "Dinner".to_string(),
+        meal_type: MealType::Dinner,
         order_index: 2,
         servings: vec![
             PersonServingDto::Recipe {
@@ -1805,7 +1805,7 @@ async fn shopping_aggregates_same_name_different_prep() {
         &db,
         CreateMealDto {
             date: "2026-04-27".to_string(),
-            meal_type: "Dinner".to_string(),
+            meal_type: MealType::Dinner,
             order_index: 2,
             servings: vec![PersonServingDto::Recipe {
                 person_id: alice.id.clone(),
@@ -1822,7 +1822,7 @@ async fn shopping_aggregates_same_name_different_prep() {
         &db,
         CreateMealDto {
             date: "2026-04-28".to_string(),
-            meal_type: "Dinner".to_string(),
+            meal_type: MealType::Dinner,
             order_index: 2,
             servings: vec![PersonServingDto::Recipe {
                 person_id: alice.id,
@@ -1917,7 +1917,7 @@ async fn shopping_keeps_distinct_purchasable_names_separate() {
         &db,
         CreateMealDto {
             date: "2026-04-27".to_string(),
-            meal_type: "Dinner".to_string(),
+            meal_type: MealType::Dinner,
             order_index: 2,
             servings: vec![PersonServingDto::Recipe {
                 person_id: alice.id.clone(),
@@ -1934,7 +1934,7 @@ async fn shopping_keeps_distinct_purchasable_names_separate() {
         &db,
         CreateMealDto {
             date: "2026-04-28".to_string(),
-            meal_type: "Dinner".to_string(),
+            meal_type: MealType::Dinner,
             order_index: 2,
             servings: vec![PersonServingDto::Recipe {
                 person_id: alice.id,
@@ -2009,7 +2009,7 @@ async fn shopping_aggregates_range_amounts_across_prep_variants() {
         &db,
         CreateMealDto {
             date: "2026-04-27".to_string(),
-            meal_type: "Dinner".to_string(),
+            meal_type: MealType::Dinner,
             order_index: 2,
             servings: vec![PersonServingDto::Recipe {
                 person_id: alice.id.clone(),
@@ -2026,7 +2026,7 @@ async fn shopping_aggregates_range_amounts_across_prep_variants() {
         &db,
         CreateMealDto {
             date: "2026-04-28".to_string(),
-            meal_type: "Dinner".to_string(),
+            meal_type: MealType::Dinner,
             order_index: 2,
             servings: vec![PersonServingDto::Recipe {
                 person_id: alice.id,
@@ -2142,7 +2142,7 @@ async fn shopping_split_partitions_staples_and_buys() {
         &db,
         CreateMealDto {
             date: "2026-05-03".to_string(),
-            meal_type: "Dinner".to_string(),
+            meal_type: MealType::Dinner,
             order_index: 2,
             servings: vec![PersonServingDto::Recipe {
                 person_id: alice.id,
@@ -2212,7 +2212,7 @@ async fn shopping_split_all_staples() {
         &db,
         CreateMealDto {
             date: "2026-05-03".to_string(),
-            meal_type: "Dinner".to_string(),
+            meal_type: MealType::Dinner,
             order_index: 2,
             servings: vec![PersonServingDto::Recipe {
                 person_id: alice.id,
@@ -2269,7 +2269,7 @@ async fn shopping_split_preserves_source_breakdown() {
             &db,
             CreateMealDto {
                 date: date.to_string(),
-                meal_type: "Dinner".to_string(),
+                meal_type: MealType::Dinner,
                 order_index: 2,
                 servings: vec![PersonServingDto::Recipe {
                     person_id: alice.id.clone(),
@@ -2325,7 +2325,7 @@ async fn shopping_split_preserves_range_amounts() {
         &db,
         CreateMealDto {
             date: "2026-05-03".to_string(),
-            meal_type: "Dinner".to_string(),
+            meal_type: MealType::Dinner,
             order_index: 2,
             servings: vec![PersonServingDto::Recipe {
                 person_id: alice.id,
@@ -2424,7 +2424,7 @@ async fn shopping_split_partitions_adhoc_items() {
         &db,
         CreateMealDto {
             date: "2026-05-03".to_string(),
-            meal_type: "Breakfast".to_string(),
+            meal_type: MealType::Breakfast,
             order_index: 0,
             servings: vec![PersonServingDto::Adhoc {
                 person_id: alice.id,
