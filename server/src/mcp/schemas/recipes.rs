@@ -73,7 +73,8 @@ pub struct SearchRecipesParams {
     /// Maximum recipe total time in minutes. The recipe's `total_time` is
     /// normalized to minutes regardless of its authored unit (minutes, hours,
     /// or days), so an hour-authored recipe matches correctly. Recipes with no
-    /// total time are excluded.
+    /// total time — or a `total_time` whose unit can't be recognized — are
+    /// excluded.
     #[serde(default)]
     pub max_total_time_minutes: Option<i32>,
     /// Minimum star rating. Recipes with no rating are excluded.
