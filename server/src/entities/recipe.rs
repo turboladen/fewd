@@ -19,6 +19,11 @@ pub struct Model {
     pub cook_time: Option<String>,
     #[sea_orm(column_type = "Text")]
     pub total_time: Option<String>,
+    /// `total_time` normalized to whole minutes (NULL when absent or the unit
+    /// isn't recognized). Backfilled by m20260607; populated on create/update
+    /// via `migration::total_minutes`. `search_recipes`' time filter compares
+    /// this column so hour-authored recipes match correctly.
+    pub total_minutes: Option<i32>,
     pub servings: i32,
     #[sea_orm(column_type = "Text")]
     pub portion_size: Option<String>,

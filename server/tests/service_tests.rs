@@ -2745,7 +2745,7 @@ mod recipe_discovery {
     }
 
     #[tokio::test]
-    async fn search_filtered_max_total_time_minutes_assumes_minutes_unit() {
+    async fn search_filtered_max_total_time_minutes_compares_normalized_column() {
         let db = setup_db().await;
         RecipeService::create(&db, recipe_with("Quick", vec![], vec![], Some(15)))
             .await
@@ -2769,9 +2769,43 @@ mod recipe_discovery {
         )
         .await
         .unwrap();
-        // Untimed (NULL total_time) is excluded since json_extract returns
-        // NULL and `NULL <= 30` is unknown / false.
+        // Untimed (NULL total_minutes) is excluded since `NULL <= 30` is
+        // unknown / false.
         assert_eq!(names(&out), vec!["Medium", "Quick"]);
+    }
+
+    #[tokio::test]
+    async fn search_filtered_max_total_time_normalizes_hour_authored_recipes() {
+        // The fix this bead delivers: a recipe authored in hours must compare
+        // by its real minute count, not its raw `value`.
+        let db = setup_db().await;
+        let mut two_hours = test_recipe_dto("TwoHours");
+        two_hours.total_time = Some(TimeValueDto {
+            value: 2,
+            unit: "hours".to_string(),
+        });
+        RecipeService::create(&db, two_hours).await.unwrap();
+
+        let mut one_hour = test_recipe_dto("OneHour");
+        one_hour.total_time = Some(TimeValueDto {
+            value: 1,
+            unit: "hours".to_string(),
+        });
+        RecipeService::create(&db, one_hour).await.unwrap();
+
+        let out = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                max_total_time_minutes: Some(90),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        // 1h = 60min ≤ 90 → matches; 2h = 120min > 90 → excluded. Under the old
+        // `json_extract($.value)` clause both raw values (1, 2) were ≤ 90, so the
+        // 2-hour recipe wrongly matched. This pins the unit normalization.
+        assert_eq!(names(&out), vec!["OneHour"]);
     }
 
     #[tokio::test]
