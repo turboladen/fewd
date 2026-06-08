@@ -38,6 +38,7 @@ export function makeRecipe(overrides: Partial<Recipe> = {}): Recipe {
     prep_time: null,
     cook_time: null,
     total_time: null,
+    total_minutes: null,
     servings: 4,
     portion_size: null,
     instructions: 'Boil water, add pasta.',

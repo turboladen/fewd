@@ -21,8 +21,9 @@ pub struct SearchFilters {
     /// Lowercased exact-match tags. Multiple tags compose as AND (recipe must
     /// have every listed tag).
     pub tags: Vec<String>,
-    /// Maximum recipe `total_time.value`, assumed unit=minutes. Recipes with
-    /// no `total_time` are excluded (json_extract on NULL returns NULL).
+    /// Maximum recipe total time in minutes, compared against the normalized
+    /// `total_minutes` column (so hour-authored recipes match correctly).
+    /// Recipes with no `total_time` or an unrecognized unit are excluded.
     pub max_total_time_minutes: Option<i32>,
     pub min_rating: Option<f64>,
     pub is_favorite: Option<bool>,
@@ -92,6 +93,11 @@ impl RecipeService {
         // Serialize the JSON fields once; reuse across retries.
         let prep_time = data.prep_time.map(|t| to_json(&t)).transpose()?;
         let cook_time = data.cook_time.map(|t| to_json(&t)).transpose()?;
+        // Compute normalized minutes before `total_time` is moved into the JSON map.
+        let total_minutes = data
+            .total_time
+            .as_ref()
+            .and_then(|t| migration::total_minutes::total_time_to_minutes(t.value, &t.unit));
         let total_time = data.total_time.map(|t| to_json(&t)).transpose()?;
         let portion_size = data.portion_size.map(|p| to_json(&p)).transpose()?;
         let ingredients = to_json(&data.ingredients)?;
@@ -116,6 +122,7 @@ impl RecipeService {
                 prep_time: Set(prep_time.clone()),
                 cook_time: Set(cook_time.clone()),
                 total_time: Set(total_time.clone()),
+                total_minutes: Set(total_minutes),
                 servings: Set(data.servings),
                 portion_size: Set(portion_size.clone()),
                 instructions: Set(data.instructions.clone()),
@@ -168,6 +175,10 @@ impl RecipeService {
             recipe.cook_time = Set(Some(to_json(&cook_time)?));
         }
         if let Some(total_time) = data.total_time {
+            recipe.total_minutes = Set(migration::total_minutes::total_time_to_minutes(
+                total_time.value,
+                &total_time.unit,
+            ));
             recipe.total_time = Set(Some(to_json(&total_time)?));
         }
         if let Some(servings) = data.servings {
@@ -331,14 +342,11 @@ impl RecipeService {
         }
 
         if let Some(n) = filters.max_total_time_minutes {
-            // total_time is JSON `{"value": i32, "unit": String}` with
-            // free-form unit. We assume unit=minutes — recipes authored in
-            // hours will not match, which is documented as a known limitation
-            // in the tool description until a `total_minutes` column lands.
-            q = q.filter(Expr::cust_with_values(
-                "CAST(json_extract(\"recipes\".\"total_time\", '$.value') AS INTEGER) <= ?",
-                [n],
-            ));
+            // Compare the normalized `total_minutes` column (populated from
+            // total_time via migration::total_minutes, regardless of whether the
+            // unit was minutes or hours). Recipes with NULL total_minutes — no
+            // total_time, or an unrecognized unit — are excluded (NULL <= n is NULL).
+            q = q.filter(recipe::Column::TotalMinutes.lte(n));
         }
 
         if let Some(min) = filters.min_rating {

@@ -20,8 +20,10 @@ mod m20260429_000015_peel_size_parens_from_ingredient_name;
 mod m20260509_000016_add_mcp_token_to_people;
 mod m20260523_000017_rename_recipe_planning_fields;
 mod m20260605_000018_normalize_meal_types;
+mod m20260607_000019_add_recipe_total_minutes;
 pub mod paren_notes;
 pub mod slug;
+pub mod total_minutes;
 
 pub use ingredient_amount::{is_known_unit, try_parse_amount, try_parse_amount_json, AmountKind};
 pub use ingredient_splitter::{first_top_level_or, split_name_and_prep};
@@ -52,6 +54,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260509_000016_add_mcp_token_to_people::Migration),
             Box::new(m20260523_000017_rename_recipe_planning_fields::Migration),
             Box::new(m20260605_000018_normalize_meal_types::Migration),
+            Box::new(m20260607_000019_add_recipe_total_minutes::Migration),
         ]
     }
 }

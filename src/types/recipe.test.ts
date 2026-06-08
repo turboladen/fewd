@@ -85,6 +85,7 @@ describe('parseRecipe', () => {
     prep_time: null,
     cook_time: null,
     total_time: null,
+    total_minutes: null,
     servings: 4,
     portion_size: null,
     instructions: 'Mix and cook',

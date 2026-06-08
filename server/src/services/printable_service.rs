@@ -658,6 +658,7 @@ mod tests {
                 })
                 .unwrap(),
             ),
+            total_minutes: Some(25),
             servings: 4,
             portion_size: None,
             instructions: "[]".into(),
