@@ -80,6 +80,10 @@ export interface Recipe {
   prep_time: string | null
   cook_time: string | null
   total_time: string | null
+  /** `total_time` normalized to whole minutes (null when absent or the unit
+   * isn't recognized). Mirrors the backend column; the search-time filter
+   * compares this. */
+  total_minutes: number | null
   servings: number
   portion_size: string | null
   instructions: string
