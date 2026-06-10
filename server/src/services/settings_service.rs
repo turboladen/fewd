@@ -11,7 +11,13 @@ impl SettingsService {
         Ok(result.map(|m| m.value))
     }
 
-    /// Upsert: insert if key doesn't exist, update if it does
+    /// Upsert a setting: insert if the key doesn't exist, update if it does.
+    ///
+    /// This is a non-atomic read-then-write (find + insert/update), fine for
+    /// last-writer-wins settings (API key, model, …). It is NOT safe for concurrent
+    /// read-modify-write accumulation — two writers can both read the old value and one
+    /// update is lost. For counters, do the arithmetic in a single SQL statement instead
+    /// (see `increment_token_usage` / `increment_counter`).
     pub async fn set<C: ConnectionTrait>(db: &C, key: String, value: String) -> Result<(), DbErr> {
         let existing = Setting::find_by_id(key.clone()).one(db).await?;
 
@@ -61,13 +67,15 @@ impl SettingsService {
             .unwrap_or_else(|| ClaudeClient::default_model().to_string())
     }
 
-    /// Increment the cumulative token-usage counters. Each counter is bumped with a
-    /// single atomic `INSERT … ON CONFLICT DO UPDATE SET value = value + ?` statement,
-    /// so concurrent callers can't lose updates: the add happens entirely in SQL under
-    /// the row write-lock, with no read-modify-write window in application code. The
-    /// transaction's first operation is that write, so there is no earlier
-    /// read-snapshot to invalidate — a contended call waits on the write lock
-    /// (busy_timeout) rather than failing with SQLITE_BUSY_SNAPSHOT.
+    /// Increment the cumulative token-usage counters. Each counter is bumped with one
+    /// atomic `INSERT … ON CONFLICT(key) DO UPDATE SET value = value + delta` statement:
+    /// the read and add happen together in SQL under the row write-lock, so concurrent
+    /// callers can't lose updates (the bug fewd-4as fixed). The upsert is also
+    /// write-first — no `SELECT` precedes it — so there's no read-snapshot to invalidate,
+    /// and a contended call waits on the write lock (busy_timeout) instead of failing
+    /// with `SQLITE_BUSY_SNAPSHOT`; that safety comes from the statement shape, not the
+    /// transaction. The surrounding `db.begin()` is only for all-or-nothing grouping, so
+    /// the three counters never advance partially.
     pub async fn increment_token_usage(
         db: &DatabaseConnection,
         input_tokens: u64,

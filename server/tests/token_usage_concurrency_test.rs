@@ -21,15 +21,24 @@ impl TempDbPath {
             .join(format!("fewd_token_usage_test_{}.db", std::process::id()))
             .to_string_lossy()
             .into_owned();
-        Self(path)
+        let me = Self(path);
+        // A crashed prior run with a recycled PID could leave a stale DB whose
+        // non-zero counters would make this test's exact-sum assertion fail
+        // spuriously. Start from a clean slate.
+        me.remove_files();
+        me
+    }
+
+    fn remove_files(&self) {
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{}", self.0, suffix));
+        }
     }
 }
 
 impl Drop for TempDbPath {
     fn drop(&mut self) {
-        for suffix in ["", "-wal", "-shm"] {
-            let _ = std::fs::remove_file(format!("{}{}", self.0, suffix));
-        }
+        self.remove_files();
     }
 }
 
