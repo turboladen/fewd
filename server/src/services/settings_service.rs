@@ -11,7 +11,15 @@ impl SettingsService {
         Ok(result.map(|m| m.value))
     }
 
-    /// Upsert: insert if key doesn't exist, update if it does
+    /// Upsert a setting: insert if the key doesn't exist, update if it does.
+    ///
+    /// This is a non-atomic read-then-write (find + insert/update), fine for
+    /// last-writer-wins settings (API key, model, …). It is NOT safe under write
+    /// concurrency: two writers accumulating a value can both read the old one and lose
+    /// an update, and two writers first-creating the *same absent key* both see `None`
+    /// and the loser fails on the primary-key constraint. For counters, do the
+    /// arithmetic in a single SQL statement instead (see `increment_token_usage` /
+    /// `increment_counter`).
     pub async fn set<C: ConnectionTrait>(db: &C, key: String, value: String) -> Result<(), DbErr> {
         let existing = Setting::find_by_id(key.clone()).one(db).await?;
 
@@ -61,7 +69,16 @@ impl SettingsService {
             .unwrap_or_else(|| ClaudeClient::default_model().to_string())
     }
 
-    /// Increment cumulative token usage counters atomically within a transaction.
+    /// Increment the cumulative token-usage counters. Each counter is bumped with one
+    /// atomic `INSERT … ON CONFLICT(key) DO UPDATE SET value = value + delta` statement:
+    /// the read and add happen together in one statement, and SQLite admits only a
+    /// single writer at a time, so concurrent callers can't lose updates (the bug
+    /// fewd-4as fixed). The upsert is also
+    /// write-first — no `SELECT` precedes it — so there's no read-snapshot to invalidate,
+    /// and a contended call waits on the write lock (busy_timeout) instead of failing
+    /// with `SQLITE_BUSY_SNAPSHOT`; that safety comes from the statement shape, not the
+    /// transaction. The surrounding `db.begin()` is only for all-or-nothing grouping, so
+    /// the three counters never advance partially.
     pub async fn increment_token_usage(
         db: &DatabaseConnection,
         input_tokens: u64,
@@ -76,38 +93,9 @@ impl SettingsService {
         };
 
         let result: Result<(), DbErr> = async {
-            let current_input: u64 = Self::get(&txn, "token_usage_input".to_string())
-                .await?
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-            let current_output: u64 = Self::get(&txn, "token_usage_output".to_string())
-                .await?
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-            let current_requests: u64 = Self::get(&txn, "token_usage_requests".to_string())
-                .await?
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-
-            Self::set(
-                &txn,
-                "token_usage_input".to_string(),
-                (current_input + input_tokens).to_string(),
-            )
-            .await?;
-            Self::set(
-                &txn,
-                "token_usage_output".to_string(),
-                (current_output + output_tokens).to_string(),
-            )
-            .await?;
-            Self::set(
-                &txn,
-                "token_usage_requests".to_string(),
-                (current_requests + 1).to_string(),
-            )
-            .await?;
-
+            Self::increment_counter(&txn, "token_usage_input", input_tokens).await?;
+            Self::increment_counter(&txn, "token_usage_output", output_tokens).await?;
+            Self::increment_counter(&txn, "token_usage_requests", 1).await?;
             Ok(())
         }
         .await;
@@ -123,5 +111,30 @@ impl SettingsService {
                 let _ = txn.rollback().await;
             }
         }
+    }
+
+    /// Atomically add `delta` to an integer-valued counter setting, creating it at
+    /// `delta` if absent. The read and add happen inside one `INSERT … ON CONFLICT DO
+    /// UPDATE` statement, which SQLite runs under its single-writer lock, so there is no
+    /// lost-update window the way a separate `get` + `set` has.
+    async fn increment_counter<C: ConnectionTrait>(
+        db: &C,
+        key: &str,
+        delta: u64,
+    ) -> Result<(), DbErr> {
+        // SQLite integers are i64; reject (rather than silently wrap) a delta that
+        // wouldn't fit. Unreachable for real token counts, but `as` would wrap to a
+        // negative increment, corrupting the counter.
+        let delta = i64::try_from(delta).map_err(|_| {
+            DbErr::Custom(format!("counter '{key}' delta {delta} exceeds i64::MAX"))
+        })?;
+        db.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "INSERT INTO settings (key, value) VALUES (?, ?) \
+             ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + ?",
+            [key.into(), delta.into(), delta.into()],
+        ))
+        .await?;
+        Ok(())
     }
 }
