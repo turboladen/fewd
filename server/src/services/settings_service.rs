@@ -125,8 +125,9 @@ impl SettingsService {
         // SQLite integers are i64; reject (rather than silently wrap) a delta that
         // wouldn't fit. Unreachable for real token counts, but `as` would wrap to a
         // negative increment, corrupting the counter.
-        let delta = i64::try_from(delta)
-            .map_err(|_| DbErr::Custom(format!("token counter delta {delta} exceeds i64::MAX")))?;
+        let delta = i64::try_from(delta).map_err(|_| {
+            DbErr::Custom(format!("counter '{key}' delta {delta} exceeds i64::MAX"))
+        })?;
         db.execute(Statement::from_sql_and_values(
             DatabaseBackend::Sqlite,
             "INSERT INTO settings (key, value) VALUES (?, ?) \
