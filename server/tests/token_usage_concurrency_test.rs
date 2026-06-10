@@ -65,12 +65,14 @@ async fn concurrent_increments_sum_without_lost_updates() {
     let counter = |key: &'static str| {
         let db = db.clone();
         async move {
+            // Fail loudly on a missing/non-numeric counter rather than coercing it to 0
+            // — a 0 would masquerade as a lost update and point at the wrong cause.
             SettingsService::get(&db, key.to_string())
                 .await
                 .expect("read counter")
-                .unwrap_or_default()
+                .unwrap_or_else(|| panic!("counter {key} should exist after increments"))
                 .parse::<u64>()
-                .unwrap_or(0)
+                .unwrap_or_else(|e| panic!("counter {key} should be numeric: {e}"))
         }
     };
 
