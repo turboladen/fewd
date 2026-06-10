@@ -61,7 +61,13 @@ impl SettingsService {
             .unwrap_or_else(|| ClaudeClient::default_model().to_string())
     }
 
-    /// Increment cumulative token usage counters atomically within a transaction.
+    /// Increment the cumulative token-usage counters. Each counter is bumped with a
+    /// single atomic `INSERT … ON CONFLICT DO UPDATE SET value = value + ?` statement,
+    /// so concurrent callers can't lose updates: the add happens entirely in SQL under
+    /// the row write-lock, with no read-modify-write window in application code. The
+    /// transaction's first operation is that write, so there is no earlier
+    /// read-snapshot to invalidate — a contended call waits on the write lock
+    /// (busy_timeout) rather than failing with SQLITE_BUSY_SNAPSHOT.
     pub async fn increment_token_usage(
         db: &DatabaseConnection,
         input_tokens: u64,
@@ -76,38 +82,9 @@ impl SettingsService {
         };
 
         let result: Result<(), DbErr> = async {
-            let current_input: u64 = Self::get(&txn, "token_usage_input".to_string())
-                .await?
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-            let current_output: u64 = Self::get(&txn, "token_usage_output".to_string())
-                .await?
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-            let current_requests: u64 = Self::get(&txn, "token_usage_requests".to_string())
-                .await?
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-
-            Self::set(
-                &txn,
-                "token_usage_input".to_string(),
-                (current_input + input_tokens).to_string(),
-            )
-            .await?;
-            Self::set(
-                &txn,
-                "token_usage_output".to_string(),
-                (current_output + output_tokens).to_string(),
-            )
-            .await?;
-            Self::set(
-                &txn,
-                "token_usage_requests".to_string(),
-                (current_requests + 1).to_string(),
-            )
-            .await?;
-
+            Self::increment_counter(&txn, "token_usage_input", input_tokens).await?;
+            Self::increment_counter(&txn, "token_usage_output", output_tokens).await?;
+            Self::increment_counter(&txn, "token_usage_requests", 1).await?;
             Ok(())
         }
         .await;
@@ -123,5 +100,25 @@ impl SettingsService {
                 let _ = txn.rollback().await;
             }
         }
+    }
+
+    /// Atomically add `delta` to an integer-valued counter setting, creating it at
+    /// `delta` if absent. A single `INSERT … ON CONFLICT DO UPDATE` statement — the
+    /// read and write happen together under SQLite's row write-lock, so there is no
+    /// lost-update window the way a separate `get` + `set` has.
+    async fn increment_counter<C: ConnectionTrait>(
+        db: &C,
+        key: &str,
+        delta: u64,
+    ) -> Result<(), DbErr> {
+        let delta = delta as i64;
+        db.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "INSERT INTO settings (key, value) VALUES (?, ?) \
+             ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + ?",
+            [key.into(), delta.into(), delta.into()],
+        ))
+        .await?;
+        Ok(())
     }
 }
