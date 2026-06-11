@@ -323,7 +323,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         />
 
         {/* Build provenance (fewd-0vp) */}
-        <div className='mt-6 pt-3 border-t border-stone-100 text-center'>
+        <div className='mt-6 pt-3 border-t border-stone-200 text-center'>
           <VersionBadge />
         </div>
       </div>
