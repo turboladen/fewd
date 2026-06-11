@@ -69,6 +69,16 @@ export function CookingView({ parsed, onExit, enhancedInstructions }: Props) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleExit])
 
+  // Keyboard activation for the role=button step cards (a native <button> can't
+  // wrap the steps' block markdown). Enter/Space toggle; Space also prevents the
+  // default page scroll.
+  const handleToggleKeyDown = (e: React.KeyboardEvent, index: number) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      toggleStep(index)
+    }
+  }
+
   // First global step index of each section, so a step's completion +
   // current-step state is tracked across section boundaries.
   const sectionStepBases = sections.reduce<number[]>((bases, _section, i) => {
@@ -147,12 +157,21 @@ export function CookingView({ parsed, onExit, enhancedInstructions }: Props) {
                           const isCurrent = globalIndex === currentStepIndex
                           return (
                             <li key={i}>
-                              <button
-                                type='button'
+                              {
+                                /* A div with role=button, not a <button>: the
+                                  step body renders block markdown (<p>, <ol>),
+                                  which is invalid inside a <button> (phrasing
+                                  content only). tabIndex + Enter/Space keep it
+                                  keyboard-operable as a toggle. */
+                              }
+                              <div
+                                role='button'
+                                tabIndex={0}
                                 aria-pressed={completed}
                                 aria-current={isCurrent ? 'step' : undefined}
                                 onClick={() => toggleStep(globalIndex)}
-                                className={`card w-full text-left p-6 md:p-8 flex gap-4 md:gap-6 items-start transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary-500${
+                                onKeyDown={(e) => handleToggleKeyDown(e, globalIndex)}
+                                className={`card w-full text-left p-6 md:p-8 flex gap-4 md:gap-6 items-start transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary-500${
                                   completed ? ' opacity-50' : ''
                                 }${
                                   isCurrent
@@ -173,7 +192,7 @@ export function CookingView({ parsed, onExit, enhancedInstructions }: Props) {
                                 <div className='min-w-0 flex-1'>
                                   <RecipeMarkdown markdown={step} variant='cook' />
                                 </div>
-                              </button>
+                              </div>
                             </li>
                           )
                         })}

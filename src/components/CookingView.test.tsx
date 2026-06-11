@@ -238,11 +238,15 @@ describe('CookingView', () => {
         ]),
       }))
 
-    /** The step toggle button whose body contains `text`. */
+    /**
+     * The step toggle whose body contains `text`. Steps are role=button divs
+     * (a native <button> can't wrap the steps' block markdown), so match the
+     * role rather than the tag.
+     */
     async function stepButton(text: string) {
       const body = await screen.findByText(text)
-      const button = body.closest('button')
-      if (!button) throw new Error(`no step button wrapping "${text}"`)
+      const button = body.closest('[role="button"]')
+      if (!button) throw new Error(`no step toggle wrapping "${text}"`)
       return button
     }
 
@@ -254,6 +258,19 @@ describe('CookingView', () => {
       fireEvent.click(step)
       expect(step).toHaveAttribute('aria-pressed', 'true')
       fireEvent.click(step)
+      expect(step).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('toggles a step via keyboard (Enter and Space) since it is a role=button', async () => {
+      renderCookingView(threeStepRecipe())
+      const step = await stepButton('Add pasta.')
+      expect(step.tagName).toBe('DIV')
+      expect(step).toHaveAttribute('role', 'button')
+      expect(step).toHaveAttribute('tabindex', '0')
+
+      fireEvent.keyDown(step, { key: 'Enter' })
+      expect(step).toHaveAttribute('aria-pressed', 'true')
+      fireEvent.keyDown(step, { key: ' ' })
       expect(step).toHaveAttribute('aria-pressed', 'false')
     })
 
