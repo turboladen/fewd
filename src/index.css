@@ -312,3 +312,118 @@
     to { opacity: 1; }
   }
 }
+
+/* --- Print: offline-friendly recipe view ---
+   The app's first print stylesheet. When a recipe detail page is printed
+   (or saved as PDF), strip every app chrome surface — nav, tabs, search,
+   action buttons, toggles — and lay out the single `.print-recipe` card
+   cleanly for paper. Mirrors the typography discipline of the server-side
+   fridge-card template (letter portrait, 0.4in margin).
+
+   Three deliberate design choices:
+
+   1. The whole rule set is gated on `body:has(.print-recipe)`, so it only
+      engages on the recipe-detail route that actually has a print root.
+      Every other page (recipe list, cocktails, shopping, etc.) keeps the
+      browser's default print behavior instead of rendering a blank sheet.
+      `:has()` is within the project's browser baseline
+      (Safari 16.4+ / Chrome 111+ / Firefox 128+).
+
+   2. The print root stays in normal flow (`position: static`). An
+      absolutely-positioned root is NOT fragmented across pages by Chromium —
+      content past page one is clipped — so a long recipe (exactly the case
+      this view exists for) would lose its tail. Keeping it in flow, with the
+      shell's height/overflow caps neutralised, lets it paginate.
+
+   3. Chrome is removed with `display: none`, not `visibility: hidden`. The
+      hide targets every branch that is NOT an ancestor, the print root, or a
+      descendant of it — `*:not(:has(.print-recipe)):not(.print-recipe):not(.print-recipe *)`.
+      `visibility: hidden` would keep the nav/back-link/route padding in flow,
+      pushing the recipe down and wasting a blank band at the top of page one;
+      `display: none` collapses them so the recipe starts at the page origin.
+      The print root's ancestors (matched by `:has(.print-recipe)`) stay in
+      flow, with their padding/margin zeroed below. */
+@media print {
+  @page {
+    size: letter portrait;
+    margin: 0.4in;
+  }
+
+  /* Neutralise the app shell's h-screen / overflow caps so the in-flow recipe
+     paginates instead of being clipped at one viewport height. Covers html,
+     body, and the chrome ancestors (#root, the h-screen flex wrapper, and the
+     nested `<main className='overflow-y-auto'>` scroll container). Excludes the
+     print root's own subtree so a future fixed-height element inside a recipe
+     (e.g. an image) isn't squashed to height:auto. */
+  html:has(.print-recipe),
+  body:has(.print-recipe),
+  body:has(.print-recipe) *:not(.print-recipe, .print-recipe *) {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  html:has(.print-recipe),
+  body:has(.print-recipe) {
+    background: white !important;
+  }
+
+  /* Remove every off-print branch from layout: any element that doesn't
+     contain, isn't, and isn't inside the print root. This leaves only the
+     print root's ancestor chain (kept for flow) plus the card itself. */
+  body:has(.print-recipe)
+    *:not(:has(.print-recipe)):not(.print-recipe):not(.print-recipe *) {
+    display: none !important;
+  }
+
+  /* Zero the ancestor chain's own spacing so the recipe sits at the page
+     origin rather than inside the app's `p-6` route padding. */
+  body:has(.print-recipe) :has(.print-recipe) {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .print-recipe {
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    border: none;
+    border-radius: 0;
+    color: #1a1a1a; /* deliberate paper near-black; no dark-ink theme token exists */
+    font-size: 11pt;
+    line-height: 1.4;
+  }
+
+  /* Recipe name */
+  .print-recipe h2 {
+    font-size: 22pt;
+    line-height: 1.1;
+  }
+
+  /* Section headings (Ingredients, Instructions, Notes, Nutrition) */
+  .print-recipe h3 {
+    font-size: 13pt;
+    margin-bottom: 0.25rem;
+  }
+
+  /* Collapse the on-screen ingredients/instructions grid into a single
+     readable column for paper. */
+  .print-recipe .grid {
+    display: block !important;
+  }
+
+  .print-recipe .grid > * + * {
+    margin-top: 1rem;
+  }
+
+  /* Keep cohesive blocks from splitting awkwardly across page breaks. A long
+     instruction body may still span pages, which is fine. */
+  .print-recipe li,
+  .print-recipe h3 {
+    break-inside: avoid;
+  }
+
+  .print-recipe h3 {
+    break-after: avoid;
+  }
+}
