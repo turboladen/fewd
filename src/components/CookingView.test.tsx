@@ -3,7 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ChromeProvider, useChrome } from '../contexts/ChromeContext'
 import { makeRecipe } from '../test/factories'
 import { type ParsedRecipe, parseRecipe } from '../types/recipe'
-import { cookingProgressKey, loadCookingProgress } from '../utils/cookingProgress'
+import {
+  cookingProgressKey,
+  fingerprintInstructions,
+  loadCookingProgress,
+} from '../utils/cookingProgress'
 import { CookingView } from './CookingView'
 
 afterEach(() => {
@@ -223,10 +227,11 @@ describe('CookingView', () => {
   })
 
   describe('check-off + current-step (fewd-awo)', () => {
+    const THREE_STEP_INSTRUCTIONS = '1. Boil water.\n2. Add pasta.\n3. Stir.'
     const threeStepRecipe = () =>
       parseRecipe(makeRecipe({
         id: 'cook-1',
-        instructions: '1. Boil water.\n2. Add pasta.\n3. Stir.',
+        instructions: THREE_STEP_INSTRUCTIONS,
         ingredients: JSON.stringify([
           { name: 'Spaghetti', amount: { type: 'single', value: 1 }, unit: 'lb' },
           { name: 'Salt', amount: { type: 'single', value: 1 }, unit: 'tbsp' },
@@ -297,7 +302,8 @@ describe('CookingView', () => {
       const { onExit } = renderCookingView(parsed)
 
       fireEvent.click(await stepButton('Boil water.'))
-      expect(loadCookingProgress('cook-1').completedSteps).toEqual([0])
+      const fp = fingerprintInstructions(THREE_STEP_INSTRUCTIONS)
+      expect(loadCookingProgress('cook-1', fp).completedSteps).toEqual([0])
       expect(localStorage.getItem(cookingProgressKey('cook-1'))).not.toBeNull()
 
       fireEvent.click(screen.getByRole('button', { name: /Exit cooking mode/i }))
@@ -347,6 +353,55 @@ describe('CookingView', () => {
       expect(melt).toHaveAttribute('aria-current', 'step')
       fireEvent.click(melt)
       expect(await stepButton('Whisk eggs.')).toHaveAttribute('aria-current', 'step')
+    })
+
+    it('clears persisted progress when Escape exits cooking mode', async () => {
+      const parsed = threeStepRecipe()
+      const { onExit } = renderCookingView(parsed)
+
+      fireEvent.click(await stepButton('Boil water.'))
+      expect(localStorage.getItem(cookingProgressKey('cook-1'))).not.toBeNull()
+
+      // Escape must take the same reset-then-exit path as the Exit button —
+      // otherwise it would strand stale progress that restores on re-entry.
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(onExit).toHaveBeenCalledTimes(1)
+      expect(localStorage.getItem(cookingProgressKey('cook-1'))).toBeNull()
+    })
+
+    it('does not restore progress saved against different instruction text', async () => {
+      // Cook checks step 2 while viewing the ENHANCED instructions...
+      const enhanced = parseRecipe(makeRecipe({ id: 'cook-fp', instructions: 'original' }))
+      const { unmount } = render(
+        <ChromeProvider>
+          <CookingView
+            parsed={enhanced}
+            onExit={vi.fn()}
+            enhancedInstructions={'Step A.\n\nStep B.\n\nStep C.'}
+          />
+        </ChromeProvider>,
+      )
+      fireEvent.click(await stepButton('Step C.'))
+      expect(localStorage.getItem(cookingProgressKey('cook-fp'))).not.toBeNull()
+      unmount()
+
+      // ...then reloads with the enhancement gone (only original instructions).
+      // The stored index-2 must NOT mark a step in the differently-numbered
+      // original text — the fingerprint guard discards the stale progress.
+      const original = parseRecipe(makeRecipe({
+        id: 'cook-fp',
+        instructions: '1. First.\n2. Second.\n3. Third.\n4. Fourth.',
+      }))
+      render(
+        <ChromeProvider>
+          <CookingView parsed={original} onExit={vi.fn()} />
+        </ChromeProvider>,
+      )
+      for (const text of ['First.', 'Second.', 'Third.', 'Fourth.']) {
+        expect(await stepButton(text)).toHaveAttribute('aria-pressed', 'false')
+      }
+      // First step is current (nothing restored as complete).
+      expect(await stepButton('First.')).toHaveAttribute('aria-current', 'step')
     })
   })
 })

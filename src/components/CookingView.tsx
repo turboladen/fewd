@@ -3,6 +3,7 @@ import { useChrome } from '../contexts/ChromeContext'
 import { useCookingProgress } from '../hooks/useCookingProgress'
 import { useWakeLock } from '../hooks/useWakeLock'
 import { formatTime, type ParsedRecipe, parseInstructionSections } from '../types/recipe'
+import { fingerprintInstructions } from '../utils/cookingProgress'
 import { IconClose } from './Icon'
 import { IngredientLineText } from './IngredientLineText'
 import { RecipeMarkdown } from './RecipeMarkdown'
@@ -27,6 +28,10 @@ export function CookingView({ parsed, onExit, enhancedInstructions }: Props) {
   const sections = parseInstructionSections(sourceText)
   const hasSteps = sections.some((section) => section.steps.length > 0)
   const totalSteps = sections.reduce((sum, section) => sum + section.steps.length, 0)
+  // Scope saved step indices to the exact instruction text they came from, so
+  // progress saved against enhanced instructions isn't restored onto the
+  // (differently-numbered) original after a hard reload drops the enhancement.
+  const fingerprint = fingerprintInstructions(sourceText)
   const { setHidden } = useChrome()
 
   const {
@@ -36,7 +41,7 @@ export function CookingView({ parsed, onExit, enhancedInstructions }: Props) {
     toggleStep,
     toggleIngredient,
     reset,
-  } = useCookingProgress(parsed.id, totalSteps)
+  } = useCookingProgress(parsed.id, totalSteps, fingerprint)
 
   useEffect(() => {
     setHidden(true)
@@ -51,6 +56,18 @@ export function CookingView({ parsed, onExit, enhancedInstructions }: Props) {
     reset()
     onExit()
   }, [reset, onExit])
+
+  // Escape exits cooking mode through the same path as the Exit button, so
+  // every close path runs reset() and honors the exit-clears-progress contract.
+  // CookingView owns this (alongside hidden chrome + wake lock); the route's
+  // keydown handler no longer special-cases cook mode.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleExit()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [handleExit])
 
   // First global step index of each section, so a step's completion +
   // current-step state is tracked across section boundaries.
