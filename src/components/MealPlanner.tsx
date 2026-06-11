@@ -45,18 +45,22 @@ function PersonServingEditor({
   person,
   servings,
   recipes,
+  defaultRecipeId,
   onChange,
+  onRecipePicked,
 }: {
   person: Person
   servings: PersonServing[]
   recipes: { id: string; name: string; servings: number }[]
+  defaultRecipeId?: string
   onChange: (servings: PersonServing[]) => void
+  onRecipePicked?: (recipeId: string) => void
 }) {
   const handleAddRecipe = () => {
     onChange([...servings, {
       food_type: 'recipe',
       person_id: person.id,
-      recipe_id: recipes[0]?.id ?? '',
+      recipe_id: defaultRecipeId ?? '',
       servings_count: 1,
       notes: null,
     }])
@@ -107,11 +111,13 @@ function PersonServingEditor({
                 <div className='flex gap-2 items-center'>
                   <select
                     value={item.recipe_id}
-                    onChange={(e) =>
-                      handleUpdateItem(index, { ...item, recipe_id: e.target.value })}
+                    onChange={(e) => {
+                      handleUpdateItem(index, { ...item, recipe_id: e.target.value })
+                      if (e.target.value !== '') onRecipePicked?.(e.target.value)
+                    }}
                     className='input-sm flex-1'
                   >
-                    <option value=''>Select recipe...</option>
+                    <option value='' disabled>Select recipe...</option>
                     {recipes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                   </select>
                   <NumberInput
@@ -406,6 +412,16 @@ function TemplatePicker({
 
 // --- MealEditor ---
 
+function lastRecipeIdOf(servings: PersonServing[]): string | undefined {
+  let lastRecipeId: string | undefined
+  for (const serving of servings) {
+    if (serving.food_type === 'recipe' && serving.recipe_id !== '') {
+      lastRecipeId = serving.recipe_id
+    }
+  }
+  return lastRecipeId
+}
+
 function MealEditor({
   date,
   mealType,
@@ -455,6 +471,17 @@ function MealEditor({
   const [showSuggestionPanel, setShowSuggestionPanel] = useState(false)
   const isCustom = orderIndex >= 3
   const [dismissedMismatches, setDismissedMismatches] = useState<Set<string>>(new Set())
+
+  // Families usually share a meal, so a new serving defaults to the recipe the
+  // user picked most recently in this slot. Two tiers: lastPickedRecipeId tracks
+  // explicit picks this session (a select change, a suggestion, a template);
+  // before any interaction, fall back to scanning the loaded servings.
+  const [lastPickedRecipeId, setLastPickedRecipeId] = useState<string | undefined>(undefined)
+  const lastSlotRecipeId = useMemo(
+    () => lastRecipeIdOf([...servingsMap.values()].flat()),
+    [servingsMap],
+  )
+  const defaultRecipeId = lastPickedRecipeId ?? lastSlotRecipeId
 
   // Detect serving mismatches: recipe makes X servings but planned total < X
   const servingMismatches = useMemo(() => {
@@ -520,6 +547,8 @@ function MealEditor({
       newMap.set(s.person_id, [...existing, s])
     }
     setServingsMap(newMap)
+    const templateRecipeId = lastRecipeIdOf(template.servings)
+    if (templateRecipeId) setLastPickedRecipeId(templateRecipeId)
     setShowTemplatePicker(false)
   }
 
@@ -536,6 +565,7 @@ function MealEditor({
       }])
     }
     setServingsMap(newMap)
+    setLastPickedRecipeId(recipeId)
     setShowSuggestionPanel(false)
   }
 
@@ -574,6 +604,10 @@ function MealEditor({
           }
           servings.push({ ...serving, adhoc_items: validItems })
         } else {
+          if (serving.recipe_id === '') {
+            setValidationError('Select a recipe for each added recipe row')
+            return
+          }
           servings.push(serving)
         }
       }
@@ -676,7 +710,9 @@ function MealEditor({
             person={person}
             servings={servingsMap.get(person.id) ?? []}
             recipes={recipes}
+            defaultRecipeId={defaultRecipeId}
             onChange={(s) => handlePersonChange(person.id, s)}
+            onRecipePicked={setLastPickedRecipeId}
           />
         ))}
       </div>
