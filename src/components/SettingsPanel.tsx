@@ -10,6 +10,7 @@ import {
 import { copyToClipboard } from '../utils/clipboard'
 import { IconCheck, IconChevronDown, IconChevronRight, IconClose, IconRefresh, IconX } from './Icon'
 import { useToast } from './Toast'
+import { VersionBadge } from './VersionBadge'
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const apiKeyQuery = useSetting('anthropic_api_key')
@@ -320,6 +321,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           confirmingRevokeId={confirmingRevokeId}
           setConfirmingRevokeId={setConfirmingRevokeId}
         />
+
+        {/* Build provenance (fewd-0vp) */}
+        <div className='mt-6 pt-3 border-t border-stone-200 text-center'>
+          <VersionBadge />
+        </div>
       </div>
     </div>
   )

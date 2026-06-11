@@ -7,6 +7,7 @@ mod settings;
 mod shopping;
 pub(crate) mod sse_helpers;
 mod suggestions;
+mod version;
 
 use axum::routing::{delete, get, post, put};
 use axum::Router;
@@ -96,6 +97,8 @@ pub fn api_routes() -> Router<AppState> {
         )
         // Cocktail AI Suggestions
         .route("/cocktails/suggest", post(cocktails::ai_suggest_cocktails))
+        // Version
+        .route("/version", get(version::version_info))
         // Settings
         .route("/settings/models", get(settings::available_models))
         .route("/settings/test-connection", post(settings::test_connection))

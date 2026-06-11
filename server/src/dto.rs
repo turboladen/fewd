@@ -338,6 +338,16 @@ pub struct SetSettingBody {
     pub value: String,
 }
 
+/// Build provenance of the running binary. `git_sha`/`built_at` are embedded
+/// at compile time (see `build.rs`); since the frontend is embedded via
+/// rust-embed, this describes the whole deployed artifact, not just the server.
+#[derive(Debug, Serialize)]
+pub struct VersionInfo {
+    pub version: String,
+    pub git_sha: String,
+    pub built_at: String,
+}
+
 // ─── Bar Item DTOs ─────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Serialize)]
