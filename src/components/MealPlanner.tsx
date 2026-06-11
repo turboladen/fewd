@@ -47,12 +47,14 @@ function PersonServingEditor({
   recipes,
   defaultRecipeId,
   onChange,
+  onRecipePicked,
 }: {
   person: Person
   servings: PersonServing[]
   recipes: { id: string; name: string; servings: number }[]
   defaultRecipeId?: string
   onChange: (servings: PersonServing[]) => void
+  onRecipePicked?: (recipeId: string) => void
 }) {
   const handleAddRecipe = () => {
     onChange([...servings, {
@@ -109,8 +111,10 @@ function PersonServingEditor({
                 <div className='flex gap-2 items-center'>
                   <select
                     value={item.recipe_id}
-                    onChange={(e) =>
-                      handleUpdateItem(index, { ...item, recipe_id: e.target.value })}
+                    onChange={(e) => {
+                      handleUpdateItem(index, { ...item, recipe_id: e.target.value })
+                      if (e.target.value !== '') onRecipePicked?.(e.target.value)
+                    }}
                     className='input-sm flex-1'
                   >
                     <option value='' disabled>Select recipe...</option>
@@ -408,6 +412,16 @@ function TemplatePicker({
 
 // --- MealEditor ---
 
+function lastRecipeIdOf(servings: PersonServing[]): string | undefined {
+  let lastRecipeId: string | undefined
+  for (const serving of servings) {
+    if (serving.food_type === 'recipe' && serving.recipe_id !== '') {
+      lastRecipeId = serving.recipe_id
+    }
+  }
+  return lastRecipeId
+}
+
 function MealEditor({
   date,
   mealType,
@@ -458,19 +472,16 @@ function MealEditor({
   const isCustom = orderIndex >= 3
   const [dismissedMismatches, setDismissedMismatches] = useState<Set<string>>(new Set())
 
-  // The most-recently-added recipe in this slot — families usually share a meal,
-  // so a new serving defaults to whatever the last person picked.
-  const lastSlotRecipeId = useMemo(() => {
-    let lastRecipeId: string | undefined
-    for (const items of servingsMap.values()) {
-      for (const serving of items) {
-        if (serving.food_type === 'recipe' && serving.recipe_id !== '') {
-          lastRecipeId = serving.recipe_id
-        }
-      }
-    }
-    return lastRecipeId
-  }, [servingsMap])
+  // Families usually share a meal, so a new serving defaults to the recipe the
+  // user picked most recently in this slot. Two tiers: lastPickedRecipeId tracks
+  // explicit picks this session (a select change, a suggestion, a template);
+  // before any interaction, fall back to scanning the loaded servings.
+  const [lastPickedRecipeId, setLastPickedRecipeId] = useState<string | undefined>(undefined)
+  const lastSlotRecipeId = useMemo(
+    () => lastRecipeIdOf([...servingsMap.values()].flat()),
+    [servingsMap],
+  )
+  const defaultRecipeId = lastPickedRecipeId ?? lastSlotRecipeId
 
   // Detect serving mismatches: recipe makes X servings but planned total < X
   const servingMismatches = useMemo(() => {
@@ -536,6 +547,8 @@ function MealEditor({
       newMap.set(s.person_id, [...existing, s])
     }
     setServingsMap(newMap)
+    const templateRecipeId = lastRecipeIdOf(template.servings)
+    if (templateRecipeId) setLastPickedRecipeId(templateRecipeId)
     setShowTemplatePicker(false)
   }
 
@@ -552,6 +565,7 @@ function MealEditor({
       }])
     }
     setServingsMap(newMap)
+    setLastPickedRecipeId(recipeId)
     setShowSuggestionPanel(false)
   }
 
@@ -696,8 +710,9 @@ function MealEditor({
             person={person}
             servings={servingsMap.get(person.id) ?? []}
             recipes={recipes}
-            defaultRecipeId={lastSlotRecipeId}
+            defaultRecipeId={defaultRecipeId}
             onChange={(s) => handlePersonChange(person.id, s)}
+            onRecipePicked={setLastPickedRecipeId}
           />
         ))}
       </div>

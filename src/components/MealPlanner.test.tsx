@@ -266,6 +266,54 @@ describe('MealPlanner — default recipe for a new serving', () => {
     })
   })
 
+  it('follows the latest explicit pick, not map order, when an earlier person re-picks', async () => {
+    const alice = makePerson({ id: 'p1', name: 'Alice' })
+    const bob = makePerson({ id: 'p2', name: 'Bob' })
+    const carol = makePerson({ id: 'p3', name: 'Carol' })
+    // servings: 1 so a 1-serving pick is a full recipe — no ServingMismatchBanner
+    // whose "Adjust to Full Recipe" button would match the /Recipe/ queries below.
+    const pasta = makeRecipe({ id: 'r-pasta', name: 'Pasta', servings: 1 })
+    const tacos = makeRecipe({ id: 'r-tacos', name: 'Tacos', servings: 1 })
+    mockJson('GET', '/api/people', [alice, bob, carol])
+    mockJson('GET', '/api/recipes', [pasta, tacos])
+    mockJson('GET', MEALS_URL, [])
+    mockJson('GET', '/api/meal-templates', [])
+
+    renderWithProviders(<MealPlanner />)
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Dinner/ }).length).toBe(7))
+    fireEvent.click(screen.getAllByRole('button', { name: /Dinner/ })[0])
+    await screen.findByRole('button', { name: 'Create Meal' })
+
+    // Alice picks Pasta.
+    fireEvent.click(screen.getAllByRole('button', { name: /Recipe/ })[0])
+    const aliceSelect = await screen.findByRole('combobox') as HTMLSelectElement
+    fireEvent.change(aliceSelect, { target: { value: 'r-pasta' } })
+
+    // Bob's new serving defaults to Alice's pick.
+    fireEvent.click(screen.getAllByRole('button', { name: /Recipe/ })[1])
+    await waitFor(() => {
+      const selects = screen.getAllByRole('combobox') as HTMLSelectElement[]
+      expect(selects).toHaveLength(2)
+      expect(selects[1].value).toBe('r-pasta')
+    })
+
+    // Alice changes her mind to Tacos — now the latest explicit pick,
+    // even though Bob's Pasta serving comes later in map order.
+    fireEvent.change(
+      (screen.getAllByRole('combobox') as HTMLSelectElement[])[0],
+      { target: { value: 'r-tacos' } },
+    )
+
+    // Carol's new serving follows Alice's re-pick, not Bob's older Pasta.
+    fireEvent.click(screen.getAllByRole('button', { name: /Recipe/ })[2])
+    await waitFor(() => {
+      const selects = screen.getAllByRole('combobox') as HTMLSelectElement[]
+      expect(selects).toHaveLength(3)
+      expect(selects[2].value).toBe('r-tacos')
+    })
+  })
+
   it('defaults the first serving in an empty slot to unselected, not the first recipe', async () => {
     const alice = makePerson({ id: 'p1', name: 'Alice' })
     const baconFriedRice = makeRecipe({ id: 'r-bacon', name: 'Bacon Fried Rice', servings: 4 })
