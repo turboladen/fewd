@@ -312,3 +312,88 @@
     to { opacity: 1; }
   }
 }
+
+/* --- Print: offline-friendly recipe view ---
+   The app's first print stylesheet. When a recipe detail page is printed
+   (or saved as PDF), strip every app chrome surface — nav, tabs, search,
+   action buttons, toggles — and lay out the single `.print-recipe` card
+   cleanly for paper. The reveal pattern (hide everything, then un-hide the
+   print root and its descendants) is markup-agnostic, so it survives layout
+   changes in the surrounding shell. Mirrors the typography discipline of the
+   server-side fridge-card template (letter portrait, 0.4in margin). */
+@media print {
+  @page {
+    size: letter portrait;
+    margin: 0.4in;
+  }
+
+  /* Defeat the app shell's h-screen / overflow clipping so long recipes
+     paginate instead of being cut off at one screen height. */
+  html,
+  body,
+  #root {
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+  }
+
+  /* Hide the whole tree, then reveal only the recipe card. */
+  body * {
+    visibility: hidden;
+  }
+
+  .print-recipe,
+  .print-recipe * {
+    visibility: visible;
+  }
+
+  .print-recipe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    border: none;
+    border-radius: 0;
+    color: #1a1a1a;
+    font-size: 11pt;
+    line-height: 1.4;
+  }
+
+  /* Recipe name */
+  .print-recipe h2 {
+    font-size: 22pt;
+    line-height: 1.1;
+  }
+
+  /* Section headings (Ingredients, Instructions, Notes, Nutrition) */
+  .print-recipe h3 {
+    font-size: 13pt;
+    margin-bottom: 0.25rem;
+  }
+
+  /* Collapse the on-screen ingredients/instructions grid into a single
+     readable column for paper. */
+  .print-recipe .grid {
+    display: block !important;
+  }
+
+  .print-recipe .grid > * + * {
+    margin-top: 1rem;
+  }
+
+  /* Keep cohesive blocks from splitting awkwardly across page breaks. A long
+     instruction body may still span pages, which is fine. */
+  .print-recipe li,
+  .print-recipe h3 {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-recipe h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+}

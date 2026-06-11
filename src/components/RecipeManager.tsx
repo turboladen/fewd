@@ -42,6 +42,7 @@ import {
   IconClose,
   IconEdit,
   IconPlus,
+  IconPrinter,
   IconRefresh,
   IconStar,
   IconStarFilled,
@@ -831,7 +832,7 @@ export function RecipeDetail({
   }
 
   return (
-    <div className='card p-6 md:col-span-2 animate-fade-in'>
+    <div className='card p-6 md:col-span-2 animate-fade-in print-recipe'>
       {/* Header */}
       <div className='flex flex-col sm:flex-row items-start sm:justify-between gap-2 mb-4'>
         <div>
@@ -840,7 +841,7 @@ export function RecipeDetail({
             <h2 className='text-xl font-semibold'>{parsed.name}</h2>
             <button
               onClick={onToggleFavorite}
-              className={`text-xl ${
+              className={`text-xl print:hidden ${
                 parsed.is_favorite ? 'text-accent-500' : 'text-stone-300 hover:text-accent-400'
               }`}
               aria-label={parsed.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
@@ -855,9 +856,13 @@ export function RecipeDetail({
           </div>
           {parsed.description && <p className='text-stone-600 mt-1'>{parsed.description}</p>}
         </div>
-        <div className='flex flex-wrap gap-1.5 items-center'>
+        <div className='flex flex-wrap gap-1.5 items-center print:hidden'>
           <button onClick={onCook} className='btn-sm btn-primary'>
             Cook this
+          </button>
+          <button onClick={() => window.print()} className='btn-xs btn-outline'>
+            <IconPrinter className='w-3.5 h-3.5' />
+            Print
           </button>
           <span className='text-stone-200 mx-0.5' aria-hidden='true'>|</span>
           <button onClick={onEdit} className='btn-xs btn-outline'>
@@ -974,7 +979,7 @@ export function RecipeDetail({
               <button
                 onClick={handleToggleEnhanced}
                 disabled={enhanceMutation.isPending}
-                className={`text-xs px-2 py-0.5 rounded border ${
+                className={`text-xs px-2 py-0.5 rounded border print:hidden ${
                   enhancedMode
                     ? 'bg-primary-100 border-primary-300 text-primary-700'
                     : 'bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100'
