@@ -45,18 +45,20 @@ function PersonServingEditor({
   person,
   servings,
   recipes,
+  defaultRecipeId,
   onChange,
 }: {
   person: Person
   servings: PersonServing[]
   recipes: { id: string; name: string; servings: number }[]
+  defaultRecipeId?: string
   onChange: (servings: PersonServing[]) => void
 }) {
   const handleAddRecipe = () => {
     onChange([...servings, {
       food_type: 'recipe',
       person_id: person.id,
-      recipe_id: recipes[0]?.id ?? '',
+      recipe_id: defaultRecipeId ?? '',
       servings_count: 1,
       notes: null,
     }])
@@ -111,7 +113,7 @@ function PersonServingEditor({
                       handleUpdateItem(index, { ...item, recipe_id: e.target.value })}
                     className='input-sm flex-1'
                   >
-                    <option value=''>Select recipe...</option>
+                    <option value='' disabled>Select recipe...</option>
                     {recipes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                   </select>
                   <NumberInput
@@ -456,6 +458,20 @@ function MealEditor({
   const isCustom = orderIndex >= 3
   const [dismissedMismatches, setDismissedMismatches] = useState<Set<string>>(new Set())
 
+  // The most-recently-added recipe in this slot — families usually share a meal,
+  // so a new serving defaults to whatever the last person picked.
+  const lastSlotRecipeId = useMemo(() => {
+    let lastRecipeId: string | undefined
+    for (const items of servingsMap.values()) {
+      for (const serving of items) {
+        if (serving.food_type === 'recipe' && serving.recipe_id !== '') {
+          lastRecipeId = serving.recipe_id
+        }
+      }
+    }
+    return lastRecipeId
+  }, [servingsMap])
+
   // Detect serving mismatches: recipe makes X servings but planned total < X
   const servingMismatches = useMemo(() => {
     const recipeGroups = new Map<
@@ -574,6 +590,10 @@ function MealEditor({
           }
           servings.push({ ...serving, adhoc_items: validItems })
         } else {
+          if (serving.recipe_id === '') {
+            setValidationError('Select a recipe for each added recipe row')
+            return
+          }
           servings.push(serving)
         }
       }
@@ -676,6 +696,7 @@ function MealEditor({
             person={person}
             servings={servingsMap.get(person.id) ?? []}
             recipes={recipes}
+            defaultRecipeId={lastSlotRecipeId}
             onChange={(s) => handlePersonChange(person.id, s)}
           />
         ))}

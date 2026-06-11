@@ -182,6 +182,137 @@ describe('MealPlanner — ServingMismatchBanner wiring', () => {
   })
 })
 
+describe('MealPlanner — default recipe for a new serving', () => {
+  // servings_count: 4 matches the recipes' full yield so no ServingMismatchBanner
+  // renders — its "Adjust to Full Recipe" button would match /Recipe/ queries below.
+  function makeRecipeServing(personId: string, recipeId: string): PersonServing {
+    return {
+      food_type: 'recipe',
+      person_id: personId,
+      recipe_id: recipeId,
+      servings_count: 4,
+      notes: null,
+    }
+  }
+
+  it('defaults a new serving to the recipe another person already picked in the slot', async () => {
+    const alice = makePerson({ id: 'p1', name: 'Alice' })
+    const bob = makePerson({ id: 'p2', name: 'Bob' })
+    // 'Bacon Fried Rice' sorts first alphabetically — the old buggy default.
+    const baconFriedRice = makeRecipe({ id: 'r-bacon', name: 'Bacon Fried Rice', servings: 4 })
+    const tacos = makeRecipe({ id: 'r-tacos', name: 'Tacos', servings: 4 })
+    const existingMeal = makeMeal({
+      id: 'm-existing',
+      date: MONDAY,
+      meal_type: 'Dinner',
+      order_index: 2,
+      servings: [makeRecipeServing('p1', 'r-tacos')],
+    })
+    mockJson('GET', '/api/people', [alice, bob])
+    mockJson('GET', '/api/recipes', [baconFriedRice, tacos])
+    mockJson('GET', MEALS_URL, [existingMeal])
+    mockJson('GET', '/api/meal-templates', [])
+
+    renderWithProviders(<MealPlanner />)
+
+    // Open the Monday Dinner editor.
+    await waitFor(() => expect(screen.getAllByText(/Tacos/).length).toBeGreaterThan(0))
+    fireEvent.click(screen.getAllByRole('button', { name: /Dinner/ })[0])
+    await screen.findByRole('button', { name: 'Save Changes' })
+
+    // Click Bob's "+ Recipe" button (one per person; Bob is second).
+    const addRecipeButtons = screen.getAllByRole('button', { name: /Recipe/ })
+    fireEvent.click(addRecipeButtons[1])
+
+    // Bob's new serving defaults to Tacos — the recipe Alice already picked.
+    await waitFor(() => {
+      const selects = screen.getAllByRole('combobox') as HTMLSelectElement[]
+      expect(selects).toHaveLength(2)
+      expect(selects[1].value).toBe('r-tacos')
+    })
+  })
+
+  it('defaults to the most-recently-added recipe when the slot has several', async () => {
+    const alice = makePerson({ id: 'p1', name: 'Alice' })
+    const bob = makePerson({ id: 'p2', name: 'Bob' })
+    const pasta = makeRecipe({ id: 'r-pasta', name: 'Pasta', servings: 4 })
+    const tacos = makeRecipe({ id: 'r-tacos', name: 'Tacos', servings: 4 })
+    // Alice picked Pasta first, then Tacos — Tacos is the latest pick.
+    const existingMeal = makeMeal({
+      id: 'm-existing',
+      date: MONDAY,
+      meal_type: 'Dinner',
+      order_index: 2,
+      servings: [makeRecipeServing('p1', 'r-pasta'), makeRecipeServing('p1', 'r-tacos')],
+    })
+    mockJson('GET', '/api/people', [alice, bob])
+    mockJson('GET', '/api/recipes', [pasta, tacos])
+    mockJson('GET', MEALS_URL, [existingMeal])
+    mockJson('GET', '/api/meal-templates', [])
+
+    renderWithProviders(<MealPlanner />)
+
+    await waitFor(() => expect(screen.getAllByText(/Pasta/).length).toBeGreaterThan(0))
+    fireEvent.click(screen.getAllByRole('button', { name: /Dinner/ })[0])
+    await screen.findByRole('button', { name: 'Save Changes' })
+
+    const addRecipeButtons = screen.getAllByRole('button', { name: /Recipe/ })
+    fireEvent.click(addRecipeButtons[1])
+
+    await waitFor(() => {
+      const selects = screen.getAllByRole('combobox') as HTMLSelectElement[]
+      expect(selects).toHaveLength(3)
+      expect(selects[2].value).toBe('r-tacos')
+    })
+  })
+
+  it('defaults the first serving in an empty slot to unselected, not the first recipe', async () => {
+    const alice = makePerson({ id: 'p1', name: 'Alice' })
+    const baconFriedRice = makeRecipe({ id: 'r-bacon', name: 'Bacon Fried Rice', servings: 4 })
+    mockJson('GET', '/api/people', [alice])
+    mockJson('GET', '/api/recipes', [baconFriedRice])
+    mockJson('GET', MEALS_URL, [])
+    mockJson('GET', '/api/meal-templates', [])
+
+    renderWithProviders(<MealPlanner />)
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Dinner/ }).length).toBe(7))
+    fireEvent.click(screen.getAllByRole('button', { name: /Dinner/ })[0])
+    await screen.findByRole('button', { name: 'Create Meal' })
+
+    fireEvent.click(screen.getByRole('button', { name: /Recipe/ }))
+
+    const recipeSelect = await screen.findByRole('combobox') as HTMLSelectElement
+    expect(recipeSelect.value).toBe('')
+  })
+
+  it('blocks saving a serving with no recipe selected', async () => {
+    const alice = makePerson({ id: 'p1', name: 'Alice' })
+    const pasta = makeRecipe({ id: 'r-pasta', name: 'Pasta', servings: 4 })
+    mockJson('GET', '/api/people', [alice])
+    mockJson('GET', '/api/recipes', [pasta])
+    mockJson('GET', MEALS_URL, [])
+    mockJson('GET', '/api/meal-templates', [])
+    // No POST /api/meals mock registered — a save attempt would throw.
+
+    renderWithProviders(<MealPlanner />)
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Dinner/ }).length).toBe(7))
+    fireEvent.click(screen.getAllByRole('button', { name: /Dinner/ })[0])
+    await screen.findByRole('button', { name: 'Create Meal' })
+
+    // Add a recipe serving but leave it unselected.
+    fireEvent.click(screen.getByRole('button', { name: /Recipe/ }))
+    await screen.findByRole('combobox')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Meal' }))
+
+    // Validation error appears and the editor stays open.
+    await screen.findByText(/select a recipe/i)
+    expect(screen.getByRole('button', { name: 'Create Meal' })).toBeInTheDocument()
+  })
+})
+
 describe('MealPlanner — delete a planned meal', () => {
   it('removes a meal via DELETE and the slot reverts to "+ Plan"', async () => {
     const alice = makePerson({ id: 'p1', name: 'Alice' })
