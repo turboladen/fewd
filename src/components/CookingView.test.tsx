@@ -1,9 +1,14 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ChromeProvider, useChrome } from '../contexts/ChromeContext'
 import { makeRecipe } from '../test/factories'
 import { type ParsedRecipe, parseRecipe } from '../types/recipe'
+import { cookingProgressKey, loadCookingProgress } from '../utils/cookingProgress'
 import { CookingView } from './CookingView'
+
+afterEach(() => {
+  localStorage.clear()
+})
 
 function renderCookingView(parsed: ParsedRecipe, onExit = vi.fn()) {
   return {
@@ -215,5 +220,133 @@ describe('CookingView', () => {
     expect(states.at(-1)).toBe(true)
     rerender(<Harness mounted={false} />)
     expect(states.at(-1)).toBe(false)
+  })
+
+  describe('check-off + current-step (fewd-awo)', () => {
+    const threeStepRecipe = () =>
+      parseRecipe(makeRecipe({
+        id: 'cook-1',
+        instructions: '1. Boil water.\n2. Add pasta.\n3. Stir.',
+        ingredients: JSON.stringify([
+          { name: 'Spaghetti', amount: { type: 'single', value: 1 }, unit: 'lb' },
+          { name: 'Salt', amount: { type: 'single', value: 1 }, unit: 'tbsp' },
+        ]),
+      }))
+
+    /** The step toggle button whose body contains `text`. */
+    async function stepButton(text: string) {
+      const body = await screen.findByText(text)
+      const button = body.closest('button')
+      if (!button) throw new Error(`no step button wrapping "${text}"`)
+      return button
+    }
+
+    it('toggles a step between complete and incomplete on click', async () => {
+      renderCookingView(threeStepRecipe())
+      const step = await stepButton('Add pasta.')
+
+      expect(step).toHaveAttribute('aria-pressed', 'false')
+      fireEvent.click(step)
+      expect(step).toHaveAttribute('aria-pressed', 'true')
+      fireEvent.click(step)
+      expect(step).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('toggles an ingredient between added and not-added on click', () => {
+      renderCookingView(threeStepRecipe())
+      const ingredient = screen.getByText('Spaghetti').closest('button')!
+
+      expect(ingredient).toHaveAttribute('aria-pressed', 'false')
+      fireEvent.click(ingredient)
+      expect(ingredient).toHaveAttribute('aria-pressed', 'true')
+      fireEvent.click(ingredient)
+      expect(ingredient).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('marks the first incomplete step as the current step', async () => {
+      renderCookingView(threeStepRecipe())
+      const first = await stepButton('Boil water.')
+      const second = await stepButton('Add pasta.')
+
+      expect(first).toHaveAttribute('aria-current', 'step')
+      expect(second).not.toHaveAttribute('aria-current')
+
+      // Completing the first advances "current" to the next incomplete step.
+      fireEvent.click(first)
+      expect(first).not.toHaveAttribute('aria-current')
+      expect(second).toHaveAttribute('aria-current', 'step')
+    })
+
+    it('restores step + ingredient progress after a remount (mid-cook reload)', async () => {
+      const parsed = threeStepRecipe()
+      const { unmount } = renderCookingView(parsed)
+
+      fireEvent.click(await stepButton('Boil water.'))
+      fireEvent.click(screen.getByText('Salt').closest('button')!)
+      unmount()
+
+      renderCookingView(parsed)
+      expect(await stepButton('Boil water.')).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByText('Salt').closest('button')!).toHaveAttribute('aria-pressed', 'true')
+      // Current step advanced past the completed first step.
+      expect(await stepButton('Add pasta.')).toHaveAttribute('aria-current', 'step')
+    })
+
+    it('clears persisted progress when cooking mode is exited', async () => {
+      const parsed = threeStepRecipe()
+      const { onExit } = renderCookingView(parsed)
+
+      fireEvent.click(await stepButton('Boil water.'))
+      expect(loadCookingProgress('cook-1').completedSteps).toEqual([0])
+      expect(localStorage.getItem(cookingProgressKey('cook-1'))).not.toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: /Exit cooking mode/i }))
+      expect(onExit).toHaveBeenCalledTimes(1)
+      // The storage key is removed, not just written empty — distinguishing a
+      // real clear from a no-op empty write.
+      expect(localStorage.getItem(cookingProgressKey('cook-1'))).toBeNull()
+    })
+
+    it('does not write a storage entry for a recipe with no check-off activity', () => {
+      renderCookingView(threeStepRecipe())
+      // Merely viewing cooking mode must not litter localStorage; an entry
+      // appears only once the cook checks something off.
+      expect(localStorage.getItem(cookingProgressKey('cook-1'))).toBeNull()
+    })
+
+    it('does not resurrect a step that was checked then unchecked, after a remount', async () => {
+      const parsed = threeStepRecipe()
+      const { unmount } = renderCookingView(parsed)
+
+      const first = await stepButton('Boil water.')
+      fireEvent.click(first) // check
+      fireEvent.click(first) // uncheck — back to empty
+      // Empty in-memory state must clear the entry, not leave the stale `[0]`.
+      expect(localStorage.getItem(cookingProgressKey('cook-1'))).toBeNull()
+      unmount()
+
+      renderCookingView(parsed)
+      expect(await stepButton('Boil water.')).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('tracks step indices globally across section headings', async () => {
+      renderCookingView(parseRecipe(makeRecipe({
+        id: 'cook-sections',
+        instructions: [
+          '## Base',
+          '1. Melt butter.',
+          '',
+          '## Top',
+          '1. Whisk eggs.',
+        ].join('\n'),
+      })))
+
+      // Completing the first section's only step makes the second section's
+      // step current — proving indices are global, not per-section.
+      const melt = await stepButton('Melt butter.')
+      expect(melt).toHaveAttribute('aria-current', 'step')
+      fireEvent.click(melt)
+      expect(await stepButton('Whisk eggs.')).toHaveAttribute('aria-current', 'step')
+    })
   })
 })
