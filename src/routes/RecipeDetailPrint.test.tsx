@@ -1,4 +1,6 @@
 import { fireEvent, screen, within } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeRecipe } from '../test/factories'
@@ -71,5 +73,30 @@ describe('RecipeDetail print view', () => {
     expect(printScope.getByText('Ground beef')).toBeInTheDocument()
     expect(printScope.getByRole('heading', { name: 'Instructions' })).toBeInTheDocument()
     expect(printScope.getByText(/Brown the beef/)).toBeInTheDocument()
+  })
+})
+
+// jsdom evaluates neither `@media print` nor the `:has()` specificity cascade,
+// so these two invariants can't be checked by rendering. They guard against
+// regressions that would silently print a blank page — assert them against the
+// CSS source instead.
+describe('print stylesheet invariants', () => {
+  const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
+  const printBlock = css.slice(css.indexOf('@media print'))
+
+  it('scopes the visibility reveal under body:has(.print-recipe) so it is not out-specified by the hide rule', () => {
+    // The hide rule `body:has(.print-recipe) *` has higher specificity than a
+    // bare `.print-recipe *` reveal; if the reveal is not equally scoped the
+    // hide wins on every descendant and the recipe prints blank.
+    expect(printBlock).toMatch(/body:has\(\.print-recipe\)\s+\*\s*\{\s*visibility:\s*hidden/)
+    expect(printBlock).toMatch(
+      /body:has\(\.print-recipe\)\s+\.print-recipe\s*\*?,?[\s\S]*?visibility:\s*visible/,
+    )
+  })
+
+  it('gates the hide-everything reveal on body:has(.print-recipe) so other routes print normally', () => {
+    // A bare `body * { visibility: hidden }` would blank every page that has no
+    // print root (recipe list, cocktails, shopping, …).
+    expect(printBlock).not.toMatch(/(^|\s)body\s+\*\s*\{\s*visibility:\s*hidden/)
   })
 })

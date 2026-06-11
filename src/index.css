@@ -317,47 +317,69 @@
    The app's first print stylesheet. When a recipe detail page is printed
    (or saved as PDF), strip every app chrome surface — nav, tabs, search,
    action buttons, toggles — and lay out the single `.print-recipe` card
-   cleanly for paper. The reveal pattern (hide everything, then un-hide the
-   print root and its descendants) is markup-agnostic, so it survives layout
-   changes in the surrounding shell. Mirrors the typography discipline of the
-   server-side fridge-card template (letter portrait, 0.4in margin). */
+   cleanly for paper. Mirrors the typography discipline of the server-side
+   fridge-card template (letter portrait, 0.4in margin).
+
+   Two deliberate design choices:
+
+   1. The whole rule set is gated on `body:has(.print-recipe)`, so it only
+      engages on the recipe-detail route that actually has a print root.
+      Every other page (recipe list, cocktails, shopping, etc.) keeps the
+      browser's default print behavior instead of rendering a blank sheet —
+      the hide-everything reveal would otherwise hide the entire page with
+      nothing to un-hide. `:has()` is within the project's browser baseline
+      (Safari 16.4+ / Chrome 111+ / Firefox 128+).
+
+   2. The print root stays in normal flow (`position: static`). An
+      absolutely-positioned root is NOT fragmented across pages by Chromium —
+      content past page one is clipped — so a long recipe (exactly the case
+      this view exists for) would lose its tail. Keeping it in flow, with the
+      shell's height/overflow caps neutralised, lets it paginate. */
 @media print {
   @page {
     size: letter portrait;
     margin: 0.4in;
   }
 
-  /* Defeat the app shell's h-screen / overflow clipping so long recipes
-     paginate instead of being cut off at one screen height. */
-  html,
-  body,
-  #root {
+  /* Neutralise the app shell's h-screen / overflow caps so the in-flow recipe
+     paginates instead of being clipped at one viewport height. Covers html,
+     body, and the chrome ancestors (#root, the h-screen flex wrapper, and the
+     nested `<main className='overflow-y-auto'>` scroll container). Excludes the
+     print root's own subtree so a future fixed-height element inside a recipe
+     (e.g. an image) isn't squashed to height:auto. */
+  html:has(.print-recipe),
+  body:has(.print-recipe),
+  body:has(.print-recipe) *:not(.print-recipe, .print-recipe *) {
     height: auto !important;
+    max-height: none !important;
     overflow: visible !important;
+  }
+
+  html:has(.print-recipe),
+  body:has(.print-recipe) {
     background: white !important;
   }
 
-  /* Hide the whole tree, then reveal only the recipe card. */
-  body * {
+  /* Hide everything on the print-root's page, then reveal only the recipe
+     card and its descendants. The reveal must share the `body:has(...)` scope
+     so its specificity matches the hide rule — otherwise the more-specific
+     hide wins on every descendant and the page prints blank. */
+  body:has(.print-recipe) * {
     visibility: hidden;
   }
 
-  .print-recipe,
-  .print-recipe * {
+  body:has(.print-recipe) .print-recipe,
+  body:has(.print-recipe) .print-recipe * {
     visibility: visible;
   }
 
   .print-recipe {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
     margin: 0;
     padding: 0;
     box-shadow: none;
     border: none;
     border-radius: 0;
-    color: #1a1a1a;
+    color: #1a1a1a; /* deliberate paper near-black; no dark-ink theme token exists */
     font-size: 11pt;
     line-height: 1.4;
   }
@@ -389,11 +411,9 @@
   .print-recipe li,
   .print-recipe h3 {
     break-inside: avoid;
-    page-break-inside: avoid;
   }
 
   .print-recipe h3 {
     break-after: avoid;
-    page-break-after: avoid;
   }
 }
