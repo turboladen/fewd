@@ -20,8 +20,17 @@ fn main() {
     // the operator can tell "missing git" apart from a tarball build. A dirty
     // working tree gets a "-dirty" suffix — a clean-looking SHA from a build
     // that included uncommitted changes would mislead the deploy-lag check.
+    //
+    // Freshness caveat: cargo reruns this script only when a watched path
+    // changes, so SHA/dirty/built_at describe the tree as of that run — a dev
+    // rebuild after editing source keeps the old values. The deploy flow is
+    // accurate: `just deploy` runs `bun run build` first, which rewrites
+    // ../dist and forces a rerun.
     let git_sha = match capture("git", &["rev-parse", "--short=9", "HEAD"]) {
         Some(sha) => {
+            // `status --porcelain` prints nothing on a clean tree, and
+            // capture() maps empty stdout to None — that mapping IS the
+            // clean/dirty test here.
             let dirty = capture("git", &["status", "--porcelain"]).is_some();
             if dirty {
                 format!("{sha}-dirty")
@@ -34,8 +43,10 @@ fn main() {
             "unknown".into()
         }
     };
-    let built_at =
-        capture("date", &["-u", "+%Y-%m-%d %H:%M UTC"]).unwrap_or_else(|| "unknown".into());
+    let built_at = capture("date", &["-u", "+%Y-%m-%d %H:%M UTC"]).unwrap_or_else(|| {
+        println!("cargo:warning=fewd-server: `date` unavailable; /api/version will report built_at 'unknown'");
+        "unknown".into()
+    });
     println!("cargo:rustc-env=FEWD_GIT_SHA={git_sha}");
     println!("cargo:rustc-env=FEWD_BUILT_AT={built_at}");
 
