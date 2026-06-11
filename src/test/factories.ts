@@ -1,7 +1,7 @@
 import type { Meal, PersonServing } from '../types/meal'
 import type { MealTemplate } from '../types/mealTemplate'
 import type { Person } from '../types/person'
-import type { Ingredient, Recipe } from '../types/recipe'
+import type { Ingredient, Recipe, RecipePickerOption } from '../types/recipe'
 import type { AggregatedIngredient, IngredientSource } from '../types/shopping'
 
 export function makePerson(overrides: Partial<Person> = {}): Person {
@@ -53,6 +53,20 @@ export function makeRecipe(overrides: Partial<Recipe> = {}): Recipe {
     rating: null,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+export function makeRecipePickerOption(
+  overrides: Partial<RecipePickerOption> = {},
+): RecipePickerOption {
+  return {
+    id: 'r1',
+    name: 'Pasta',
+    tags: [],
+    is_favorite: false,
+    times_planned: 0,
+    last_planned: null,
     ...overrides,
   }
 }
