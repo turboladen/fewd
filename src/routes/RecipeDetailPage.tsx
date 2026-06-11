@@ -55,12 +55,11 @@ export function RecipeDetailPage() {
   }, [setSearchParams])
 
   useEffect(() => {
+    // Cooking mode owns its own Escape handling (CookingView), so it can run
+    // the progress-clearing exit path; this handler ignores Escape while
+    // cooking to avoid a second, reset-skipping exit.
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      if (isCooking) {
-        exitCooking()
-        return
-      }
+      if (e.key !== 'Escape' || isCooking) return
       if (mode !== 'view') {
         setMode('view')
         setAdaptDraft(null)
@@ -74,7 +73,7 @@ export function RecipeDetailPage() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [mode, confirmingDelete, navigate, isCooking, exitCooking])
+  }, [mode, confirmingDelete, navigate, isCooking])
 
   if (!id) {
     return (

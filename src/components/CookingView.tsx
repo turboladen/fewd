@@ -1,7 +1,9 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useChrome } from '../contexts/ChromeContext'
+import { useCookingProgress } from '../hooks/useCookingProgress'
 import { useWakeLock } from '../hooks/useWakeLock'
 import { formatTime, type ParsedRecipe, parseInstructionSections } from '../types/recipe'
+import { fingerprintInstructions } from '../utils/cookingProgress'
 import { IconClose } from './Icon'
 import { IngredientLineText } from './IngredientLineText'
 import { RecipeMarkdown } from './RecipeMarkdown'
@@ -25,7 +27,21 @@ export function CookingView({ parsed, onExit, enhancedInstructions }: Props) {
     : parsed.instructions
   const sections = parseInstructionSections(sourceText)
   const hasSteps = sections.some((section) => section.steps.length > 0)
+  const totalSteps = sections.reduce((sum, section) => sum + section.steps.length, 0)
+  // Scope saved step indices to the exact instruction text they came from, so
+  // progress saved against enhanced instructions isn't restored onto the
+  // (differently-numbered) original after a hard reload drops the enhancement.
+  const fingerprint = fingerprintInstructions(sourceText)
   const { setHidden } = useChrome()
+
+  const {
+    isStepComplete,
+    isIngredientAdded,
+    currentStepIndex,
+    toggleStep,
+    toggleIngredient,
+    reset,
+  } = useCookingProgress(parsed.id, totalSteps, fingerprint)
 
   useEffect(() => {
     setHidden(true)
@@ -34,11 +50,47 @@ export function CookingView({ parsed, onExit, enhancedInstructions }: Props) {
 
   useWakeLock(true)
 
+  // Exiting cooking mode clears progress (a reload, which doesn't run this,
+  // restores it). Reset before handing control back to the caller.
+  const handleExit = useCallback(() => {
+    reset()
+    onExit()
+  }, [reset, onExit])
+
+  // Escape exits cooking mode through the same path as the Exit button, so
+  // every close path runs reset() and honors the exit-clears-progress contract.
+  // CookingView owns this (alongside hidden chrome + wake lock); the route's
+  // keydown handler no longer special-cases cook mode.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleExit()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [handleExit])
+
+  // Keyboard activation for the role=button step cards (a native <button> can't
+  // wrap the steps' block markdown). Enter/Space toggle; Space also prevents the
+  // default page scroll.
+  const handleToggleKeyDown = (e: React.KeyboardEvent, index: number) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      toggleStep(index)
+    }
+  }
+
+  // First global step index of each section, so a step's completion +
+  // current-step state is tracked across section boundaries.
+  const sectionStepBases = sections.reduce<number[]>((bases, _section, i) => {
+    bases.push(i === 0 ? 0 : bases[i - 1] + sections[i - 1].steps.length)
+    return bases
+  }, [])
+
   return (
     <section className='min-h-screen bg-surface animate-fade-in'>
       <button
         type='button'
-        onClick={onExit}
+        onClick={handleExit}
         aria-label='Exit cooking mode'
         className='btn-ghost fixed top-4 right-4 z-10 inline-flex items-center gap-1.5 bg-white/80 backdrop-blur-xs shadow-soft'
       >
@@ -65,45 +117,89 @@ export function CookingView({ parsed, onExit, enhancedInstructions }: Props) {
             <h2 className='font-heading text-2xl md:text-3xl mb-4 text-stone-900'>
               Ingredients
             </h2>
-            <ul className='space-y-2 text-lg md:text-base text-stone-700'>
-              {parsed.ingredients.map((ing, i) => (
-                <li key={i}>
-                  <IngredientLineText ingredient={ing} />
-                </li>
-              ))}
+            <ul className='space-y-1 text-lg md:text-base text-stone-700'>
+              {parsed.ingredients.map((ing, i) => {
+                const added = isIngredientAdded(i)
+                return (
+                  <li key={i}>
+                    <button
+                      type='button'
+                      aria-pressed={added}
+                      onClick={() => toggleIngredient(i)}
+                      className={`w-full text-left rounded-md px-2 py-1 -mx-2 transition-colors hover:bg-secondary-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary-500${
+                        added ? ' line-through text-stone-400' : ''
+                      }`}
+                    >
+                      <IngredientLineText ingredient={ing} />
+                    </button>
+                  </li>
+                )
+              })}
             </ul>
           </aside>
 
           {hasSteps
             ? (
               <div className='space-y-10 md:space-y-12'>
-                {sections.map((section, si) => (
-                  <div key={si}>
-                    {section.heading && (
-                      <h2 className='font-heading text-2xl md:text-3xl font-semibold text-stone-900 mb-5 md:mb-6'>
-                        {section.heading}
-                      </h2>
-                    )}
-                    <ol className='space-y-6 md:space-y-8'>
-                      {section.steps.map((step, i) => (
-                        <li
-                          key={i}
-                          className='card p-6 md:p-8 flex gap-4 md:gap-6 items-start'
-                        >
-                          <span
-                            aria-hidden='true'
-                            className='font-heading text-secondary-600 text-5xl md:text-6xl leading-none flex-none tabular-nums'
-                          >
-                            {i + 1}
-                          </span>
-                          <div className='min-w-0 flex-1'>
-                            <RecipeMarkdown markdown={step} variant='cook' />
-                          </div>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                ))}
+                {sections.map((section, si) => {
+                  const sectionBase = sectionStepBases[si]
+                  return (
+                    <div key={si}>
+                      {section.heading && (
+                        <h2 className='font-heading text-2xl md:text-3xl font-semibold text-stone-900 mb-5 md:mb-6'>
+                          {section.heading}
+                        </h2>
+                      )}
+                      <ol className='space-y-6 md:space-y-8'>
+                        {section.steps.map((step, i) => {
+                          const globalIndex = sectionBase + i
+                          const completed = isStepComplete(globalIndex)
+                          const isCurrent = globalIndex === currentStepIndex
+                          return (
+                            <li key={i}>
+                              {
+                                /* A div with role=button, not a <button>: the
+                                  step body renders block markdown (<p>, <ol>),
+                                  which is invalid inside a <button> (phrasing
+                                  content only). tabIndex + Enter/Space keep it
+                                  keyboard-operable as a toggle. */
+                              }
+                              <div
+                                role='button'
+                                tabIndex={0}
+                                aria-pressed={completed}
+                                aria-current={isCurrent ? 'step' : undefined}
+                                onClick={() => toggleStep(globalIndex)}
+                                onKeyDown={(e) => handleToggleKeyDown(e, globalIndex)}
+                                className={`card w-full text-left p-6 md:p-8 flex gap-4 md:gap-6 items-start transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary-500${
+                                  completed ? ' opacity-50' : ''
+                                }${
+                                  isCurrent
+                                    ? ' border-secondary-400 bg-secondary-50 ring-1 ring-secondary-300'
+                                    : ''
+                                }`}
+                              >
+                                <span
+                                  aria-hidden='true'
+                                  className={`font-heading text-5xl md:text-6xl leading-none flex-none tabular-nums${
+                                    completed
+                                      ? ' text-stone-300 line-through'
+                                      : ' text-secondary-600'
+                                  }`}
+                                >
+                                  {globalIndex + 1}
+                                </span>
+                                <div className='min-w-0 flex-1'>
+                                  <RecipeMarkdown markdown={step} variant='cook' />
+                                </div>
+                              </div>
+                            </li>
+                          )
+                        })}
+                      </ol>
+                    </div>
+                  )
+                })}
               </div>
             )
             : (

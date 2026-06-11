@@ -1,9 +1,18 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ChromeProvider, useChrome } from '../contexts/ChromeContext'
 import { makeRecipe } from '../test/factories'
 import { type ParsedRecipe, parseRecipe } from '../types/recipe'
+import {
+  cookingProgressKey,
+  fingerprintInstructions,
+  loadCookingProgress,
+} from '../utils/cookingProgress'
 import { CookingView } from './CookingView'
+
+afterEach(() => {
+  localStorage.clear()
+})
 
 function renderCookingView(parsed: ParsedRecipe, onExit = vi.fn()) {
   return {
@@ -215,5 +224,201 @@ describe('CookingView', () => {
     expect(states.at(-1)).toBe(true)
     rerender(<Harness mounted={false} />)
     expect(states.at(-1)).toBe(false)
+  })
+
+  describe('check-off + current-step (fewd-awo)', () => {
+    const THREE_STEP_INSTRUCTIONS = '1. Boil water.\n2. Add pasta.\n3. Stir.'
+    const threeStepRecipe = () =>
+      parseRecipe(makeRecipe({
+        id: 'cook-1',
+        instructions: THREE_STEP_INSTRUCTIONS,
+        ingredients: JSON.stringify([
+          { name: 'Spaghetti', amount: { type: 'single', value: 1 }, unit: 'lb' },
+          { name: 'Salt', amount: { type: 'single', value: 1 }, unit: 'tbsp' },
+        ]),
+      }))
+
+    /**
+     * The step toggle whose body contains `text`. Steps are role=button divs
+     * (a native <button> can't wrap the steps' block markdown), so match the
+     * role rather than the tag.
+     */
+    async function stepButton(text: string) {
+      const body = await screen.findByText(text)
+      const button = body.closest('[role="button"]')
+      if (!button) throw new Error(`no step toggle wrapping "${text}"`)
+      return button
+    }
+
+    it('toggles a step between complete and incomplete on click', async () => {
+      renderCookingView(threeStepRecipe())
+      const step = await stepButton('Add pasta.')
+
+      expect(step).toHaveAttribute('aria-pressed', 'false')
+      fireEvent.click(step)
+      expect(step).toHaveAttribute('aria-pressed', 'true')
+      fireEvent.click(step)
+      expect(step).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('toggles a step via keyboard (Enter and Space) since it is a role=button', async () => {
+      renderCookingView(threeStepRecipe())
+      const step = await stepButton('Add pasta.')
+      expect(step.tagName).toBe('DIV')
+      expect(step).toHaveAttribute('role', 'button')
+      expect(step).toHaveAttribute('tabindex', '0')
+
+      fireEvent.keyDown(step, { key: 'Enter' })
+      expect(step).toHaveAttribute('aria-pressed', 'true')
+      fireEvent.keyDown(step, { key: ' ' })
+      expect(step).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('toggles an ingredient between added and not-added on click', () => {
+      renderCookingView(threeStepRecipe())
+      const ingredient = screen.getByText('Spaghetti').closest('button')!
+
+      expect(ingredient).toHaveAttribute('aria-pressed', 'false')
+      fireEvent.click(ingredient)
+      expect(ingredient).toHaveAttribute('aria-pressed', 'true')
+      fireEvent.click(ingredient)
+      expect(ingredient).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('marks the first incomplete step as the current step', async () => {
+      renderCookingView(threeStepRecipe())
+      const first = await stepButton('Boil water.')
+      const second = await stepButton('Add pasta.')
+
+      expect(first).toHaveAttribute('aria-current', 'step')
+      expect(second).not.toHaveAttribute('aria-current')
+
+      // Completing the first advances "current" to the next incomplete step.
+      fireEvent.click(first)
+      expect(first).not.toHaveAttribute('aria-current')
+      expect(second).toHaveAttribute('aria-current', 'step')
+    })
+
+    it('restores step + ingredient progress after a remount (mid-cook reload)', async () => {
+      const parsed = threeStepRecipe()
+      const { unmount } = renderCookingView(parsed)
+
+      fireEvent.click(await stepButton('Boil water.'))
+      fireEvent.click(screen.getByText('Salt').closest('button')!)
+      unmount()
+
+      renderCookingView(parsed)
+      expect(await stepButton('Boil water.')).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByText('Salt').closest('button')!).toHaveAttribute('aria-pressed', 'true')
+      // Current step advanced past the completed first step.
+      expect(await stepButton('Add pasta.')).toHaveAttribute('aria-current', 'step')
+    })
+
+    it('clears persisted progress when cooking mode is exited', async () => {
+      const parsed = threeStepRecipe()
+      const { onExit } = renderCookingView(parsed)
+
+      fireEvent.click(await stepButton('Boil water.'))
+      const fp = fingerprintInstructions(THREE_STEP_INSTRUCTIONS)
+      expect(loadCookingProgress('cook-1', fp).completedSteps).toEqual([0])
+      expect(localStorage.getItem(cookingProgressKey('cook-1'))).not.toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: /Exit cooking mode/i }))
+      expect(onExit).toHaveBeenCalledTimes(1)
+      // The storage key is removed, not just written empty — distinguishing a
+      // real clear from a no-op empty write.
+      expect(localStorage.getItem(cookingProgressKey('cook-1'))).toBeNull()
+    })
+
+    it('does not write a storage entry for a recipe with no check-off activity', () => {
+      renderCookingView(threeStepRecipe())
+      // Merely viewing cooking mode must not litter localStorage; an entry
+      // appears only once the cook checks something off.
+      expect(localStorage.getItem(cookingProgressKey('cook-1'))).toBeNull()
+    })
+
+    it('does not resurrect a step that was checked then unchecked, after a remount', async () => {
+      const parsed = threeStepRecipe()
+      const { unmount } = renderCookingView(parsed)
+
+      const first = await stepButton('Boil water.')
+      fireEvent.click(first) // check
+      fireEvent.click(first) // uncheck — back to empty
+      // Empty in-memory state must clear the entry, not leave the stale `[0]`.
+      expect(localStorage.getItem(cookingProgressKey('cook-1'))).toBeNull()
+      unmount()
+
+      renderCookingView(parsed)
+      expect(await stepButton('Boil water.')).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('tracks step indices globally across section headings', async () => {
+      renderCookingView(parseRecipe(makeRecipe({
+        id: 'cook-sections',
+        instructions: [
+          '## Base',
+          '1. Melt butter.',
+          '',
+          '## Top',
+          '1. Whisk eggs.',
+        ].join('\n'),
+      })))
+
+      // Completing the first section's only step makes the second section's
+      // step current — proving indices are global, not per-section.
+      const melt = await stepButton('Melt butter.')
+      expect(melt).toHaveAttribute('aria-current', 'step')
+      fireEvent.click(melt)
+      expect(await stepButton('Whisk eggs.')).toHaveAttribute('aria-current', 'step')
+    })
+
+    it('clears persisted progress when Escape exits cooking mode', async () => {
+      const parsed = threeStepRecipe()
+      const { onExit } = renderCookingView(parsed)
+
+      fireEvent.click(await stepButton('Boil water.'))
+      expect(localStorage.getItem(cookingProgressKey('cook-1'))).not.toBeNull()
+
+      // Escape must take the same reset-then-exit path as the Exit button —
+      // otherwise it would strand stale progress that restores on re-entry.
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(onExit).toHaveBeenCalledTimes(1)
+      expect(localStorage.getItem(cookingProgressKey('cook-1'))).toBeNull()
+    })
+
+    it('does not restore progress saved against different instruction text', async () => {
+      // Cook checks step 2 while viewing the ENHANCED instructions...
+      const enhanced = parseRecipe(makeRecipe({ id: 'cook-fp', instructions: 'original' }))
+      const { unmount } = render(
+        <ChromeProvider>
+          <CookingView
+            parsed={enhanced}
+            onExit={vi.fn()}
+            enhancedInstructions={'Step A.\n\nStep B.\n\nStep C.'}
+          />
+        </ChromeProvider>,
+      )
+      fireEvent.click(await stepButton('Step C.'))
+      expect(localStorage.getItem(cookingProgressKey('cook-fp'))).not.toBeNull()
+      unmount()
+
+      // ...then reloads with the enhancement gone (only original instructions).
+      // The stored index-2 must NOT mark a step in the differently-numbered
+      // original text — the fingerprint guard discards the stale progress.
+      const original = parseRecipe(makeRecipe({
+        id: 'cook-fp',
+        instructions: '1. First.\n2. Second.\n3. Third.\n4. Fourth.',
+      }))
+      render(
+        <ChromeProvider>
+          <CookingView parsed={original} onExit={vi.fn()} />
+        </ChromeProvider>,
+      )
+      for (const text of ['First.', 'Second.', 'Third.', 'Fourth.']) {
+        expect(await stepButton(text)).toHaveAttribute('aria-pressed', 'false')
+      }
+      // First step is current (nothing restored as complete).
+      expect(await stepButton('First.')).toHaveAttribute('aria-current', 'step')
+    })
   })
 })
