@@ -48,9 +48,10 @@ describe('MealPlanner — plan a meal on a day slot', () => {
     // PersonServingEditor renders an "+ Recipe" button per person; click Alice's.
     fireEvent.click(screen.getByRole('button', { name: /Recipe/ }))
 
-    // Select Pasta in the first recipe dropdown (only combobox on the screen).
-    const recipeSelect = await screen.findByRole('combobox')
-    fireEvent.change(recipeSelect, { target: { value: 'r-pasta' } })
+    // Pick Pasta in the recipe combobox (only combobox on the screen).
+    const recipePicker = await screen.findByRole('combobox')
+    fireEvent.focus(recipePicker)
+    fireEvent.click(await screen.findByRole('option', { name: 'Pasta' }))
 
     // Stage the POST response and the post-invalidation GET refetch.
     const pastaServing: PersonServing = {
@@ -122,10 +123,10 @@ describe('MealPlanner — applying a template', () => {
     fireEvent.click(templateRow)
 
     // The editor now has a serving for Alice with Pizza selected.
-    // Verify the recipe dropdown has pizza selected (value = r-pizza).
+    // The recipe picker displays the selected recipe's name.
     await waitFor(() => {
-      const selects = screen.getAllByRole('combobox') as HTMLSelectElement[]
-      const pizzaSelected = selects.some((s) => s.value === 'r-pizza')
+      const pickers = screen.getAllByRole('combobox') as HTMLInputElement[]
+      const pizzaSelected = pickers.some((p) => p.value === 'Pizza')
       expect(pizzaSelected).toBe(true)
     })
   })
@@ -225,10 +226,11 @@ describe('MealPlanner — default recipe for a new serving', () => {
     fireEvent.click(addRecipeButtons[1])
 
     // Bob's new serving defaults to Tacos — the recipe Alice already picked.
+    // The picker displays the selected recipe's name.
     await waitFor(() => {
-      const selects = screen.getAllByRole('combobox') as HTMLSelectElement[]
-      expect(selects).toHaveLength(2)
-      expect(selects[1].value).toBe('r-tacos')
+      const pickers = screen.getAllByRole('combobox') as HTMLInputElement[]
+      expect(pickers).toHaveLength(2)
+      expect(pickers[1].value).toBe('Tacos')
     })
   })
 
@@ -260,9 +262,9 @@ describe('MealPlanner — default recipe for a new serving', () => {
     fireEvent.click(addRecipeButtons[1])
 
     await waitFor(() => {
-      const selects = screen.getAllByRole('combobox') as HTMLSelectElement[]
-      expect(selects).toHaveLength(3)
-      expect(selects[2].value).toBe('r-tacos')
+      const pickers = screen.getAllByRole('combobox') as HTMLInputElement[]
+      expect(pickers).toHaveLength(3)
+      expect(pickers[2].value).toBe('Tacos')
     })
   })
 
@@ -285,32 +287,31 @@ describe('MealPlanner — default recipe for a new serving', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /Dinner/ })[0])
     await screen.findByRole('button', { name: 'Create Meal' })
 
-    // Alice picks Pasta.
+    // Alice picks Pasta via the combobox.
     fireEvent.click(screen.getAllByRole('button', { name: /Recipe/ })[0])
-    const aliceSelect = await screen.findByRole('combobox') as HTMLSelectElement
-    fireEvent.change(aliceSelect, { target: { value: 'r-pasta' } })
+    const alicePicker = await screen.findByRole('combobox')
+    fireEvent.focus(alicePicker)
+    fireEvent.click(await screen.findByRole('option', { name: 'Pasta' }))
 
     // Bob's new serving defaults to Alice's pick.
     fireEvent.click(screen.getAllByRole('button', { name: /Recipe/ })[1])
     await waitFor(() => {
-      const selects = screen.getAllByRole('combobox') as HTMLSelectElement[]
-      expect(selects).toHaveLength(2)
-      expect(selects[1].value).toBe('r-pasta')
+      const pickers = screen.getAllByRole('combobox') as HTMLInputElement[]
+      expect(pickers).toHaveLength(2)
+      expect(pickers[1].value).toBe('Pasta')
     })
 
     // Alice changes her mind to Tacos — now the latest explicit pick,
     // even though Bob's Pasta serving comes later in map order.
-    fireEvent.change(
-      (screen.getAllByRole('combobox') as HTMLSelectElement[])[0],
-      { target: { value: 'r-tacos' } },
-    )
+    fireEvent.focus(screen.getAllByRole('combobox')[0])
+    fireEvent.click(await screen.findByRole('option', { name: 'Tacos' }))
 
     // Carol's new serving follows Alice's re-pick, not Bob's older Pasta.
     fireEvent.click(screen.getAllByRole('button', { name: /Recipe/ })[2])
     await waitFor(() => {
-      const selects = screen.getAllByRole('combobox') as HTMLSelectElement[]
-      expect(selects).toHaveLength(3)
-      expect(selects[2].value).toBe('r-tacos')
+      const pickers = screen.getAllByRole('combobox') as HTMLInputElement[]
+      expect(pickers).toHaveLength(3)
+      expect(pickers[2].value).toBe('Tacos')
     })
   })
 
@@ -330,8 +331,8 @@ describe('MealPlanner — default recipe for a new serving', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Recipe/ }))
 
-    const recipeSelect = await screen.findByRole('combobox') as HTMLSelectElement
-    expect(recipeSelect.value).toBe('')
+    const recipePicker = await screen.findByRole('combobox') as HTMLInputElement
+    expect(recipePicker.value).toBe('')
   })
 
   it('blocks saving a serving with no recipe selected', async () => {

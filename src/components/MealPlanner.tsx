@@ -17,7 +17,7 @@ import { MEAL_TYPES, parseMeal } from '../types/meal'
 import type { ParsedMealTemplate } from '../types/mealTemplate'
 import { parseMealTemplate } from '../types/mealTemplate'
 import type { Person } from '../types/person'
-import type { Ingredient } from '../types/recipe'
+import type { Ingredient, RecipePickerOption } from '../types/recipe'
 import {
   addDays,
   formatDateDisplay,
@@ -29,6 +29,7 @@ import {
 import { IconArrowLeft, IconArrowRight, IconClose, IconPlus, IconWarning } from './Icon'
 import { IngredientInput } from './IngredientInput'
 import { NumberInput } from './NumberInput'
+import { RecipePicker } from './RecipePicker'
 import { ServingMismatchBanner } from './ServingMismatchBanner'
 import { SuggestionPanel } from './SuggestionPanel'
 import { useToast } from './Toast'
@@ -39,6 +40,19 @@ const DEFAULT_MEALS: { type: MealType; order: number }[] = [
   { type: 'Dinner', order: 2 },
 ]
 
+/** Picker fields plus `servings`, which the mismatch banner logic needs. */
+type PlannerRecipe = RecipePickerOption & { servings: number }
+
+/** Parse a Recipe's JSON tags string, tolerating malformed data. */
+function parseTags(tags: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(tags)
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 // --- PersonServingEditor ---
 
 function PersonServingEditor({
@@ -46,13 +60,15 @@ function PersonServingEditor({
   servings,
   recipes,
   defaultRecipeId,
+  mealType,
   onChange,
   onRecipePicked,
 }: {
   person: Person
   servings: PersonServing[]
-  recipes: { id: string; name: string; servings: number }[]
+  recipes: PlannerRecipe[]
   defaultRecipeId?: string
+  mealType: MealType
   onChange: (servings: PersonServing[]) => void
   onRecipePicked?: (recipeId: string) => void
 }) {
@@ -109,17 +125,16 @@ function PersonServingEditor({
             {item.food_type === 'recipe'
               ? (
                 <div className='flex gap-2 items-center'>
-                  <select
+                  <RecipePicker
+                    recipes={recipes}
                     value={item.recipe_id}
-                    onChange={(e) => {
-                      handleUpdateItem(index, { ...item, recipe_id: e.target.value })
-                      if (e.target.value !== '') onRecipePicked?.(e.target.value)
+                    onChange={(recipeId) => {
+                      handleUpdateItem(index, { ...item, recipe_id: recipeId })
+                      if (recipeId !== '') onRecipePicked?.(recipeId)
                     }}
-                    className='input-sm flex-1'
-                  >
-                    <option value='' disabled>Select recipe...</option>
-                    {recipes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                  </select>
+                    mealType={mealType}
+                    className='flex-1'
+                  />
                   <NumberInput
                     value={item.servings_count}
                     onChange={(v) => handleUpdateItem(index, { ...item, servings_count: v })}
@@ -442,7 +457,7 @@ function MealEditor({
   orderIndex: number
   existingMeal: ParsedMeal | undefined
   people: Person[]
-  recipes: { id: string; name: string; servings: number }[]
+  recipes: PlannerRecipe[]
   templates: ParsedMealTemplate[]
   recipeNames: Map<string, string>
   onSave: (data: CreateMealDto) => void
@@ -711,6 +726,7 @@ function MealEditor({
             servings={servingsMap.get(person.id) ?? []}
             recipes={recipes}
             defaultRecipeId={defaultRecipeId}
+            mealType={isCustom ? customMealType : mealType}
             onChange={(s) => handlePersonChange(person.id, s)}
             onRecipePicked={setLastPickedRecipeId}
           />
@@ -852,9 +868,18 @@ export function MealPlanner() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [editingSlot])
 
-  // Build recipe name lookup
+  // Narrow recipes to what the editor + picker need
   const recipes = useMemo(
-    () => rawRecipes?.map((r) => ({ id: r.id, name: r.name, servings: r.servings })) ?? [],
+    (): PlannerRecipe[] =>
+      rawRecipes?.map((r) => ({
+        id: r.id,
+        name: r.name,
+        servings: r.servings,
+        tags: parseTags(r.tags),
+        is_favorite: r.is_favorite,
+        times_planned: r.times_planned,
+        last_planned: r.last_planned,
+      })) ?? [],
     [rawRecipes],
   )
   const recipeNames = new Map(recipes.map((r) => [r.id, r.name]))

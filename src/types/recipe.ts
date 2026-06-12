@@ -100,6 +100,20 @@ export interface Recipe {
   updated_at: string
 }
 
+/**
+ * Minimal recipe shape the `RecipePicker` combobox needs for display and
+ * ranking (favorites pinned, recently-planned boosted, meal-type tag match).
+ * `tags` is already parsed, unlike `Recipe.tags` which is a JSON string.
+ */
+export interface RecipePickerOption {
+  id: string
+  name: string
+  tags: string[]
+  is_favorite: boolean
+  times_planned: number
+  last_planned: string | null
+}
+
 export interface CreateRecipeDto {
   name: string
   description?: string
