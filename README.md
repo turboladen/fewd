@@ -197,7 +197,8 @@ Claude Desktop's settings → Developer → Edit Config opens `claude_desktop_co
         "--header",
         "Authorization:${FEWD_BEARER}",
         "--transport",
-        "http-only"
+        "http-only",
+        "--allow-http"
       ],
       "env": {
         "FEWD_BEARER": "Bearer <paste-the-token-from-Settings-here>"
@@ -211,6 +212,7 @@ Claude Desktop's settings → Developer → Edit Config opens `claude_desktop_co
 - Replace `<paste-the-token-from-Settings-here>` with the plaintext shown when you provisioned the token in the web Settings panel. (Lost it? Re-provision — the old one is gone.)
 - The `--header "Authorization:${FEWD_BEARER}"` + `env.FEWD_BEARER` split is intentional: it dodges a Windows-specific quoting bug in the launchers where spaces inside `args` get mangled ([upstream note](https://github.com/geelen/mcp-remote#custom-headers-authentication)).
 - `--transport http-only` pins the bridge to Streamable HTTP. Without it, `mcp-remote` tries the deprecated HTTP+SSE transport as a fallback — fewd only speaks Streamable HTTP.
+- `--allow-http` is required because the URL is plain `http://` (fewd serves the MCP endpoint over HTTP, not HTTPS). `mcp-remote` refuses non-`https` URLs unless the host is `localhost`/`127.0.0.1`; for any other host (`dietpi.local`, a LAN IP, …) you'll get a connection failure without this flag.
 
 Fully quit and relaunch Claude Desktop. You should see fewd's tools in the MCP indicator. Call `whoami` first to confirm the bearer resolves correctly.
 
