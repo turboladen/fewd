@@ -456,13 +456,38 @@ sqlite3 <path-to-fewd.db>
 
 ### Workflows
 
-**`.github/workflows/ci.yml`** - Runs on every push and PR:
+**`.github/workflows/ci.yml`** - Verification jobs on `pull_request` (the
+push-triggered formatter lives in `auto-format.yml`, kept separate so the two
+event types don't produce duplicate/skipped jobs):
 
-- ✅ Rust: `cargo fmt --check`, `cargo clippy`, `cargo test`
+- ✅ Rust: `cargo fmt --check`, `cargo clippy`, `cargo test`, plus the migration drift smoke test
 - ✅ TypeScript: `dprint check`, `bun run lint`, `bun run test`
 - ✅ Typos: `typos --config .typos.toml`
 
-**`.github/workflows/auto-format.yml`** - Auto-formats code on push.
+**`.github/workflows/auto-format.yml`** - Auto-formats code on push (every branch except `main`).
+
+**Runner & toolchain notes (fewd-5pz, 2026-06-30):** all jobs run on
+`ubuntu-latest` (migrated off `macos-latest` for cost/speed — CI has no
+host-arch dependency since the dietpi deploy cross-compiles aarch64). Several
+things follow from that runner choice and are easy to break:
+
+- **Rust caching is `Swatinem/rust-cache@v2`**, not hand-rolled `actions/cache`.
+  Its `workspaces: ". -> target"` is pinned deliberately: the cargo workspace
+  manifest, `Cargo.lock`, and `target/` all live at the **repo root** (members
+  `server`, `server/migration`), even though later steps `cd server`. Do NOT
+  "correct" it to `server -> server/target` — that caches an empty dir (the
+  silent no-op the old `path: server/target` cache hit).
+- **`bun-version` is pinned** (`oven-sh/setup-bun@v2`, currently `1.3.14`), not
+  `latest` — bumping the bun toolchain means editing that pin in `ci.yml`.
+- **`bun install --frozen-lockfile`** means a stale `bun.lock` fails CI — after
+  a dep change, run `bun install` and commit the refreshed `bun.lock`.
+- **Typos is installed via `taiki-e/install-action@v2` (`tool: typos`)**, not
+  `brew` (which isn't on ubuntu). The id is `typos`, not the crate name `typos-cli`.
+- Workflow-level `permissions: contents: read` + per-job `timeout-minutes` are
+  set; the `auto-format` job keeps job-level `contents: write` (job-level perms
+  replace, not merge with, workflow-level) so its push still works.
+- **Job names/IDs are branch-protection required status checks** — renaming a
+  job silently breaks the merge gate. Don't rename casually.
 
 There is **no tag-triggered build workflow**. Releases are notes-only: an
 annotated tag (`vYYYY-MM-DD`, with a `.N` suffix for same-day hotfixes —
