@@ -67,7 +67,6 @@ dist-ssr
 .superpowers/
 
 # Beads, Dolt database files (added by bd init)
-.beads/metadata.json
 .dolt/
 *.db
 
