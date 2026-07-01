@@ -53,8 +53,6 @@
 # - github.org
 # - github.repo
 
-sync.git-remote: "ssh://git@github.com/turboladen/fewd.git"
-
 sync.remote: "git+ssh://git@github.com/turboladen/fewd.git"
 
 export.auto: true
