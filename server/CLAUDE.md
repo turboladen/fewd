@@ -14,9 +14,9 @@ Backend-specific guidance for the Rust/Axum/SeaORM server. The root `../CLAUDE.m
 
 **Error Handling:**
 
-- Use `Result<T, E>` for fallible operations; `thiserror` for libs/internal, `anyhow` for apps/public
-- Convert SeaORM errors to appropriate HTTP error responses
-- Log errors before returning to frontend
+- Use `Result<T, E>` for fallible operations. Route/service errors funnel through the hand-rolled `AppError` enum (`server/src/error.rs`), whose `IntoResponse` impl maps variants (`Database`/`NotFound`/`BadRequest`/`Internal`) to HTTP status codes; add a `From<E>` impl to bubble a new error source into it. (No `anyhow`/`thiserror` in this workspace.)
+- Convert SeaORM errors to appropriate HTTP error responses (`AppError` already has `From<DbErr>`)
+- Log errors before returning to frontend (`AppError` logs `Database`/`Internal` via `tracing::error!` and returns a generic message so internals don't leak)
 - Provide user-friendly error messages
 
 **Patterns:**

@@ -20,7 +20,7 @@ Top-level tabs: **Family** | **Meals** | **Recipes** | **Cocktails**
 
 Sub-navigation uses a generic `SubNav<T>` component in `App.tsx`.
 
-**Component-specific guidance:** backend rules live in `server/CLAUDE.md`, frontend rules in `src/CLAUDE.md` (auto-loaded by your editor's working directory). This root file holds project-wide and cross-boundary rules that apply everywhere.
+**Component-specific guidance:** backend rules live in `server/CLAUDE.md`, frontend rules in `src/CLAUDE.md` — the coding agent auto-loads each based on the working directory of the files being edited (a nested `CLAUDE.md` only applies to files at or below its directory). This root file holds project-wide and cross-boundary rules that apply everywhere.
 
 ## Development Environment
 
