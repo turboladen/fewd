@@ -72,3 +72,6 @@ dist-ssr
 
 # Beads / Dolt files (added by bd init)
 .beads-credential-key
+
+# Beads issue export mirror — local only; the Dolt DB is the source of truth
+.beads/issues.jsonl

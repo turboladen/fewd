@@ -407,9 +407,19 @@ Branches: `fewd-<id>/<short-slug>` (e.g. `fewd-82e/mcp-host-allowlist`). Commits
 
 ### Bead closure: post-merge, not inside the fix PR
 
-Closing a bead is a separate `chore(beads): close <id> after PR #<N> merge` commit on `main`, AFTER the fix PR is merged. Do NOT flip `status: closed` inside the fix PR — it makes `bd ready` / `bd list` inaccurate while the PR is in review. Precedent: `bc8e6f4`, `5411cc6`, `6320a91`, `734f724`. Documented at length in `.github/copilot-instructions.md`; surfaced here because Copilot reviews repeatedly suggest the wrong pattern and Claude has made the mistake too.
+Close a bead AFTER its fix PR merges, on `main`, with `bd close <id>` followed by `bd dolt push`.
+Because `.beads/issues.jsonl` is untracked here (see below), that produces no commit — there is nothing
+to stage and nothing to restore. Do NOT flip `status: closed` while the PR is in review; it makes
+`bd ready` / `bd list` report the fix as shipped when it is still under review.
 
-`.beads/issues.jsonl` carries **issue rows only**. As of bd 1.0.4+, `bd export` excludes `bd remember` memory rows by default (rationale: they may hold sensitive agent context; opt back in with `--include-memories`/`--all`), and bd's auto-export (`export.auto: true` in `.beads/config.yaml`) re-writes the JSONL using the bare path — so memories never land in the committed snapshot. Auto-export is **debounced to `export.interval` (60s)** via a high-water mark in `.beads/export-state.json`: a mutation flushes on the next `bd` command run after the window elapses, not on the command itself — so the mirror can trail the DB by up to ~60s. When you need it current immediately (e.g. before committing a snapshot), force a deterministic flush with a bare `bd export -o .beads/issues.jsonl`. A second refresh trigger is the **bd pre-commit hook** (`.beads/hooks/pre-commit` → `bd hooks run pre-commit`), which re-exports the JSONL on every commit. It's wired via `core.hooksPath = .beads/hooks` in machine-local `.git/config` (not committed, so it doesn't travel with a clone) — fewd had drifted to an empty `.git/hooks` and silently no-op'd the hook; re-pointed 2026-06-10 to match the sibling beads repos. The hook exports but does **not** `git add` the JSONL, so it never auto-bundles into your commit — it just leaves a freshened (unstaged) mirror in the working tree, which you discard or let the next snapshot pick up. The Dolt DB is the source of truth for memories: `bd memories` reads from it, `bd dolt push`/`pull` syncs it, and a fresh `bd init` bootstraps it from `refs/dolt/data` on the remote. The JSONL is just an export mirror, never the memory recovery path. A PR diff should therefore never show `{"_type":"memory",...}` rows; if one does, it's a stale snapshot from before this convention — regenerate with a bare `bd export -o .beads/issues.jsonl`, don't hand-edit. (History: bd <1.0.4 wrote memory rows into the JSONL and reordered them non-deterministically on every commit — Copilot repeatedly misread that churn as "cleanup" across the fewd-2y6 series, PRs #35/#37/#39. That class of noise is gone now that memories are DB-only; decided in fewd-040.)
+`.beads/issues.jsonl` is **not tracked by git** in this repo (untracked 2026-09-05). The Dolt DB under
+`.beads/` is the source of truth: `bd dolt push` syncs it to `refs/dolt/data`, and a fresh `bd init`
+bootstraps from there. The JSONL is a local export mirror that `export.auto` rewrites on every bead
+mutation, so tracking it meant a permanently dirty working tree — which makes `git pull --rebase`
+refuse — plus recurring full-snapshot diff noise that PR reviewers kept misreading as changes belonging
+to the PR (PRs #35, #37, #39, #43, #44). The ignore rule lives in the **top-level** `.gitignore`, not
+`.beads/.gitignore`, because the latter is bd-managed and is overwritten on upgrade. A
+`.beads/issues.jsonl` diff should never appear in a PR again; if one does, something re-added it.
 
 ## Session Completion
 

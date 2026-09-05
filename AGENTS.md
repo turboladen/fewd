@@ -109,8 +109,8 @@ bd close bd-42 --reason "Completed" --json
 bd automatically syncs with git:
 
 - Exports to `.beads/issues.jsonl` after changes (5s debounce)
-- Imports from JSONL when newer (e.g., after `git pull`)
-- No manual export/import needed!
+- That mirror is **untracked in this repo** — it stays local and never rides a commit. The Dolt DB is
+  the source of truth; share it with `bd dolt push` / `bd dolt pull`, not `git pull`.
 
 ### Important Rules
 
