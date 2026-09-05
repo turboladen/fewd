@@ -108,9 +108,7 @@ pub fn update_person_input_to_dto(input: UpdatePersonInput) -> UpdatePersonDto {
         birthdate: None,
         dietary_goals: None,
         is_active: None,
-        notes: input
-            .notes
-            .and_then(|s| if s.trim().is_empty() { None } else { Some(s) }),
+        notes: input.notes.filter(|s| !s.trim().is_empty()),
         dislikes: input.dislikes,
         favorites: input.favorites,
         drink_preferences: input.drink_preferences,
