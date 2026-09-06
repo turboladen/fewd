@@ -162,6 +162,14 @@ Expect: a `RecipeFull` object with ingredients, instructions, nutrition, parent 
 
 Expect: tool-level error mentioning the missing slug AND pointing at `list_curated_recipes` / `search_recipes` for discovery.
 
+**Error path — empty slug:**
+
+```json
+{ "slug": "   " }
+```
+
+Expect: tool-level error saying `slug` must not be empty or whitespace-only, NOT "no recipe with slug ''".
+
 **Edge case — slug with whitespace / mixed case:**
 
 ```json
@@ -318,6 +326,103 @@ Expect: tool-level error citing "servings must be >= 1."
 ```
 
 Expect: tool-level error mentioning the bad slug AND pointing at `search_recipes`.
+
+---
+
+### `update_recipe`
+
+State-changing, and destructive in a way `create_recipe` is not — the list and block fields replace whole. Use a throwaway dev DB, and seed a recipe with tags, ingredients, and nutrition first (`create_recipe`) so you can see what survives an edit.
+
+Substitute the slug of the recipe you seeded for `test-recipe` throughout.
+
+**Happy path — partial update:**
+
+```json
+{
+  "slug": "test-recipe",
+  "servings": 6,
+  "notes": "doubles well"
+}
+```
+
+Expect: the full updated recipe with `servings: 6` and the new note. Every field you did not send — name, instructions, ingredients, tags, nutrition — comes back exactly as it was.
+
+Note what that means for `servings`: the ingredient amounts are untouched, and `get_shopping_list` divides them by `servings`, so this call quietly cut every per-person quantity by a third. Sending `servings` alone is only correct when the stored count was wrong; a genuine resize has to send a rescaled `ingredients` array in the same call.
+
+**Rename keeps the slug:**
+
+```json
+{
+  "slug": "test-recipe",
+  "name": "Renamed Test Recipe"
+}
+```
+
+Expect: `name` is the new one and `slug` is still `test-recipe`. Keep using the original slug for `get_recipe` / `create_meal` — a rename never re-derives it.
+
+**Whole-blob replacement — this DELETES the ingredients you omit:**
+
+```json
+{
+  "slug": "test-recipe",
+  "ingredients": [
+    {
+      "name": "replacement ingredient",
+      "amount": { "kind": "single", "value": 2.0 },
+      "unit": "cup"
+    }
+  ]
+}
+```
+
+Expect: the recipe now has exactly one ingredient. Anything that was there before is gone. Same for `tags`, `instructions`, and `nutrition_per_serving` — a `nutrition_per_serving` carrying only `calories` nulls protein, carbs, fat, and notes.
+
+**Clearing a list:**
+
+```json
+{
+  "slug": "test-recipe",
+  "tags": []
+}
+```
+
+Expect: `tags` is empty and the ingredients are untouched. `[]` is the only way to clear a list.
+
+**No clear path for scalars:**
+
+```json
+{
+  "slug": "test-recipe",
+  "instructions": "",
+  "notes": "   "
+}
+```
+
+Expect: success, and both fields keep their previous values. An empty or whitespace-only string means "no change", never "blank it".
+
+**Error path — unknown slug:**
+
+```json
+{ "slug": "this-recipe-does-not-exist", "servings": 6 }
+```
+
+Expect: tool-level error naming the bad slug and pointing at `list_curated_recipes` / `search_recipes` — the same message `create_meal` produces for an unresolvable recipe.
+
+**Error path — empty slug:**
+
+```json
+{ "slug": "   ", "servings": 6 }
+```
+
+Expect: tool-level error saying `slug` must not be empty or whitespace-only, NOT "no recipe with slug ''".
+
+**Error path — zero servings:**
+
+```json
+{ "slug": "test-recipe", "servings": 0 }
+```
+
+Expect: tool-level error citing "servings must be >= 1", and the recipe unchanged.
 
 ---
 

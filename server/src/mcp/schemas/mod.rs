@@ -6,7 +6,8 @@
 //! - [`common`] — shared input types (`EmptyParams`, `DateRangeParams`, …),
 //!   bidirectional value types (`IngredientOut`, `TimeOut`, …), and the
 //!   low-level conversion helpers both directions use.
-//! - [`recipes`] — recipe list/full payloads and `create_recipe` input.
+//! - [`recipes`] — recipe list/full payloads plus `create_recipe` and
+//!   `update_recipe` input.
 //! - [`diet_tags`] — canonical diet-tag vocabulary backing the
 //!   `list_diet_tags` tool and the `fewd://diet-tags` resource.
 //! - [`meals`] — meal list payload, `create_meal` input, and the
@@ -17,9 +18,8 @@
 //! - [`errors`] — `InputError`, `ResolveError`, `CreateMealError`. Only
 //!   `CreateMealError` is re-exported below (handler.rs's exhaustive
 //!   match on it needs the type at runtime). `InputError` and
-//!   `ResolveError` stay scoped to the submodule and the handler test
-//!   module reaches them via the explicit path; that keeps clippy quiet
-//!   about unused re-exports without hiding the types from tests.
+//!   `ResolveError` are reached through the explicit `schemas::errors::`
+//!   path instead, which keeps clippy quiet about unused re-exports.
 //!
 //! All public items used by `handler.rs`'s production code are re-exported
 //! at this level so the runtime path can keep a single
@@ -49,7 +49,7 @@ pub(super) use people::{
 pub(super) use printable::PrintableInput;
 pub(super) use prompts::WeeklyDinnerPlanArgs;
 pub(super) use recipes::{
-    create_recipe_input_to_dto, recipe_to_brief, recipe_to_full, CreateRecipeInput,
-    ImportRecipeUrlInput, SearchRecipesParams,
+    create_recipe_input_to_dto, recipe_to_brief, recipe_to_full, update_recipe_input_to_dto,
+    CreateRecipeInput, ImportRecipeUrlInput, SearchRecipesParams, UpdateRecipeInput,
 };
 pub(super) use shopping::shopping_item_from_dto;
