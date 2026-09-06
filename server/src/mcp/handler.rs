@@ -86,7 +86,7 @@ impl FewdMcp {
 
     #[tool(
         name = "list_curated_recipes",
-        description = "Use as the default starting point for meal-planning when the user hasn't named a specific dish or ingredient — returns the family's likely-relevant shortlist (every favorite first, then most-recently-planned, then top-rated, deduped, ≤30 unless favorites exceed that). For targeted lookups by ingredient, tag, time, rating, or person preference, call `search_recipes` instead. The shortlist is built from favorites, recent planning, and top ratings, so `favorite_recipe` changes what shows up here. The full archive is intentionally not exposed — the web UI is for human browsing.",
+        description = "Use as the default starting point for meal-planning when the user hasn't named a specific dish or ingredient — returns the family's likely-relevant shortlist (every favorite first, then most-recently-planned, then top-rated, deduped, ≤30 unless favorites exceed that). For targeted lookups by ingredient, tag, time, rating, or person preference, call `search_recipes` instead. Use `favorite_recipe` to change which recipes land in the favorites tier. The full archive is intentionally not exposed — the web UI is for human browsing.",
         input_schema = rmcp::handler::server::common::schema_for_type::<EmptyParams>()
     )]
     async fn list_curated_recipes(
@@ -217,7 +217,7 @@ impl FewdMcp {
 
     #[tool(
         name = "get_recipe",
-        description = "Read the full recipe — call AFTER `search_recipes` or `list_curated_recipes` returned a slug worth inspecting (when the user wants ingredients, instructions, nutrition, or prep time). Returns ingredients (with amounts and units), instructions, nutrition, prep/cook time, and any parent recipe it was adapted from. Call this before `update_recipe` too: its list fields replace whole, so you need the current values to send back a complete one. When the user reacts to a dish rather than asks about it, `favorite_recipe` records that against the same slug.",
+        description = "Read the full recipe — call AFTER `search_recipes` or `list_curated_recipes` returned a slug worth inspecting (when the user wants ingredients, instructions, nutrition, or prep time). Returns ingredients (with amounts and units), instructions, nutrition, prep/cook time, and any parent recipe it was adapted from. Call this before `update_recipe` too: its list fields replace whole, so you need the current values to send back a complete one. When the user wants a dish kept in regular rotation rather than asks about it, `favorite_recipe` sets that flag on the same slug — it is a shortlist flag only, so `false` means \"off the shortlist\", never \"they disliked it\".",
         input_schema = rmcp::handler::server::common::schema_for_type::<GetRecipeParams>()
     )]
     async fn get_recipe(
@@ -597,7 +597,7 @@ impl FewdMcp {
 
     #[tool(
         name = "favorite_recipe",
-        description = "Mark a recipe as a family favorite — or unmark one — when the user says they loved it, want it in regular rotation, or want it off that list; call `search_recipes` or `get_recipe` first for the `slug`. Returns the same brief row `search_recipes` returns — slug, name, description, tags, icon, servings, total time, planning counts, rating, and is_favorite — so you can confirm the new state; call `get_recipe` when you need ingredients or instructions. `is_favorite` is set absolutely, never toggled: `true` always favorites and `false` always unfavorites, so you never need to know the current state first, and calling twice with the same value leaves the recipe in the same state. Favorites drive `list_curated_recipes` (every favorite is listed first and is never truncated) and `search_recipes`'s `is_favorite` filter, so marking one changes what later planning sessions see. A favorite is a binary shortlist flag, not a score. This writes only `is_favorite` — use `update_recipe` to change the recipe's content. An unknown `slug` returns an error pointing at `search_recipes`; a blank one is rejected as a missing value. Example: {\"slug\":\"beef-taco-bowls\",\"is_favorite\":true}",
+        description = "Mark a recipe as a family favorite — or unmark one — when the user says they loved it, want it in regular rotation, or want it off that list; call `search_recipes` or `get_recipe` first for the `slug`. Returns the same brief row `search_recipes` returns — slug, name, description, tags, icon, servings, total time, how many times it has been planned, when it was last planned, rating, and is_favorite — so you can confirm the new state; call `get_recipe` when you need ingredients or instructions. `is_favorite` is set absolutely, never toggled: `true` always favorites and `false` always unfavorites, so you never need to know the current state first, and calling twice with the same value leaves the recipe in the same state. Favorites drive `list_curated_recipes` (every favorite is listed first and is never truncated) and `search_recipes`'s `is_favorite` filter, so marking one changes what later planning sessions see. A favorite is a binary shortlist flag, not a score. This writes only `is_favorite` — use `update_recipe` to change the recipe's content. An unknown `slug` returns an error pointing at `search_recipes`; a blank one is rejected as a missing value. Example: {\"slug\":\"beef-taco-bowls\",\"is_favorite\":true}",
         input_schema = rmcp::handler::server::common::schema_for_type::<FavoriteRecipeInput>()
     )]
     async fn favorite_recipe(
@@ -2789,8 +2789,13 @@ mod tests {
         let after = reload_recipe(&mcp, &seeded.slug).await;
         assert!(after.is_favorite, "the in-scope field must have changed");
         assert_eq!(after.name, before.name);
+        assert_eq!(after.description, before.description);
         assert_eq!(after.servings, before.servings);
         assert_eq!(after.instructions, before.instructions);
+        assert_eq!(after.prep_time, before.prep_time);
+        assert_eq!(after.cook_time, before.cook_time);
+        assert_eq!(after.total_time, before.total_time);
+        assert_eq!(after.rating, before.rating);
         assert_eq!(after.ingredients, before.ingredients);
         assert_eq!(after.tags, before.tags);
         assert_eq!(after.notes, before.notes);
