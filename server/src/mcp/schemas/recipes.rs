@@ -357,8 +357,10 @@ pub struct UpdateRecipeInput {
     pub name: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
-    /// Hands-on time. The `unit` has to be minutes, hours, or days —
-    /// singular, plural, or the `min` / `hr` / `d` abbreviations.
+    /// Hands-on time. The `unit` is stored as written and never validated,
+    /// so prefer minutes, hours, or days — singular, plural, or the `min` /
+    /// `hr` / `d` abbreviations — to stay readable alongside the rest of
+    /// the catalog.
     #[serde(default)]
     pub prep_time: Option<TimeOut>,
     /// Time on the heat. Same `unit` vocabulary as `prep_time`.
@@ -366,8 +368,9 @@ pub struct UpdateRecipeInput {
     pub cook_time: Option<TimeOut>,
     /// Replaces the stored total time. Send this whenever `prep_time` or
     /// `cook_time` changes, or the recipe keeps advertising its old
-    /// duration. Keep to the `unit` vocabulary `prep_time` lists: a unit
-    /// outside it drops the recipe out of every time-filtered
+    /// duration. Unlike `prep_time` and `cook_time`, this `unit` carries
+    /// consequences — it is the only one parsed, and a unit outside
+    /// minutes / hours / days drops the recipe out of every time-filtered
     /// `search_recipes` call.
     #[serde(default)]
     pub total_time: Option<TimeOut>,
@@ -377,6 +380,8 @@ pub struct UpdateRecipeInput {
     /// rescaled `ingredients` array in the same call.
     #[serde(default)]
     pub servings: Option<i32>,
+    /// How big one serving is, as a `{value, unit}` pair — e.g.
+    /// `{"value": 1.5, "unit": "cup"}`. Replaces the stored pair whole.
     #[serde(default)]
     pub portion_size: Option<PortionSizeOut>,
     /// Replaces the full instruction text rather than appending to it.
@@ -435,8 +440,8 @@ pub fn create_recipe_input_to_dto(
 }
 
 /// Translate `UpdateRecipeInput` into the `UpdateRecipeDto` the service
-/// layer accepts. `slug` is the lookup key and is consumed by the caller
-/// before this point, so nothing here writes it.
+/// layer accepts. The caller resolves the row from `slug` before calling,
+/// so nothing here writes it.
 ///
 /// See [`UpdateRecipeInput`]'s docstring for the clear semantics this
 /// enforces.

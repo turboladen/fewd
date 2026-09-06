@@ -157,7 +157,7 @@ The MCP endpoint is mounted at `/mcp` on the same port as the web UI. Transport 
 | `halal`         | Permissible under Islamic dietary law (no pork or alcohol; meat slaughtered halal). |
 | `kosher`        | Conforms to Jewish dietary law (no pork or shellfish; meat and dairy not mixed).    |
 
-Enforcement is **soft**: `create_recipe` accepts any tags, but its description encourages applying these when a recipe qualifies. Recipes authored before this convention won't carry diet tags until re-tagged — apply tags on new recipes going forward, and re-tag existing ones in the Recipes tab of the web UI, for the catalog to narrow well by diet.
+Enforcement is **soft**: `create_recipe` accepts any tags, but its description encourages applying these when a recipe qualifies. Recipes authored before this convention won't carry diet tags until re-tagged — apply tags on new recipes going forward, and re-tag existing ones with `update_recipe` (or in the Recipes tab of the web UI), for the catalog to narrow well by diet. Note that `update_recipe`'s `tags` replaces the whole list, so send the recipe's existing tags alongside the new ones.
 
 ### Authentication and threat model
 
