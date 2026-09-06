@@ -658,7 +658,7 @@ impl FewdMcp {
 
     #[tool(
         name = "unrate_recipe",
-        description = "Clear a recipe's star rating when the user says a rating was recorded wrong or no longer reflects how they feel — call `search_recipes` or `get_recipe` first for the `slug`, and use `rate_recipe` instead whenever the user names a new star value, since rating again overwrites without needing this. Returns the same brief row `search_recipes` returns, with `rating` now absent, so you can confirm it is gone. Clearing is not the same as rating 1 star: `search_recipes`'s `min_rating` filter excludes unrated recipes entirely, so a cleared recipe drops out of every rating-filtered search rather than ranking at the bottom, and `list_curated_recipes` stops considering it for the top-rated tier. Calling this on a recipe that has no rating succeeds and leaves it unrated. This writes only `rating` — the recipe's content, tags, and `is_favorite` are untouched, and `favorite_recipe` is what changes the favorite flag. An unknown `slug` returns an error pointing at `search_recipes`; a blank one is rejected as a missing value. Example: {\"slug\":\"beef-taco-bowls\"}",
+        description = "Clear a recipe's star rating when the user says a rating was recorded wrong or no longer reflects how they feel — call `search_recipes` or `get_recipe` first for the `slug`, and use `rate_recipe` instead whenever the user names a new star value, since rating again overwrites without needing this. Returns the same brief row `search_recipes` returns, with `rating` now `null`, so you can confirm it is gone. Clearing is not the same as rating 1 star: `search_recipes`'s `min_rating` filter excludes unrated recipes entirely, so a cleared recipe drops out of every rating-filtered search rather than ranking at the bottom, and `list_curated_recipes` stops considering it for the top-rated tier. Calling this on a recipe that has no rating succeeds and leaves it unrated. This writes only `rating` — the recipe's content, tags, and `is_favorite` are untouched, and `favorite_recipe` is what changes the favorite flag. An unknown `slug` returns an error pointing at `search_recipes`; a blank one is rejected as a missing value. Example: {\"slug\":\"beef-taco-bowls\"}",
         input_schema = rmcp::handler::server::common::schema_for_type::<UnrateRecipeInput>()
     )]
     async fn unrate_recipe(
@@ -2872,6 +2872,21 @@ mod tests {
         assert_eq!(after.last_planned, before.last_planned);
         assert_eq!(after.slug, before.slug);
         assert_eq!(after.created_at, before.created_at);
+    }
+
+    #[test]
+    fn favorite_recipe_input_requires_is_favorite() {
+        // `bool`'s Default is `false`, so a `#[serde(default)]` added to the
+        // field would turn "the model forgot it" into a silent unfavorite.
+        // The omission has to fail loudly instead.
+        let LenientParameters(parsed) = LenientParameters::<FavoriteRecipeInput>::extract(
+            args_with(&[("slug", serde_json::json!("beef-taco-bowls"))]),
+        );
+        let err = parsed.expect_err("is_favorite must be required");
+        assert!(
+            err.contains("is_favorite"),
+            "error must name the missing field: {err}"
+        );
     }
 
     #[tokio::test]

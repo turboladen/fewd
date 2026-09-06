@@ -554,11 +554,8 @@ pub fn update_recipe_input_to_dto(input: UpdateRecipeInput) -> Result<UpdateReci
 /// The caller resolves the row from `slug` before calling, so nothing here
 /// writes it.
 //
-// Explicit literal rather than `..Default::default()`, on the same grounds
-// as `update_recipe_input_to_dto` above: a field added to UpdateRecipeDto
-// later must be categorized here rather than defaulting to "leave
-// unchanged". A future non-Option field, or one whose Default is a real
-// value, would otherwise write through silently.
+// The field literal is explicit for the reason given above
+// `update_recipe_input_to_dto`.
 //
 // `RecipeService::update` sets `is_favorite` directly, so this needs no
 // service-side helper — it is an ordinary partial update that happens to
@@ -590,19 +587,14 @@ pub fn favorite_recipe_input_to_dto(input: FavoriteRecipeInput) -> UpdateRecipeD
 /// writes it.
 //
 // Rounds first, then range-checks the rounded value — the same two steps
-// `RecipeService::update` performs, so nothing that would trip its
-// `DbErr::Custom` reaches it. That matters because `db_error` flattens a
-// `DbErr` to the opaque "database error", which gives the LLM no way to
-// recover from what is really an input mistake. Mirroring the service
-// rather than being stricter also keeps this tool from rejecting a value
-// the web UI accepts. NaN and the infinities fail `contains` and are
-// rejected here.
+// `RecipeService::update` performs, so nothing reaches it that would trip
+// its `DbErr::Custom`, which `db_error` flattens to an opaque "database
+// error" the LLM cannot act on. Mirroring the service rather than being
+// stricter also keeps this tool from rejecting a value the web UI accepts.
+// NaN and the infinities fail `contains` and are rejected here.
 //
-// Explicit literal rather than `..Default::default()`, on the same grounds
-// as `update_recipe_input_to_dto` above: a field added to UpdateRecipeDto
-// later must be categorized here rather than defaulting to "leave
-// unchanged". A future non-Option field, or one whose Default is a real
-// value, would otherwise write through silently.
+// The field literal is explicit for the reason given above
+// `update_recipe_input_to_dto`.
 pub fn rate_recipe_input_to_dto(input: RateRecipeInput) -> Result<UpdateRecipeDto, InputError> {
     let rounded = input.rating.round();
     if !(1.0..=5.0).contains(&rounded) {
@@ -836,9 +828,10 @@ mod tests {
             f64::INFINITY,
             f64::NEG_INFINITY,
         ] {
-            let err = rate_recipe_input_to_dto(mk_rate(raw))
-                .expect_err("{raw} must be rejected")
-                .to_string();
+            let Err(err) = rate_recipe_input_to_dto(mk_rate(raw)) else {
+                panic!("{raw} must be rejected");
+            };
+            let err = err.to_string();
             assert!(err.contains("1 to 5"), "{raw}: {err}");
             assert!(
                 err.contains("unrate_recipe"),
