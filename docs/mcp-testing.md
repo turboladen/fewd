@@ -544,7 +544,7 @@ Expect: tool-level error citing "1 to 5", quoting the value **as you sent it**, 
 
 ### `unrate_recipe`
 
-Removes a rating entirely. This is the only clear-to-empty path anywhere in fewd's MCP surface, and the only one in the product — the web UI's star control cannot clear a rating either.
+Removes a rating entirely. This is the only way to clear a scalar column back to null anywhere on fewd's MCP surface — `update_recipe`'s `tags` and `ingredients` and `update_person`'s list fields all clear with `[]`, but no other scalar has a path back to empty. It is also the only one in the product: the web UI's star control cannot clear a rating either.
 
 **Happy path:**
 

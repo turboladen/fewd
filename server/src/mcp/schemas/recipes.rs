@@ -554,7 +554,7 @@ pub fn update_recipe_input_to_dto(input: UpdateRecipeInput) -> Result<UpdateReci
 /// The caller resolves the row from `slug` before calling, so nothing here
 /// writes it.
 //
-// The field literal is explicit for the reason given above
+// The field literal is explicit for the reason given in
 // `update_recipe_input_to_dto`.
 //
 // `RecipeService::update` sets `is_favorite` directly, so this needs no
@@ -593,7 +593,7 @@ pub fn favorite_recipe_input_to_dto(input: FavoriteRecipeInput) -> UpdateRecipeD
 // stricter also keeps this tool from rejecting a value the web UI accepts.
 // NaN and the infinities fail `contains` and are rejected here.
 //
-// The field literal is explicit for the reason given above
+// The field literal is explicit for the reason given in
 // `update_recipe_input_to_dto`.
 pub fn rate_recipe_input_to_dto(input: RateRecipeInput) -> Result<UpdateRecipeDto, InputError> {
     let rounded = input.rating.round();
