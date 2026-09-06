@@ -3,13 +3,15 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::dto::{CreateRecipeDto, IngredientDto, NutritionDto, PortionSizeDto, TimeValueDto};
+use crate::dto::{
+    CreateRecipeDto, IngredientDto, NutritionDto, PortionSizeDto, TimeValueDto, UpdateRecipeDto,
+};
 use crate::entities::recipe;
 
 use super::common::{
-    format_date, ingredient_in, ingredient_out, nutrition_in, nutrition_out, parse_json,
-    parse_optional_json, portion_in, portion_out, time_in, time_out, IngredientOut, NutritionOut,
-    PortionSizeOut, TimeOut,
+    blank_to_none, format_date, ingredient_in, ingredient_out, nutrition_in, nutrition_out,
+    parse_json, parse_optional_json, portion_in, portion_out, time_in, time_out, IngredientOut,
+    NutritionOut, PortionSizeOut, TimeOut,
 };
 use super::errors::InputError;
 
@@ -315,6 +317,97 @@ pub struct ImportRecipeUrlInput {
     pub url: url::Url,
 }
 
+/// Input for the `update_recipe` MCP tool. `slug` identifies the row to
+/// update and is never written — renaming leaves the slug alone, so the
+/// same slug keeps addressing the recipe afterwards.
+///
+/// Every other field is optional with PATCH semantics: an omitted field —
+/// or an explicit JSON `null` — leaves the column unchanged.
+///
+/// **Clear semantics differ by field shape**:
+///
+/// - The string fields (`name`, `description`, `instructions`, `notes`,
+///   `icon`) cannot be blanked. An empty or whitespace-only value means
+///   "leave unchanged"; a blank `name` is rejected outright.
+/// - The list fields (`ingredients`, `tags`) and the structured blocks
+///   (`nutrition_per_serving`, the three time fields, `portion_size`)
+///   REPLACE the stored value whole — they are never merged. A partial
+///   `ingredients` array therefore deletes every ingredient it omits, and
+///   a `nutrition_per_serving` carrying only `calories` nulls the other
+///   four fields. Passing `[]` clears a list.
+///
+/// `is_favorite`, `rating`, `source`, `source_url`, the parent recipe, and
+/// the slug are not writable here.
+//
+// The blank-string coercion runs through `blank_to_none`, which carries
+// the invariant it protects. A blank `name` instead mirrors
+// `create_recipe_input_to_dto`'s rejection, so create and update agree on
+// what a valid recipe name is.
+//
+// Doc comments here ship to the LLM verbatim as the tool's input-schema
+// `description` — keep rustdoc links and internal identifiers out of `///`.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct UpdateRecipeInput {
+    /// Slug of the recipe to update (case-insensitive). Call
+    /// `search_recipes` or `get_recipe` first to find it. This is a lookup
+    /// key, not a write — it is never changed, including by a rename.
+    pub slug: String,
+    /// New display name. Renaming does NOT change the slug.
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Hands-on time. The `unit` is stored as written and never validated,
+    /// so prefer minutes, hours, or days — singular, plural, or the `min` /
+    /// `hr` / `d` abbreviations — to stay readable alongside the rest of
+    /// the catalog.
+    #[serde(default)]
+    pub prep_time: Option<TimeOut>,
+    /// Time on the heat. Same `unit` vocabulary as `prep_time`.
+    #[serde(default)]
+    pub cook_time: Option<TimeOut>,
+    /// Replaces the stored total time. Send this whenever `prep_time` or
+    /// `cook_time` changes, or the recipe keeps advertising its old
+    /// duration. Unlike `prep_time` and `cook_time`, this `unit` carries
+    /// consequences — it is the only one parsed, and a unit outside
+    /// minutes / hours / days drops the recipe out of every time-filtered
+    /// `search_recipes` call.
+    #[serde(default)]
+    pub total_time: Option<TimeOut>,
+    /// Servings the recipe is authored for. Must be at least 1. Changing
+    /// this does NOT rescale `ingredients`: the shopping list divides the
+    /// stored amounts by this number, so a genuine resize has to send a
+    /// rescaled `ingredients` array in the same call.
+    #[serde(default)]
+    pub servings: Option<i32>,
+    /// How big one serving is, as a `{value, unit}` pair — e.g.
+    /// `{"value": 1.5, "unit": "cup"}`. Replaces the stored pair whole.
+    #[serde(default)]
+    pub portion_size: Option<PortionSizeOut>,
+    /// Replaces the full instruction text rather than appending to it.
+    /// A blank value is ignored, so there is no way to erase the steps.
+    #[serde(default)]
+    pub instructions: Option<String>,
+    /// Replaces the whole ingredient list — this is not a merge. Omitted
+    /// ingredients are deleted, so read the current list with `get_recipe`
+    /// and send it back complete. `[]` clears the list.
+    #[serde(default)]
+    pub ingredients: Option<Vec<IngredientOut>>,
+    /// Replaces the whole nutrition block. Every field inside it is
+    /// independently optional, so sending `{"calories": 500}` alone nulls
+    /// protein, carbs, fat, and notes.
+    #[serde(default)]
+    pub nutrition_per_serving: Option<NutritionOut>,
+    /// Replaces the whole tag list. `[]` clears it.
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    /// Emoji / icon character displayed next to the recipe.
+    #[serde(default)]
+    pub icon: Option<String>,
+}
+
 pub fn create_recipe_input_to_dto(
     input: CreateRecipeInput,
     parent_recipe_id: Option<String>,
@@ -346,8 +439,65 @@ pub fn create_recipe_input_to_dto(
     })
 }
 
+/// Translate `UpdateRecipeInput` into the `UpdateRecipeDto` the service
+/// layer accepts. The caller resolves the row from `slug` before calling,
+/// so nothing here writes it.
+///
+/// See [`UpdateRecipeInput`]'s docstring for the clear semantics this
+/// enforces.
+pub fn update_recipe_input_to_dto(input: UpdateRecipeInput) -> Result<UpdateRecipeDto, InputError> {
+    // `name` and `servings` get exactly the checks
+    // `create_recipe_input_to_dto` applies, so a value create would reject
+    // can't reach the row through update instead.
+    if input.name.as_deref().is_some_and(|n| n.trim().is_empty()) {
+        return Err(InputError::EmptyName("name"));
+    }
+    if let Some(servings) = input.servings {
+        if servings < 1 {
+            return Err(InputError::NonPositiveServings(servings));
+        }
+    }
+
+    // The remaining string fields have no create-side rule to mirror, so
+    // they take the `update_person` treatment instead: empty means "no
+    // change", never "clear". `blank_to_none` carries the rationale.
+    //
+    // Written as an explicit literal rather than `..Default::default()`:
+    // a field added to UpdateRecipeDto later must be categorized here
+    // instead of silently defaulting to "leave unchanged".
+    Ok(UpdateRecipeDto {
+        name: input.name,
+        description: blank_to_none(input.description),
+        prep_time: input.prep_time.map(time_in),
+        cook_time: input.cook_time.map(time_in),
+        // An unrecognized `unit` makes total_time_to_minutes return None,
+        // which writes total_minutes = NULL, and search_recipes'
+        // max_total_time_minutes excludes NULL rows — so a bad-unit update
+        // drops the recipe out of every time-filtered search behind a
+        // success response. Tracked as fewd-2nr; not addressed here.
+        total_time: input.total_time.map(time_in),
+        servings: input.servings,
+        portion_size: input.portion_size.map(portion_in),
+        instructions: blank_to_none(input.instructions),
+        // `ingredient_in` runs the comma'd-name splitter, exactly as on
+        // create — skipping it would let "garlic, minced" land as one
+        // ingredient name and fragment shopping aggregation.
+        ingredients: input
+            .ingredients
+            .map(|v| v.into_iter().map(ingredient_in).collect()),
+        nutrition_per_serving: input.nutrition_per_serving.map(nutrition_in),
+        tags: input.tags,
+        notes: blank_to_none(input.notes),
+        icon: blank_to_none(input.icon),
+        // Owned by fewd-3w3 (favorite_recipe) and fewd-no0 (rate_recipe).
+        is_favorite: None,
+        rating: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::common::IngredientAmountOut;
     use super::*;
 
     fn mk_input(name: &str, servings: i32) -> CreateRecipeInput {
@@ -369,6 +519,113 @@ mod tests {
             notes: None,
             icon: None,
         }
+    }
+
+    fn mk_update(slug: &str) -> UpdateRecipeInput {
+        UpdateRecipeInput {
+            slug: slug.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn update_rejects_zero_servings() {
+        let err = update_recipe_input_to_dto(UpdateRecipeInput {
+            servings: Some(0),
+            ..mk_update("x")
+        })
+        .unwrap_err();
+        assert!(format!("{err}").contains("servings"));
+    }
+
+    #[test]
+    fn update_rejects_negative_servings() {
+        let err = update_recipe_input_to_dto(UpdateRecipeInput {
+            servings: Some(-1),
+            ..mk_update("x")
+        })
+        .unwrap_err();
+        assert!(format!("{err}").contains("servings"));
+    }
+
+    #[test]
+    fn update_rejects_whitespace_name() {
+        let err = update_recipe_input_to_dto(UpdateRecipeInput {
+            name: Some("   ".into()),
+            ..mk_update("x")
+        })
+        .unwrap_err();
+        assert!(format!("{err}").contains("name"));
+    }
+
+    #[test]
+    fn update_blank_strings_mean_no_change() {
+        // The invariant: no recipe scalar has a clear-to-empty path. A
+        // caller sending "" must not persist an empty string as a
+        // back-door clear.
+        for blank in ["", "   ", "\t\n"] {
+            let dto = update_recipe_input_to_dto(UpdateRecipeInput {
+                description: Some(blank.into()),
+                instructions: Some(blank.into()),
+                notes: Some(blank.into()),
+                icon: Some(blank.into()),
+                ..mk_update("x")
+            })
+            .expect("blank strings are not an error");
+            assert!(dto.description.is_none(), "description, blank {blank:?}");
+            assert!(dto.instructions.is_none(), "instructions, blank {blank:?}");
+            assert!(dto.notes.is_none(), "notes, blank {blank:?}");
+            assert!(dto.icon.is_none(), "icon, blank {blank:?}");
+        }
+    }
+
+    #[test]
+    fn update_empty_lists_survive_as_writes() {
+        // `[]` is a legitimate write that clears the list, distinct from
+        // omitting the field. Coalescing it to None would silently drop
+        // the caller's intent.
+        let dto = update_recipe_input_to_dto(UpdateRecipeInput {
+            tags: Some(vec![]),
+            ingredients: Some(vec![]),
+            ..mk_update("x")
+        })
+        .expect("empty lists are valid");
+        assert!(dto.tags.is_some_and(|v| v.is_empty()));
+        assert!(dto.ingredients.is_some_and(|v| v.is_empty()));
+    }
+
+    #[test]
+    fn update_never_writes_favorite_or_rating() {
+        let dto = update_recipe_input_to_dto(UpdateRecipeInput {
+            name: Some("Renamed".into()),
+            servings: Some(6),
+            ..mk_update("x")
+        })
+        .expect("valid input");
+        assert!(dto.is_favorite.is_none());
+        assert!(dto.rating.is_none());
+    }
+
+    #[test]
+    fn update_normalizes_comma_ingredient_name() {
+        // Proves the converter routes ingredients through `ingredient_in`
+        // rather than mapping them straight across; a comma'd name that
+        // skipped the splitter would fragment shopping aggregation.
+        let dto = update_recipe_input_to_dto(UpdateRecipeInput {
+            ingredients: Some(vec![IngredientOut {
+                name: "garlic, minced".into(),
+                prep: None,
+                amount: IngredientAmountOut::Single { value: 2.0 },
+                unit: "clove".into(),
+                notes: None,
+                or_alternative: None,
+            }]),
+            ..mk_update("x")
+        })
+        .expect("valid input");
+        let ingredients = dto.ingredients.expect("ingredients written");
+        assert_eq!(ingredients[0].name, "garlic");
+        assert_eq!(ingredients[0].prep.as_deref(), Some("minced"));
     }
 
     #[test]

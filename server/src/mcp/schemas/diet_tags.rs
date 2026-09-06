@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DietTag {
     /// The exact lowercase string to pass in `search_recipes`'s `tags` filter
-    /// and to apply in `create_recipe`. Matching is case-insensitive, but emit
+    /// and to apply in `create_recipe` — or in `update_recipe` when the
+    /// recipe already exists. Matching is case-insensitive, but emit
     /// lowercase for consistency with stored tags.
     pub tag: String,
     /// What dietary constraint this tag asserts about a recipe — use it to
@@ -104,7 +105,8 @@ pub fn diet_tags_payload() -> Vec<DietTag> {
 pub fn render_diet_tags_markdown() -> String {
     let mut out = String::from(
         "# fewd diet-tag vocabulary\n\n\
-         Apply these tags on recipes (`create_recipe`) and filter by them \
+         Apply these tags on recipes (`create_recipe`, or `update_recipe` \
+         for one already in the catalog) and filter by them \
          (`search_recipes` `tags`). Translate a person's free-form dietary \
          goals into one or more of these, then search per-constraint — \
          multiple tags AND together.\n\n",

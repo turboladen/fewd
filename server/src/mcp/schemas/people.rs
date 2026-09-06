@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::dto::UpdatePersonDto;
 use crate::entities::person;
 
-use super::common::{parse_json, parse_optional_json};
+use super::common::{blank_to_none, parse_json, parse_optional_json};
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct PersonWithPrefs {
@@ -108,7 +108,7 @@ pub fn update_person_input_to_dto(input: UpdatePersonInput) -> UpdatePersonDto {
         birthdate: None,
         dietary_goals: None,
         is_active: None,
-        notes: input.notes.filter(|s| !s.trim().is_empty()),
+        notes: blank_to_none(input.notes),
         dislikes: input.dislikes,
         favorites: input.favorites,
         drink_preferences: input.drink_preferences,
