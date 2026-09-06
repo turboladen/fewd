@@ -1437,6 +1437,79 @@ mod tests {
         assert_tool_user_error(result, &["ghost-pasta", "list_curated_recipes"]);
     }
 
+    // Parse a successful tool result's single text block back into JSON.
+    // Substring assertions on the serialized `CallToolResult` can't tell a
+    // field's value from the same text appearing elsewhere in the payload,
+    // which matters when a test is asserting the shape of a whole record.
+    fn tool_result_json(result: &CallToolResult) -> serde_json::Value {
+        let text = result
+            .content
+            .first()
+            .expect("a successful tool result carries one content block")
+            .as_text()
+            .expect("tool results are text")
+            .text
+            .clone();
+        serde_json::from_str(&text).expect("tool result body is JSON")
+    }
+
+    #[tokio::test]
+    async fn get_recipe_returns_the_full_record() {
+        // The main read path. `update_recipe` reshaped this function twice
+        // — the ResolveError swap and the parent_slug_for extraction — so
+        // the fields it hands back are pinned here rather than inferred
+        // from the error-path tests.
+        use super::super::schemas::GetRecipeParams;
+
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let result = mcp
+            .get_recipe(LenientParameters::for_test(GetRecipeParams {
+                slug: seeded.slug.clone(),
+            }))
+            .await
+            .expect("get_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+
+        let body = tool_result_json(&result);
+        assert_eq!(body["slug"], "beef-taco-bowls");
+        assert_eq!(body["name"], "Beef Taco Bowls");
+        assert_eq!(body["description"], "original description");
+        assert_eq!(body["source"], "manual");
+        assert_eq!(body["servings"], 4);
+        assert_eq!(body["instructions"], "Original instructions");
+        assert_eq!(body["notes"], "original note");
+        assert_eq!(body["icon"], "🍝");
+        assert_eq!(body["is_favorite"], false);
+        assert_eq!(body["times_planned"], 0);
+        // No parent was seeded, so the resolved slug is absent rather than
+        // stale — the null half of what `parent_slug_for` returns.
+        assert_eq!(body["parent_recipe_slug"], serde_json::Value::Null);
+
+        assert_eq!(body["tags"], serde_json::json!(["dinner", "italian"]));
+        assert_eq!(
+            body["total_time"],
+            serde_json::json!({"value": 30, "unit": "minutes"})
+        );
+        assert_eq!(body["nutrition_per_serving"]["calories"], 400);
+        assert_eq!(body["nutrition_per_serving"]["protein_grams"], 30);
+
+        // Ingredients arrive as the structured shape, not flattened text:
+        // a tagged `amount` plus a separate `unit`.
+        let ingredients = body["ingredients"]
+            .as_array()
+            .expect("ingredients is an array");
+        assert_eq!(ingredients.len(), 2);
+        assert_eq!(ingredients[0]["name"], "garlic");
+        assert_eq!(ingredients[0]["unit"], "clove");
+        assert_eq!(
+            ingredients[0]["amount"],
+            serde_json::json!({"kind": "single", "value": 2.0})
+        );
+        assert_eq!(ingredients[1]["name"], "olive oil");
+    }
+
     #[tokio::test]
     async fn get_recipe_empty_slug_returns_input_error_not_unknown_recipe() {
         // `normalize_slug`'s blank guard, from the `get_recipe` side. A
