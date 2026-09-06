@@ -338,6 +338,39 @@ pub struct FavoriteRecipeInput {
     pub is_favorite: bool,
 }
 
+/// Input for the `rate_recipe` MCP tool. `slug` identifies the row and is
+/// never written; `rating` is the only column this tool touches.
+///
+/// Ratings are whole stars. A fractional value rounds to the nearest whole
+/// number and the rounded value is what gets stored, so the returned row is
+/// the authority on what was recorded. A value that does not round into
+/// 1–5 is rejected rather than clamped.
+//
+// Doc comments here ship to the LLM verbatim as the tool's input-schema
+// `description` — keep rustdoc links and internal identifiers out of `///`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RateRecipeInput {
+    /// Slug of the recipe to rate (case-insensitive). Call
+    /// `search_recipes` or `get_recipe` first to find it.
+    pub slug: String,
+    /// Star rating, a whole number from 1 to 5. A fractional value rounds
+    /// to the nearest whole star. There is no rating that means "no
+    /// rating" — call `unrate_recipe` to remove one.
+    #[schemars(range(min = 1, max = 5))]
+    pub rating: f64,
+}
+
+/// Input for the `unrate_recipe` MCP tool. Removing a rating is not the
+/// same as rating 1 star: `search_recipes`'s `min_rating` filter excludes
+/// unrated recipes entirely, so a cleared recipe drops out of every
+/// rating-filtered search rather than ranking at the bottom.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct UnrateRecipeInput {
+    /// Slug of the recipe whose rating to remove (case-insensitive). Call
+    /// `search_recipes` or `get_recipe` first to find it.
+    pub slug: String,
+}
+
 /// Input for the `update_recipe` MCP tool. `slug` identifies the row to
 /// update and is never written — renaming leaves the slug alone, so the
 /// same slug keeps addressing the recipe afterwards.
@@ -550,6 +583,51 @@ pub fn favorite_recipe_input_to_dto(input: FavoriteRecipeInput) -> UpdateRecipeD
     }
 }
 
+/// Translate `RateRecipeInput` into a one-column `UpdateRecipeDto`,
+/// rejecting a rating that does not round into 1–5.
+///
+/// The caller resolves the row from `slug` before calling, so nothing here
+/// writes it.
+//
+// Rounds first, then range-checks the rounded value — the same two steps
+// `RecipeService::update` performs, so nothing that would trip its
+// `DbErr::Custom` reaches it. That matters because `db_error` flattens a
+// `DbErr` to the opaque "database error", which gives the LLM no way to
+// recover from what is really an input mistake. Mirroring the service
+// rather than being stricter also keeps this tool from rejecting a value
+// the web UI accepts. NaN and the infinities fail `contains` and are
+// rejected here.
+//
+// Explicit literal rather than `..Default::default()`, on the same grounds
+// as `update_recipe_input_to_dto` above: a field added to UpdateRecipeDto
+// later must be categorized here rather than defaulting to "leave
+// unchanged". A future non-Option field, or one whose Default is a real
+// value, would otherwise write through silently.
+pub fn rate_recipe_input_to_dto(input: RateRecipeInput) -> Result<UpdateRecipeDto, InputError> {
+    let rounded = input.rating.round();
+    if !(1.0..=5.0).contains(&rounded) {
+        return Err(InputError::RatingOutOfRange(input.rating));
+    }
+
+    Ok(UpdateRecipeDto {
+        name: None,
+        description: None,
+        prep_time: None,
+        cook_time: None,
+        total_time: None,
+        servings: None,
+        portion_size: None,
+        instructions: None,
+        ingredients: None,
+        nutrition_per_serving: None,
+        tags: None,
+        notes: None,
+        icon: None,
+        is_favorite: None,
+        rating: Some(rounded),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::common::IngredientAmountOut;
@@ -703,6 +781,100 @@ mod tests {
             assert!(dto.notes.is_none(), "notes, is_favorite {value}");
             assert!(dto.icon.is_none(), "icon, is_favorite {value}");
         }
+    }
+
+    fn mk_rate(rating: f64) -> RateRecipeInput {
+        RateRecipeInput {
+            slug: "x".into(),
+            rating,
+        }
+    }
+
+    #[test]
+    fn rate_accepts_whole_stars_one_through_five() {
+        for stars in [1.0, 2.0, 3.0, 4.0, 5.0] {
+            let dto = rate_recipe_input_to_dto(mk_rate(stars))
+                .unwrap_or_else(|e| panic!("{stars} stars must be accepted: {e}"));
+            assert_eq!(dto.rating, Some(stars));
+        }
+    }
+
+    #[test]
+    fn rate_rounds_at_the_accept_boundaries() {
+        // `f64::round` is half-away-from-zero, which puts the accept window
+        // on the raw input at 0.5 <= x < 5.5 — not the 1.0..=5.0 the field
+        // documentation suggests. Both edges are pinned because both are
+        // reachable from an ordinary utterance ("four and a half stars").
+        for (raw, stored) in [
+            (0.5, 1.0),
+            (0.6, 1.0),
+            (1.5, 2.0),
+            (2.5, 3.0),
+            (4.4, 4.0),
+            (4.5, 5.0),
+            (4.6, 5.0),
+            (5.4, 5.0),
+            (5.49, 5.0),
+        ] {
+            let dto = rate_recipe_input_to_dto(mk_rate(raw))
+                .unwrap_or_else(|e| panic!("{raw} must be accepted: {e}"));
+            assert_eq!(dto.rating, Some(stored), "{raw} must store as {stored}");
+        }
+    }
+
+    #[test]
+    fn rate_rejects_outside_the_accept_window() {
+        for raw in [
+            0.0,
+            0.49,
+            5.5,
+            5.6,
+            6.0,
+            -1.0,
+            -0.5,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            let err = rate_recipe_input_to_dto(mk_rate(raw))
+                .expect_err("{raw} must be rejected")
+                .to_string();
+            assert!(err.contains("1 to 5"), "{raw}: {err}");
+            assert!(
+                err.contains("unrate_recipe"),
+                "{raw} must point at the clear path: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn rate_error_reports_the_callers_raw_value() {
+        // The check runs on the rounded value, so reporting that instead
+        // would tell the caller they sent 6 when they sent 5.6.
+        let err = rate_recipe_input_to_dto(mk_rate(5.6))
+            .expect_err("5.6 rounds to 6 and must be rejected")
+            .to_string();
+        assert!(err.contains("5.6"), "must quote the value as sent: {err}");
+    }
+
+    #[test]
+    fn rate_input_writes_only_rating() {
+        let dto = rate_recipe_input_to_dto(mk_rate(4.0)).expect("valid rating");
+        assert_eq!(dto.rating, Some(4.0));
+        assert!(dto.is_favorite.is_none(), "is_favorite");
+        assert!(dto.name.is_none(), "name");
+        assert!(dto.description.is_none(), "description");
+        assert!(dto.prep_time.is_none(), "prep_time");
+        assert!(dto.cook_time.is_none(), "cook_time");
+        assert!(dto.total_time.is_none(), "total_time");
+        assert!(dto.servings.is_none(), "servings");
+        assert!(dto.portion_size.is_none(), "portion_size");
+        assert!(dto.instructions.is_none(), "instructions");
+        assert!(dto.ingredients.is_none(), "ingredients");
+        assert!(dto.nutrition_per_serving.is_none(), "nutrition_per_serving");
+        assert!(dto.tags.is_none(), "tags");
+        assert!(dto.notes.is_none(), "notes");
+        assert!(dto.icon.is_none(), "icon");
     }
 
     #[test]

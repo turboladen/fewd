@@ -494,6 +494,87 @@ Expect: tool-level error naming the missing field. `is_favorite` is required on 
 
 ---
 
+### `rate_recipe`
+
+State-changing and single-column. Seed a recipe first and substitute its slug for `test-recipe`.
+
+**Happy path:**
+
+```json
+{ "slug": "test-recipe", "rating": 5 }
+```
+
+Expect: the brief row with `rating: 5.0`.
+
+**Fractional input rounds, and the response is the authority:**
+
+```json
+{ "slug": "test-recipe", "rating": 4.6 }
+```
+
+Expect: `rating: 5.0` — not 4.6. This is the case to watch when a user says "four and a half stars": tell them the number in the response, not the one they said, or you will report a rating that was never stored.
+
+**The accept window is wider than "1 to 5" suggests.** Rounding is half-away-from-zero, so the raw value is accepted whenever `0.5 <= rating < 5.5`:
+
+| Sent | Stored   |
+| ---- | -------- |
+| 0.49 | rejected |
+| 0.5  | 1        |
+| 4.5  | 5        |
+| 5.49 | 5        |
+| 5.5  | rejected |
+
+Note the declared JSON schema advertises `minimum: 1, maximum: 5`, so a client that validates strictly will reject 0.5 before it reaches the server while a client that does not will see it stored as 1 star.
+
+**Re-rating overwrites:**
+
+Send `rating: 5`, then `rating: 3`. Expect: `rating: 3.0`. The last call wins; there is no averaging.
+
+**Error path — out of range:**
+
+```json
+{ "slug": "test-recipe", "rating": 0 }
+```
+
+Expect: tool-level error citing "1 to 5", quoting the value **as you sent it**, and pointing at `unrate_recipe`. The stored rating is unchanged — verify with `get_recipe`. A `0` is not a clear; it is a rejected rating.
+
+**Error paths — unknown and blank slug:** same two messages as `update_recipe` and `favorite_recipe`.
+
+---
+
+### `unrate_recipe`
+
+Removes a rating entirely. This is the only clear-to-empty path anywhere in fewd's MCP surface, and the only one in the product — the web UI's star control cannot clear a rating either.
+
+**Happy path:**
+
+```json
+{ "slug": "test-recipe" }
+```
+
+Expect: the brief row with `rating` absent (JSON `null`), not `0`.
+
+**The interaction that justifies this tool existing.** Run these four steps in order:
+
+1. `rate_recipe` with `{ "slug": "test-recipe", "rating": 4 }`
+2. `search_recipes` with `{ "min_rating": 3 }` — the recipe **is** in the results
+3. `unrate_recipe` with `{ "slug": "test-recipe" }`
+4. `search_recipes` with `{ "min_rating": 3 }` again — the recipe is **gone**
+
+An unrated recipe is excluded from every `min_rating` search rather than ranking at the bottom, because `rating >= 3` is never true for a NULL. So an unrated recipe and a 1-star recipe answer completely different queries, and without this tool a rating recorded wrong would permanently change which searches a recipe can answer.
+
+**Idempotent:**
+
+Call it twice, or on a recipe that was never rated. Expect: success both times, `rating` still absent.
+
+**Nothing else changes:**
+
+Favorite the recipe, rate it, then unrate it. Expect: `is_favorite` is still true and every content field is untouched. Clearing a rating is not a reset.
+
+**Error paths — unknown and blank slug:** same two messages as `rate_recipe`.
+
+---
+
 ### `create_meal`
 
 State-changing. Schedules a meal on a date with per-person serving assignments.
