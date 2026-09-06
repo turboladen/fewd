@@ -397,6 +397,28 @@ impl RecipeService {
         q.order_by_asc(recipe::Column::Slug).all(db).await
     }
 
+    /// Remove a recipe's star rating.
+    //
+    // Not expressible through `update`: `UpdateRecipeDto.rating` is
+    // `Option<f64>` and `update` gates on `if let Some(rating)`, so no
+    // inhabitant of that type writes NULL. Clearing has to exist because
+    // `search_filtered`'s `min_rating` compares `rating >= n` and NULL
+    // fails that comparison — an unrated recipe and a 1-star recipe answer
+    // different searches, so a rating recorded wrong is otherwise
+    // permanent.
+    pub async fn clear_rating(db: &DatabaseConnection, id: String) -> Result<recipe::Model, DbErr> {
+        let existing = Recipe::find_by_id(id)
+            .one(db)
+            .await?
+            .ok_or(DbErr::RecordNotFound("Recipe not found".to_string()))?;
+
+        let mut recipe: recipe::ActiveModel = existing.into();
+        recipe.rating = Set(None);
+        recipe.updated_at = Set(chrono::Utc::now());
+
+        recipe.update(db).await
+    }
+
     pub async fn toggle_favorite(
         db: &DatabaseConnection,
         id: String,
