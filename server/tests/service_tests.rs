@@ -325,6 +325,93 @@ async fn person_json_fields_roundtrip() {
 // --- RecipeService Tests ---
 
 #[tokio::test]
+async fn recipe_tags_are_trimmed_on_create_and_update() {
+    // `search_filtered` matches a tag against an already-trimmed needle, so
+    // a padded tag that survived the write would render in the UI while
+    // answering no tag search at all. Both write paths normalize.
+    let db = setup_db().await;
+    let recipe = RecipeService::create(
+        &db,
+        CreateRecipeDto {
+            tags: vec![" Dinner ".to_string(), "  ".to_string(), "easy".to_string()],
+            ..test_recipe_dto("Pasta")
+        },
+    )
+    .await
+    .unwrap();
+    let created: Vec<String> = serde_json::from_str(&recipe.tags).unwrap();
+    assert_eq!(created, vec!["Dinner", "easy"]);
+
+    let updated = RecipeService::update(
+        &db,
+        recipe.id,
+        UpdateRecipeDto {
+            tags: Some(vec!["\tvegetarian\n".to_string(), String::new()]),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let rewritten: Vec<String> = serde_json::from_str(&updated.tags).unwrap();
+    assert_eq!(rewritten, vec!["vegetarian"]);
+}
+
+#[tokio::test]
+async fn recipe_clear_rating_sets_column_to_null() {
+    // `RecipeService::update` cannot express this — `UpdateRecipeDto.rating`
+    // is an `Option<f64>` whose `None` means "leave unchanged" — so
+    // `clear_rating` is the only path to a NULL rating.
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let rated = RecipeService::update(
+        &db,
+        recipe.id.clone(),
+        UpdateRecipeDto {
+            rating: Some(4.0),
+            is_favorite: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(rated.rating, Some(4.0));
+
+    let cleared = RecipeService::clear_rating(&db, recipe.id.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(cleared.rating, None);
+    // Everything else has to survive: a `clear_rating` that rebuilt the
+    // ActiveModel from defaults would pass a bare rating assertion.
+    assert!(cleared.is_favorite, "is_favorite must survive");
+    assert!(
+        cleared.updated_at > rated.updated_at,
+        "clearing is a write and must stamp updated_at"
+    );
+    assert_eq!(cleared.name, rated.name);
+    assert_eq!(cleared.slug, rated.slug);
+    assert_eq!(cleared.servings, rated.servings);
+    assert_eq!(cleared.instructions, rated.instructions);
+    assert_eq!(cleared.ingredients, rated.ingredients);
+    assert_eq!(cleared.tags, rated.tags);
+    assert_eq!(cleared.created_at, rated.created_at);
+}
+
+#[tokio::test]
+async fn recipe_clear_rating_unknown_id_returns_record_not_found() {
+    let db = setup_db().await;
+    let err = RecipeService::clear_rating(&db, "no-such-recipe".to_string())
+        .await
+        .expect_err("an unknown id must not silently succeed");
+    assert!(
+        matches!(err, sea_orm::DbErr::RecordNotFound(_)),
+        "expected RecordNotFound, got {err:?}"
+    );
+}
+
+#[tokio::test]
 async fn recipe_create_and_get_all() {
     let db = setup_db().await;
     let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
