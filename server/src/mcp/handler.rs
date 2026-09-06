@@ -30,12 +30,13 @@ use crate::services::shopping_service::ShoppingService;
 use super::lookups::MealLookups;
 use super::schemas::errors::{InputError, ResolveError};
 use super::schemas::{
-    create_meal_input_to_dto, create_recipe_input_to_dto, diet_tags_payload, meal_to_brief,
-    person_to_prefs, recipe_to_brief, recipe_to_full, render_diet_tags_markdown,
-    render_family_overview, shopping_item_from_dto, update_person_input_to_dto,
-    update_recipe_input_to_dto, CreateMealError, CreateMealInput, CreateRecipeInput,
-    DateRangeParams, EmptyParams, GetRecipeParams, ImportRecipeUrlInput, PrintableInput,
-    SearchRecipesParams, UpdatePersonInput, UpdateRecipeInput,
+    create_meal_input_to_dto, create_recipe_input_to_dto, diet_tags_payload,
+    favorite_recipe_input_to_dto, meal_to_brief, person_to_prefs, recipe_to_brief, recipe_to_full,
+    render_diet_tags_markdown, render_family_overview, shopping_item_from_dto,
+    update_person_input_to_dto, update_recipe_input_to_dto, CreateMealError, CreateMealInput,
+    CreateRecipeInput, DateRangeParams, EmptyParams, FavoriteRecipeInput, GetRecipeParams,
+    ImportRecipeUrlInput, PrintableInput, SearchRecipesParams, UpdatePersonInput,
+    UpdateRecipeInput,
 };
 use super::AuthenticatedPerson;
 
@@ -85,7 +86,7 @@ impl FewdMcp {
 
     #[tool(
         name = "list_curated_recipes",
-        description = "Use as the default starting point for meal-planning when the user hasn't named a specific dish or ingredient — returns the family's likely-relevant shortlist (every favorite first, then most-recently-planned, then top-rated, deduped, ≤30 unless favorites exceed that). For targeted lookups by ingredient, tag, time, rating, or person preference, call `search_recipes` instead. The full archive is intentionally not exposed — the web UI is for human browsing.",
+        description = "Use as the default starting point for meal-planning when the user hasn't named a specific dish or ingredient — returns the family's likely-relevant shortlist (every favorite first, then most-recently-planned, then top-rated, deduped, ≤30 unless favorites exceed that). For targeted lookups by ingredient, tag, time, rating, or person preference, call `search_recipes` instead. The shortlist is built from favorites, recent planning, and top ratings, so `favorite_recipe` changes what shows up here. The full archive is intentionally not exposed — the web UI is for human browsing.",
         input_schema = rmcp::handler::server::common::schema_for_type::<EmptyParams>()
     )]
     async fn list_curated_recipes(
@@ -115,7 +116,7 @@ impl FewdMcp {
 
     #[tool(
         name = "search_recipes",
-        description = "Find specific recipes when the user names an ingredient, tag, time constraint, rating, or person preference — call BEFORE `create_meal` (to find a slug to schedule) or `create_recipe` (to avoid creating a near-duplicate). Bare calls (no filters / `query='*'`) are rejected — call `list_curated_recipes` for an unfiltered shortlist. Filters: `query` (case-insensitive substring on name); `tags` (case-insensitive exact match, multiple tags = AND); `max_total_time_minutes` (recipe total_time is normalized to minutes, so recipes authored in hours/days match correctly; recipes with no total time are excluded); `min_rating`; `is_favorite`; `unplanned_since_days`; `excludes_for_persons` (named family members whose dislikes exclude matching recipes — substring match on ingredient names, e.g. 'olive oil' is excluded when a person dislikes 'olive'); `includes_ingredient_substrings` (recipes must contain ALL listed substrings in some ingredient name — case-insensitive, multiple values AND together, possibly across different ingredients; use for 'what can I make with spam?' / 'recipes that use leftover rice' / combine with `tags=[\"dinner\"]` for 'dinner recipes with spam'). Returns brief rows — use `get_recipe` with the slug for full details. Unknown person names return an actionable error pointing at `list_people`. To plan around dietary goals, read each person's free-form `dietary_goals` (via `get_family_overview` / `list_people`), map them to diet tags with `list_diet_tags`, then filter via `tags` — search once per diet constraint, since multiple `tags` AND together (a single multi-tag call narrows hard).",
+        description = "Find specific recipes when the user names an ingredient, tag, time constraint, rating, or person preference — call BEFORE `create_meal` (to find a slug to schedule) or `create_recipe` (to avoid creating a near-duplicate). Bare calls (no filters / `query='*'`) are rejected — call `list_curated_recipes` for an unfiltered shortlist. Filters: `query` (case-insensitive substring on name); `tags` (case-insensitive exact match, multiple tags = AND); `max_total_time_minutes` (recipe total_time is normalized to minutes, so recipes authored in hours/days match correctly; recipes with no total time are excluded); `min_rating`; `is_favorite` (set with `favorite_recipe`); `unplanned_since_days`; `excludes_for_persons` (named family members whose dislikes exclude matching recipes — substring match on ingredient names, e.g. 'olive oil' is excluded when a person dislikes 'olive'); `includes_ingredient_substrings` (recipes must contain ALL listed substrings in some ingredient name — case-insensitive, multiple values AND together, possibly across different ingredients; use for 'what can I make with spam?' / 'recipes that use leftover rice' / combine with `tags=[\"dinner\"]` for 'dinner recipes with spam'). Returns brief rows — use `get_recipe` with the slug for full details. Unknown person names return an actionable error pointing at `list_people`. To plan around dietary goals, read each person's free-form `dietary_goals` (via `get_family_overview` / `list_people`), map them to diet tags with `list_diet_tags`, then filter via `tags` — search once per diet constraint, since multiple `tags` AND together (a single multi-tag call narrows hard).",
         input_schema = rmcp::handler::server::common::schema_for_type::<SearchRecipesParams>()
     )]
     async fn search_recipes(
@@ -216,7 +217,7 @@ impl FewdMcp {
 
     #[tool(
         name = "get_recipe",
-        description = "Read the full recipe — call AFTER `search_recipes` or `list_curated_recipes` returned a slug worth inspecting (when the user wants ingredients, instructions, nutrition, or prep time). Returns ingredients (with amounts and units), instructions, nutrition, prep/cook time, and any parent recipe it was adapted from. Call this before `update_recipe` too: its list fields replace whole, so you need the current values to send back a complete one.",
+        description = "Read the full recipe — call AFTER `search_recipes` or `list_curated_recipes` returned a slug worth inspecting (when the user wants ingredients, instructions, nutrition, or prep time). Returns ingredients (with amounts and units), instructions, nutrition, prep/cook time, and any parent recipe it was adapted from. Call this before `update_recipe` too: its list fields replace whole, so you need the current values to send back a complete one. When the user reacts to a dish rather than asks about it, `favorite_recipe` records that against the same slug.",
         input_schema = rmcp::handler::server::common::schema_for_type::<GetRecipeParams>()
     )]
     async fn get_recipe(
@@ -583,6 +584,42 @@ impl FewdMcp {
     }
 
     #[tool(
+        name = "favorite_recipe",
+        description = "Mark a recipe as a family favorite — or unmark one — when the user says they loved it, want it in regular rotation, or want it off that list; call `search_recipes` or `get_recipe` first for the `slug`. Returns the recipe's brief row (slug, name, tags, rating, is_favorite) so you can confirm the new state; call `get_recipe` when you need ingredients or instructions. `is_favorite` is set absolutely, never toggled: `true` always favorites and `false` always unfavorites, so you never need to know the current state first and calling twice with the same value changes nothing. Favorites drive `list_curated_recipes` (every favorite is listed first and is never truncated) and `search_recipes`'s `is_favorite` filter, so marking one changes what later planning sessions see. A favorite is a binary shortlist flag, not a score. This writes only `is_favorite` — use `update_recipe` to change the recipe's content. An unknown or blank `slug` returns an error pointing at `search_recipes`. Example: {\"slug\":\"beef-taco-bowls\",\"is_favorite\":true}",
+        input_schema = rmcp::handler::server::common::schema_for_type::<FavoriteRecipeInput>()
+    )]
+    async fn favorite_recipe(
+        &self,
+        input: LenientParameters<FavoriteRecipeInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let input = match input.into_tool_input("favorite_recipe") {
+            Ok(v) => v,
+            Err(e) => return Ok(e),
+        };
+        let Some(normalized) = normalize_slug(&input.slug) else {
+            return Ok(tool_user_error(InputError::EmptyName("slug").to_string()));
+        };
+        let existing = RecipeService::get_by_slug(&self.db, normalized)
+            .await
+            .map_err(db_error)?;
+        let Some(existing) = existing else {
+            return Ok(tool_user_error(
+                ResolveError::UnknownRecipe(input.slug).to_string(),
+            ));
+        };
+
+        let dto = favorite_recipe_input_to_dto(input);
+        let updated = RecipeService::update(&self.db, existing.id, dto)
+            .await
+            .map_err(db_error)?;
+        // The brief shape carries both `is_favorite` and `rating`, so it
+        // confirms the write without re-shipping ingredients and
+        // instructions on every call.
+        let brief = recipe_to_brief(&updated).map_err(internal_error)?;
+        tool_json_result(&brief)
+    }
+
+    #[tool(
         name = "import_recipe_url",
         description = "Import a recipe from a public web URL (food blog, recipe site, etc.) and save it. Use this BEFORE `create_recipe` when the recipe lives online — the server fetches the page, extracts schema.org/Recipe data (JSON-LD first, html2text fallback), parses ingredients via the same pipeline as manual entry, and persists. Returns the saved recipe in the same shape as `create_recipe`. Errors actionably if the page is unreachable, paywalled, or unparsable — fall back to `create_recipe` with manually-pasted fields in that case. The source URL is recorded automatically. Call `list_recipes` or `search_recipes` after import to pick the slug for `create_meal`.",
         input_schema = rmcp::handler::server::common::schema_for_type::<ImportRecipeUrlInput>()
@@ -755,10 +792,11 @@ impl ServerHandler for FewdMcp {
                  fridge-card HTML (sized for a single US Letter sheet). Supply \
                  prose overlays — week_theme, dont_forget, day_overlays — as \
                  the call's LLM-supplied polish. \
-                 (7) CAPTURE — when you learn something durable about a family member \
-                 mid-conversation (a standing note, a new like/dislike, a drink \
-                 preference), call `update_person` so it's available next session \
-                 instead of dying with this conversation. \
+                 (7) CAPTURE — when you learn something durable mid-conversation, \
+                 persist it instead of letting it die with the conversation: \
+                 `update_person` for a family member's standing note, like, dislike, \
+                 or drink preference; `favorite_recipe` when someone says a dish is a \
+                 keeper, which sharpens the next session's shortlist. \
                  All date inputs are YYYY-MM-DD.",
             )
     }
@@ -2623,6 +2661,181 @@ mod tests {
         assert_eq!(after.created_at, before.created_at);
     }
 
+    // ─── favorite_recipe ────────────────────────────────────────────
+
+    /// Seed the favorite flag and a rating directly, so a test can watch
+    /// what the tool leaves alone. `rating` has no MCP writer in this PR,
+    /// which is why it goes in through the service.
+    async fn seed_favorite_and_rating(
+        mcp: &FewdMcp,
+        id: &str,
+        is_favorite: bool,
+        rating: Option<f64>,
+    ) {
+        RecipeService::update(
+            &mcp.db,
+            id.to_string(),
+            crate::dto::UpdateRecipeDto {
+                is_favorite: Some(is_favorite),
+                rating,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed favorite + rating");
+    }
+
+    #[tokio::test]
+    async fn favorite_recipe_sets_and_clears_favorite() {
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+        assert!(!seeded.is_favorite, "recipes start unfavorited");
+
+        for value in [true, false] {
+            let result = mcp
+                .favorite_recipe(LenientParameters::for_test(FavoriteRecipeInput {
+                    slug: seeded.slug.clone(),
+                    is_favorite: value,
+                }))
+                .await
+                .expect("favorite_recipe returns Ok");
+            assert_ne!(
+                result.is_error,
+                Some(true),
+                "setting is_favorite={value} must not be a tool-level error: {result:?}"
+            );
+
+            let reloaded = reload_recipe(&mcp, &seeded.slug).await;
+            assert_eq!(reloaded.is_favorite, value);
+        }
+    }
+
+    #[tokio::test]
+    async fn favorite_recipe_is_idempotent() {
+        // The tool sets absolutely rather than toggling, so the LLM never
+        // has to read the current state first. A regression to
+        // read-modify-write semantics flips the second call's result.
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        for _ in 0..2 {
+            let result = mcp
+                .favorite_recipe(LenientParameters::for_test(FavoriteRecipeInput {
+                    slug: seeded.slug.clone(),
+                    is_favorite: true,
+                }))
+                .await
+                .expect("favorite_recipe returns Ok");
+            assert_ne!(result.is_error, Some(true));
+        }
+        assert!(reload_recipe(&mcp, &seeded.slug).await.is_favorite);
+    }
+
+    #[tokio::test]
+    async fn favorite_recipe_leaves_rating_alone() {
+        // Pairs with `favorite_input_writes_only_is_favorite`: that test
+        // pins the converter's literal, this one pins the column through
+        // the service. Tidying the converter back to a spread that picked
+        // up a real Default value would clobber the seeded rating here.
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+        seed_favorite_and_rating(&mcp, &seeded.id, true, Some(4.0)).await;
+
+        let result = mcp
+            .favorite_recipe(LenientParameters::for_test(FavoriteRecipeInput {
+                slug: seeded.slug.clone(),
+                is_favorite: false,
+            }))
+            .await
+            .expect("favorite_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true));
+
+        let reloaded = reload_recipe(&mcp, &seeded.slug).await;
+        assert!(
+            !reloaded.is_favorite,
+            "the in-scope field must have changed"
+        );
+        assert_eq!(reloaded.rating, Some(4.0), "rating must survive untouched");
+    }
+
+    #[tokio::test]
+    async fn favorite_recipe_never_touches_out_of_scope_columns() {
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+        let before = reload_recipe(&mcp, &seeded.slug).await;
+
+        let result = mcp
+            .favorite_recipe(LenientParameters::for_test(FavoriteRecipeInput {
+                slug: seeded.slug.clone(),
+                is_favorite: true,
+            }))
+            .await
+            .expect("favorite_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true));
+
+        let after = reload_recipe(&mcp, &seeded.slug).await;
+        assert!(after.is_favorite, "the in-scope field must have changed");
+        assert_eq!(after.name, before.name);
+        assert_eq!(after.servings, before.servings);
+        assert_eq!(after.instructions, before.instructions);
+        assert_eq!(after.ingredients, before.ingredients);
+        assert_eq!(after.tags, before.tags);
+        assert_eq!(after.notes, before.notes);
+        assert_eq!(after.icon, before.icon);
+        assert_eq!(after.nutrition_per_serving, before.nutrition_per_serving);
+        assert_eq!(after.total_minutes, before.total_minutes);
+        assert_eq!(after.source, before.source);
+        assert_eq!(after.source_url, before.source_url);
+        assert_eq!(after.times_planned, before.times_planned);
+        assert_eq!(after.last_planned, before.last_planned);
+        assert_eq!(after.slug, before.slug);
+        assert_eq!(after.created_at, before.created_at);
+    }
+
+    #[tokio::test]
+    async fn favorite_recipe_slug_lookup_is_case_and_whitespace_insensitive() {
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let result = mcp
+            .favorite_recipe(LenientParameters::for_test(FavoriteRecipeInput {
+                slug: format!("  {}  ", seeded.slug.to_uppercase()),
+                is_favorite: true,
+            }))
+            .await
+            .expect("favorite_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+        assert!(reload_recipe(&mcp, &seeded.slug).await.is_favorite);
+    }
+
+    #[tokio::test]
+    async fn favorite_recipe_unknown_slug_returns_tool_level_error_not_protocol_error() {
+        let mcp = setup_test_mcp().await;
+        let result = mcp
+            .favorite_recipe(LenientParameters::for_test(FavoriteRecipeInput {
+                slug: "ghost-pasta".into(),
+                is_favorite: true,
+            }))
+            .await;
+        assert_tool_user_error(result, &["ghost-pasta", "search_recipes"]);
+    }
+
+    #[tokio::test]
+    async fn favorite_recipe_empty_slug_returns_input_error_not_unknown_recipe() {
+        // A blank slug is a missing value, not a typo — the message has to
+        // say so rather than reporting "no recipe with slug ''".
+        let mcp = setup_test_mcp().await;
+        for raw in ["", "   ", "\t\n"] {
+            let result = mcp
+                .favorite_recipe(LenientParameters::for_test(FavoriteRecipeInput {
+                    slug: raw.into(),
+                    is_favorite: true,
+                }))
+                .await;
+            assert_tool_user_error(result, &["slug", "empty"]);
+        }
+    }
+
     // ─── LenientParameters extraction layer ─────────────────────────
     //
     // Direct unit tests for `LenientParameters::extract`, the static
@@ -2933,6 +3146,7 @@ mod tests {
             "Produce",   // get_shopping_list
             "Add",       // create_recipe
             "Revise",    // update_recipe
+            "Mark",      // favorite_recipe
             "Import",    // import_recipe_url
             "Schedule",  // create_meal
         ];
@@ -2995,6 +3209,8 @@ mod tests {
             .expect("update_person embedded example must deserialize into UpdatePersonInput");
         serde_json::from_str::<UpdateRecipeInput>(&example("update_recipe"))
             .expect("update_recipe embedded example must deserialize into UpdateRecipeInput");
+        serde_json::from_str::<FavoriteRecipeInput>(&example("favorite_recipe"))
+            .expect("favorite_recipe embedded example must deserialize into FavoriteRecipeInput");
     }
 
     #[test]

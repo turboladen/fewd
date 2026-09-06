@@ -317,6 +317,25 @@ pub struct ImportRecipeUrlInput {
     pub url: url::Url,
 }
 
+/// Input for the `favorite_recipe` MCP tool. `slug` identifies the row and
+/// is never written; `is_favorite` is the only column this tool touches.
+///
+/// `is_favorite` is set absolutely rather than toggled, so the caller never
+/// has to know the current state and repeating a call changes nothing.
+//
+// Doc comments here ship to the LLM verbatim as the tool's input-schema
+// `description` — keep rustdoc links and internal identifiers out of `///`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FavoriteRecipeInput {
+    /// Slug of the recipe to favorite or unfavorite (case-insensitive).
+    /// Call `search_recipes` or `get_recipe` first to find it.
+    pub slug: String,
+    /// `true` favorites the recipe, `false` unfavorites it. This is an
+    /// absolute set, not a toggle: you never need to read the current
+    /// state first, and sending the same value twice changes nothing.
+    pub is_favorite: bool,
+}
+
 /// Input for the `update_recipe` MCP tool. `slug` identifies the row to
 /// update and is never written — renaming leaves the slug alone, so the
 /// same slug keeps addressing the recipe afterwards.
@@ -495,6 +514,39 @@ pub fn update_recipe_input_to_dto(input: UpdateRecipeInput) -> Result<UpdateReci
     })
 }
 
+/// Translate `FavoriteRecipeInput` into a one-column `UpdateRecipeDto`.
+/// The caller resolves the row from `slug` before calling, so nothing here
+/// writes it.
+//
+// Explicit literal rather than `..Default::default()`, on the same grounds
+// as `update_recipe_input_to_dto` above: a field added to UpdateRecipeDto
+// later must be categorized here rather than defaulting to "leave
+// unchanged". A future non-Option field, or one whose Default is a real
+// value, would otherwise write through silently.
+//
+// `RecipeService::update` sets `is_favorite` directly, so this needs no
+// service-side helper — it is an ordinary partial update that happens to
+// carry exactly one field.
+pub fn favorite_recipe_input_to_dto(input: FavoriteRecipeInput) -> UpdateRecipeDto {
+    UpdateRecipeDto {
+        name: None,
+        description: None,
+        prep_time: None,
+        cook_time: None,
+        total_time: None,
+        servings: None,
+        portion_size: None,
+        instructions: None,
+        ingredients: None,
+        nutrition_per_serving: None,
+        tags: None,
+        notes: None,
+        icon: None,
+        is_favorite: Some(input.is_favorite),
+        rating: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::common::IngredientAmountOut;
@@ -604,6 +656,50 @@ mod tests {
         .expect("valid input");
         assert!(dto.is_favorite.is_none());
         assert!(dto.rating.is_none());
+    }
+
+    #[test]
+    fn favorite_input_writes_only_is_favorite() {
+        // Pins the explicit-literal converter: every column except
+        // `is_favorite` must stay "leave unchanged". Tidying the literal
+        // back to `..Default::default()` still passes this, but a future
+        // UpdateRecipeDto field whose Default is a real value would not.
+        for value in [true, false] {
+            let dto = favorite_recipe_input_to_dto(FavoriteRecipeInput {
+                slug: "x".into(),
+                is_favorite: value,
+            });
+            assert_eq!(dto.is_favorite, Some(value));
+            assert!(dto.rating.is_none(), "rating, is_favorite {value}");
+            assert!(dto.name.is_none(), "name, is_favorite {value}");
+            assert!(
+                dto.description.is_none(),
+                "description, is_favorite {value}"
+            );
+            assert!(dto.prep_time.is_none(), "prep_time, is_favorite {value}");
+            assert!(dto.cook_time.is_none(), "cook_time, is_favorite {value}");
+            assert!(dto.total_time.is_none(), "total_time, is_favorite {value}");
+            assert!(dto.servings.is_none(), "servings, is_favorite {value}");
+            assert!(
+                dto.portion_size.is_none(),
+                "portion_size, is_favorite {value}"
+            );
+            assert!(
+                dto.instructions.is_none(),
+                "instructions, is_favorite {value}"
+            );
+            assert!(
+                dto.ingredients.is_none(),
+                "ingredients, is_favorite {value}"
+            );
+            assert!(
+                dto.nutrition_per_serving.is_none(),
+                "nutrition_per_serving, is_favorite {value}"
+            );
+            assert!(dto.tags.is_none(), "tags, is_favorite {value}");
+            assert!(dto.notes.is_none(), "notes, is_favorite {value}");
+            assert!(dto.icon.is_none(), "icon, is_favorite {value}");
+        }
     }
 
     #[test]
