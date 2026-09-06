@@ -2944,9 +2944,9 @@ mod tests {
         .expect("rate_recipe returns Ok")
     }
 
-    /// Run `search_recipes` with only a `min_rating` filter and hand back
-    /// the serialized result. `min_rating` counts as a filter on its own,
-    /// so this is not a rejected bare call.
+    // Run `search_recipes` with only a `min_rating` filter and hand back
+    // the serialized result. `min_rating` counts as a filter on its own, so
+    // this is not a rejected bare call.
     async fn search_by_min_rating(mcp: &FewdMcp, min: f64) -> String {
         let result = mcp
             .search_recipes(LenientParameters::for_test(SearchRecipesParams {
@@ -3559,24 +3559,18 @@ mod tests {
     // ─── Dangling tool references ───────────────────────────────────
     //
     // Descriptions cross-reference each other by name — that is how the
-    // LLM learns the API's graph ("call `search_recipes` FIRST", "use
-    // `unrate_recipe` to clear it"). A name that does not resolve sends
-    // the model at a tool that is not there, and it recovers only by
-    // spending a failed call. `import_recipe_url` shipped exactly that,
-    // pointing at a `list_recipes` that was never registered.
+    // LLM learns which tool to call first and which one undoes another.
+    // A name that does not resolve sends the model at a tool that is not
+    // there, and it recovers only by spending a failed call.
     //
-    // Nothing else catches it. The tool still compiles, registers, and
-    // answers calls; the intent-verb guard reads the first word and the
-    // embedded-example guard reads the trailing payload, and neither
-    // looks at the prose between. It catches the forward-reference case
-    // too — a description naming a tool that does not exist YET, which
-    // is what a stacked PR produces when it mentions a sibling still
-    // under review.
+    // Nothing else catches that: the intent-verb guard reads the first
+    // word and the embedded-example guard reads the trailing payload,
+    // and neither looks at the prose between.
 
-    /// Pull the identifier-shaped spans out of a description: text
-    /// between backticks made only of lowercase letters, digits, and
-    /// underscores. Anything containing a space, brace, or quote is a
-    /// code fragment or a JSON example rather than a name.
+    // Pull the identifier-shaped spans out of a description: text between
+    // backticks made only of lowercase letters, digits, and underscores.
+    // Anything containing a space, brace, or quote is a code fragment or
+    // a JSON example rather than a name.
     fn backticked_identifiers(description: &str) -> Vec<&str> {
         description
             .split('`')
@@ -3593,19 +3587,12 @@ mod tests {
     #[test]
     fn tool_descriptions_only_reference_tools_that_exist() {
         // A backticked identifier counts as a tool reference when it
-        // starts with one of fewd's tool-name verbs. Every other
-        // identifier in a description is a field name (`min_rating`,
-        // `servings`), a literal (`true`), or a diet tag (`vegetarian`),
-        // and nothing structural separates those from a tool name.
-        //
-        // A new tool whose name starts with a new verb needs that verb
-        // added here. Adding one only ever checks more identifiers, so
-        // the direction to guard is removal: dropping a prefix to quiet a
-        // failure exempts every reference sharing it, which is the
-        // tempting fix when the failure names a `list_*` tool. The
-        // registered-tool loop below closes that off — a prefix that no
-        // longer covers a live tool fails before any description is
-        // read.
+        // starts with one of fewd's tool-name verbs; every other one is a
+        // field name (`min_rating`), a literal (`true`), or a diet tag
+        // (`vegetarian`). That bounds the reach: a name that does not
+        // exist is caught only when it shares a verb with one that does,
+        // so `plan_week` passes silently. A new tool built on a new verb
+        // needs that verb added here.
         const TOOL_NAME_PREFIXES: &[&str] = &[
             "whoami",
             "get_",
@@ -3625,8 +3612,12 @@ mod tests {
         let mut known: Vec<&str> = registered.iter().copied().collect();
         known.sort_unstable();
 
-        // Every registered tool must itself match a prefix, so trimming
-        // the list can't silently stop covering a tool that exists.
+        // Adding a prefix only ever checks more identifiers, so the
+        // direction to guard is removal: dropping one exempts every
+        // reference sharing it, which is the tempting fix when a failure
+        // names a `list_*` tool. This loop closes that off — a prefix
+        // that no longer covers a live tool fails here, before any
+        // description is read.
         for name in &known {
             assert!(
                 TOOL_NAME_PREFIXES.iter().any(|p| name.starts_with(p)),

@@ -38,8 +38,10 @@ pub enum InputError {
     NonPositiveServingsCount(f64),
     UnknownMealType(String),
     EmptyName(&'static str),
-    /// Carries the caller's raw value, not the rounded one: rejecting 5.6
-    /// with "(got 6)" describes a number the caller never sent.
+    /// Carries the rating exactly as the caller sent it.
+    //
+    // The range check runs on the rounded value, so reporting that instead
+    // would reject 5.6 with "(got 6)" — a number the caller never sent.
     RatingOutOfRange(f64),
     InvalidDate {
         field: &'static str,
