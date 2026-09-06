@@ -9,6 +9,21 @@ use crate::services::to_json;
 
 pub struct RecipeService;
 
+/// Trim each tag and drop the ones left empty.
+//
+// `search_filtered` compares `LOWER(je.value) = ?` against a needle the
+// caller has already trimmed, so a stored " dinner" answers no tag search
+// while still rendering in the UI. Every write path — the HTTP routes,
+// `import_recipe_url`, and the MCP create/update tools — reaches the tags
+// column through `create` and `update` below, so normalizing in those two
+// places keeps that state unreachable.
+fn normalize_tags(tags: Vec<String>) -> Vec<String> {
+    tags.into_iter()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect()
+}
+
 /// Filter set for [`RecipeService::search_filtered`]. All fields are optional;
 /// callers (the MCP handler) are responsible for refusing the all-empty case
 /// before ever reaching the service. Composes at the DB layer so cost grows
@@ -105,7 +120,7 @@ impl RecipeService {
             .nutrition_per_serving
             .map(|n| to_json(&n))
             .transpose()?;
-        let tags = to_json(&data.tags)?;
+        let tags = to_json(&normalize_tags(data.tags))?;
 
         // Let the DB's UNIQUE index arbitrate slug collisions: try the base slug,
         // then base-2, base-3, ... incrementing on any unique-constraint violation.
@@ -197,7 +212,7 @@ impl RecipeService {
             recipe.nutrition_per_serving = Set(Some(to_json(&nutrition)?));
         }
         if let Some(tags) = data.tags {
-            recipe.tags = Set(to_json(&tags)?);
+            recipe.tags = Set(to_json(&normalize_tags(tags))?);
         }
         if let Some(notes) = data.notes {
             recipe.notes = Set(Some(notes));

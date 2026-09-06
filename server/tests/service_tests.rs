@@ -325,6 +325,38 @@ async fn person_json_fields_roundtrip() {
 // --- RecipeService Tests ---
 
 #[tokio::test]
+async fn recipe_tags_are_trimmed_on_create_and_update() {
+    // `search_filtered` matches a tag against an already-trimmed needle, so
+    // a padded tag that survived the write would render in the UI while
+    // answering no tag search at all. Both write paths normalize.
+    let db = setup_db().await;
+    let recipe = RecipeService::create(
+        &db,
+        CreateRecipeDto {
+            tags: vec![" Dinner ".to_string(), "  ".to_string(), "easy".to_string()],
+            ..test_recipe_dto("Pasta")
+        },
+    )
+    .await
+    .unwrap();
+    let created: Vec<String> = serde_json::from_str(&recipe.tags).unwrap();
+    assert_eq!(created, vec!["Dinner", "easy"]);
+
+    let updated = RecipeService::update(
+        &db,
+        recipe.id,
+        UpdateRecipeDto {
+            tags: Some(vec!["\tvegetarian\n".to_string(), String::new()]),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let rewritten: Vec<String> = serde_json::from_str(&updated.tags).unwrap();
+    assert_eq!(rewritten, vec!["vegetarian"]);
+}
+
+#[tokio::test]
 async fn recipe_clear_rating_sets_column_to_null() {
     // `RecipeService::update` cannot express this — `UpdateRecipeDto.rating`
     // is an `Option<f64>` whose `None` means "leave unchanged" — so
