@@ -436,7 +436,7 @@ State-changing, but single-column and reversible — the safest of the write too
 { "slug": "test-recipe", "is_favorite": true }
 ```
 
-Expect: the recipe's brief row (slug, name, tags, rating, is_favorite) with `is_favorite: true`. The brief row is deliberately smaller than `get_recipe`'s — it carries enough to confirm the write, not the ingredients.
+Expect: the same brief row `search_recipes` returns — slug, name, description, tags, icon, servings, total time, planning counts, rating, is_favorite — with `is_favorite: true`. The brief row is deliberately smaller than `get_recipe`'s: it carries enough to confirm the write, not the ingredients or instructions.
 
 Then call `list_curated_recipes`: the recipe now appears at the front of the shortlist. Favorites are listed first and are never truncated.
 

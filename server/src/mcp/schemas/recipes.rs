@@ -321,7 +321,8 @@ pub struct ImportRecipeUrlInput {
 /// is never written; `is_favorite` is the only column this tool touches.
 ///
 /// `is_favorite` is set absolutely rather than toggled, so the caller never
-/// has to know the current state and repeating a call changes nothing.
+/// has to know the current state and repeating a call leaves the recipe in
+/// the same state.
 //
 // Doc comments here ship to the LLM verbatim as the tool's input-schema
 // `description` — keep rustdoc links and internal identifiers out of `///`.
@@ -332,7 +333,8 @@ pub struct FavoriteRecipeInput {
     pub slug: String,
     /// `true` favorites the recipe, `false` unfavorites it. This is an
     /// absolute set, not a toggle: you never need to read the current
-    /// state first, and sending the same value twice changes nothing.
+    /// state first, and sending the same value twice leaves the recipe in
+    /// the same state.
     pub is_favorite: bool,
 }
 
@@ -356,7 +358,8 @@ pub struct FavoriteRecipeInput {
 ///   four fields. Passing `[]` clears a list.
 ///
 /// `is_favorite`, `rating`, `source`, `source_url`, the parent recipe, and
-/// the slug are not writable here.
+/// the slug are not writable here. Use `favorite_recipe` to set
+/// `is_favorite`.
 //
 // The blank-string coercion runs through `blank_to_none`, which carries
 // the invariant it protects. A blank `name` instead mirrors
