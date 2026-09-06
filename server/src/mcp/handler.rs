@@ -228,21 +228,40 @@ impl FewdMcp {
             Ok(v) => v,
             Err(e) => return Ok(e),
         };
-        let Some(normalized) = normalize_slug(&params.slug) else {
-            return Ok(tool_user_error(InputError::EmptyName("slug").to_string()));
-        };
-        let recipe = RecipeService::get_by_slug(&self.db, normalized)
-            .await
-            .map_err(db_error)?;
-        let Some(recipe) = recipe else {
-            return Ok(tool_user_error(
-                ResolveError::UnknownRecipe(params.slug).to_string(),
-            ));
+        let recipe = match self.resolve_recipe_by_slug(&params.slug).await? {
+            Ok(recipe) => recipe,
+            Err(e) => return Ok(e),
         };
 
         let parent_slug = self.parent_slug_for(&recipe).await?;
         let out = recipe_to_full(&recipe, parent_slug).map_err(internal_error)?;
         tool_json_result(&out)
+    }
+
+    /// Load the recipe a slug-addressed tool call names, normalizing case
+    /// and surrounding whitespace first. The outer `Err` is a protocol-level
+    /// database failure; the inner `Err` is a tool-level message for the LLM
+    /// — a blank slug, or one that matches no recipe. Callers match on the
+    /// inner result and return it as-is, the same early-return shape
+    /// `LenientParameters::into_tool_input` uses.
+    //
+    // The not-found message quotes the raw slug rather than the normalized
+    // one, so the LLM sees back the exact string it sent.
+    async fn resolve_recipe_by_slug(
+        &self,
+        raw_slug: &str,
+    ) -> Result<Result<crate::entities::recipe::Model, CallToolResult>, McpError> {
+        let Some(normalized) = normalize_slug(raw_slug) else {
+            return Ok(Err(tool_user_error(
+                InputError::EmptyName("slug").to_string(),
+            )));
+        };
+        let found = RecipeService::get_by_slug(&self.db, normalized)
+            .await
+            .map_err(db_error)?;
+        Ok(found.ok_or_else(|| {
+            tool_user_error(ResolveError::UnknownRecipe(raw_slug.to_string()).to_string())
+        }))
     }
 
     /// Resolve a recipe's stored `parent_recipe_id` into the slug callers
@@ -548,7 +567,7 @@ impl FewdMcp {
 
     #[tool(
         name = "update_recipe",
-        description = "Revise an existing recipe when the user corrects or improves one already in the catalog — call `search_recipes` or `get_recipe` FIRST for the `slug` and the current values (use `create_recipe` instead when the dish isn't in the catalog at all). Returns the full updated recipe. The recipe is identified by `slug` (case-insensitive); every other field is optional, and only the fields you send are written — omitted or null fields are left unchanged, and an empty or whitespace-only string means 'no change', so no writable string field can be blanked (`name` is the one writable exception: a blank one is rejected outright rather than ignored, and a blank `slug` is rejected too since it identifies the row). `ingredients`, `tags`, `instructions`, `nutrition_per_serving`, `portion_size` and the time fields REPLACE the stored value whole and are never merged — a partial `ingredients` array silently drops every ingredient you left out, so read the current list with `get_recipe` and send it back complete. Passing `[]` clears `tags` or `ingredients`. Renaming with `name` does NOT change the slug: the slug is pinned at creation, so keep using the original slug afterwards. Two fields carry couplings the server will not infer for you: send `total_time` whenever you change `prep_time` or `cook_time`, or the recipe keeps advertising its old duration; and send a rescaled `ingredients` array whenever you resize a recipe with `servings`, because the shopping list divides the stored amounts by `servings` and will otherwise buy the wrong quantities (send `servings` on its own only to correct a count that was recorded wrong). Not writable here: `is_favorite`, `rating`, `source`, `source_url`, the parent recipe, and the slug. Example: {\"slug\":\"beef-taco-bowls\",\"notes\":\"double the chili powder\"}",
+        description = "Revise an existing recipe when the user corrects or improves one already in the catalog — call `search_recipes` or `get_recipe` FIRST for the `slug` and the current values (use `create_recipe` instead when the dish isn't in the catalog at all). Returns the full updated recipe. The recipe is identified by `slug` (case-insensitive); every other field is optional, and only the fields you send are written — omitted or null fields are left unchanged, and an empty or whitespace-only string means 'no change', so no writable string field can be blanked (`name` is the one writable exception: a blank one is rejected outright rather than ignored, and a blank `slug` is rejected too since it identifies the row). `ingredients`, `tags`, `instructions`, `nutrition_per_serving`, `portion_size` and the time fields REPLACE the stored value whole and are never merged — a partial `ingredients` array silently drops every ingredient you left out, so read the current list with `get_recipe` and send it back complete. Passing `[]` clears `tags` or `ingredients`. Renaming with `name` does NOT change the slug: the slug is pinned at creation, so keep using the original slug afterwards. Two fields carry couplings the server will not infer for you: send `total_time` whenever you change `prep_time` or `cook_time`, or the recipe keeps advertising its old duration; and send a rescaled `ingredients` array whenever you resize a recipe with `servings`, because the shopping list divides the stored amounts by `servings` and will otherwise buy the wrong quantities (send `servings` on its own only to correct a count that was recorded wrong). Not writable here: `is_favorite` (call `favorite_recipe` instead), `rating`, `source`, `source_url`, the parent recipe, and the slug. Example: {\"slug\":\"beef-taco-bowls\",\"notes\":\"double the chili powder\"}",
         input_schema = rmcp::handler::server::common::schema_for_type::<UpdateRecipeInput>()
     )]
     async fn update_recipe(
@@ -559,16 +578,9 @@ impl FewdMcp {
             Ok(v) => v,
             Err(e) => return Ok(e),
         };
-        let Some(normalized) = normalize_slug(&input.slug) else {
-            return Ok(tool_user_error(InputError::EmptyName("slug").to_string()));
-        };
-        let existing = RecipeService::get_by_slug(&self.db, normalized)
-            .await
-            .map_err(db_error)?;
-        let Some(existing) = existing else {
-            return Ok(tool_user_error(
-                ResolveError::UnknownRecipe(input.slug).to_string(),
-            ));
+        let existing = match self.resolve_recipe_by_slug(&input.slug).await? {
+            Ok(recipe) => recipe,
+            Err(e) => return Ok(e),
         };
 
         let dto = match update_recipe_input_to_dto(input) {
@@ -585,7 +597,7 @@ impl FewdMcp {
 
     #[tool(
         name = "favorite_recipe",
-        description = "Mark a recipe as a family favorite — or unmark one — when the user says they loved it, want it in regular rotation, or want it off that list; call `search_recipes` or `get_recipe` first for the `slug`. Returns the recipe's brief row (slug, name, tags, rating, is_favorite) so you can confirm the new state; call `get_recipe` when you need ingredients or instructions. `is_favorite` is set absolutely, never toggled: `true` always favorites and `false` always unfavorites, so you never need to know the current state first and calling twice with the same value changes nothing. Favorites drive `list_curated_recipes` (every favorite is listed first and is never truncated) and `search_recipes`'s `is_favorite` filter, so marking one changes what later planning sessions see. A favorite is a binary shortlist flag, not a score. This writes only `is_favorite` — use `update_recipe` to change the recipe's content. An unknown or blank `slug` returns an error pointing at `search_recipes`. Example: {\"slug\":\"beef-taco-bowls\",\"is_favorite\":true}",
+        description = "Mark a recipe as a family favorite — or unmark one — when the user says they loved it, want it in regular rotation, or want it off that list; call `search_recipes` or `get_recipe` first for the `slug`. Returns the same brief row `search_recipes` returns — slug, name, description, tags, icon, servings, total time, planning counts, rating, and is_favorite — so you can confirm the new state; call `get_recipe` when you need ingredients or instructions. `is_favorite` is set absolutely, never toggled: `true` always favorites and `false` always unfavorites, so you never need to know the current state first, and calling twice with the same value leaves the recipe in the same state. Favorites drive `list_curated_recipes` (every favorite is listed first and is never truncated) and `search_recipes`'s `is_favorite` filter, so marking one changes what later planning sessions see. A favorite is a binary shortlist flag, not a score. This writes only `is_favorite` — use `update_recipe` to change the recipe's content. An unknown `slug` returns an error pointing at `search_recipes`; a blank one is rejected as a missing value. Example: {\"slug\":\"beef-taco-bowls\",\"is_favorite\":true}",
         input_schema = rmcp::handler::server::common::schema_for_type::<FavoriteRecipeInput>()
     )]
     async fn favorite_recipe(
@@ -596,16 +608,9 @@ impl FewdMcp {
             Ok(v) => v,
             Err(e) => return Ok(e),
         };
-        let Some(normalized) = normalize_slug(&input.slug) else {
-            return Ok(tool_user_error(InputError::EmptyName("slug").to_string()));
-        };
-        let existing = RecipeService::get_by_slug(&self.db, normalized)
-            .await
-            .map_err(db_error)?;
-        let Some(existing) = existing else {
-            return Ok(tool_user_error(
-                ResolveError::UnknownRecipe(input.slug).to_string(),
-            ));
+        let existing = match self.resolve_recipe_by_slug(&input.slug).await? {
+            Ok(recipe) => recipe,
+            Err(e) => return Ok(e),
         };
 
         let dto = favorite_recipe_input_to_dto(input);
@@ -1493,10 +1498,10 @@ mod tests {
 
     #[tokio::test]
     async fn get_recipe_returns_the_full_record() {
-        // The main read path. `update_recipe` reshaped this function twice
-        // — the ResolveError swap and the parent_slug_for extraction — so
-        // the fields it hands back are pinned here rather than inferred
-        // from the error-path tests.
+        // The main read path, and the one every write tool tells the LLM
+        // to call for full detail. Its whole field set is pinned here
+        // rather than inferred from the error-path tests, so a refactor
+        // that drops or renames one fails loudly.
         use super::super::schemas::GetRecipeParams;
 
         let mcp = setup_test_mcp().await;
@@ -2663,28 +2668,6 @@ mod tests {
 
     // ─── favorite_recipe ────────────────────────────────────────────
 
-    /// Seed the favorite flag and a rating directly, so a test can watch
-    /// what the tool leaves alone. `rating` has no MCP writer in this PR,
-    /// which is why it goes in through the service.
-    async fn seed_favorite_and_rating(
-        mcp: &FewdMcp,
-        id: &str,
-        is_favorite: bool,
-        rating: Option<f64>,
-    ) {
-        RecipeService::update(
-            &mcp.db,
-            id.to_string(),
-            crate::dto::UpdateRecipeDto {
-                is_favorite: Some(is_favorite),
-                rating,
-                ..Default::default()
-            },
-        )
-        .await
-        .expect("seed favorite + rating");
-    }
-
     #[tokio::test]
     async fn favorite_recipe_sets_and_clears_favorite() {
         let mcp = setup_test_mcp().await;
@@ -2705,6 +2688,14 @@ mod tests {
                 "setting is_favorite={value} must not be a tool-level error: {result:?}"
             );
 
+            // The returned row is the LLM's only confirmation of the write,
+            // so it has to carry the post-update value. Handing back the
+            // pre-update model would leave the DB assertion below green
+            // while telling the model the opposite of what it just did.
+            let body = tool_result_json(&result);
+            assert_eq!(body["is_favorite"], serde_json::json!(value), "{body}");
+            assert_eq!(body["slug"], serde_json::json!(seeded.slug), "{body}");
+
             let reloaded = reload_recipe(&mcp, &seeded.slug).await;
             assert_eq!(reloaded.is_favorite, value);
         }
@@ -2714,21 +2705,30 @@ mod tests {
     async fn favorite_recipe_is_idempotent() {
         // The tool sets absolutely rather than toggling, so the LLM never
         // has to read the current state first. A regression to
-        // read-modify-write semantics flips the second call's result.
+        // read-modify-write semantics flips the second call's result, in
+        // whichever direction it toggles — so both values get two calls.
         let mcp = setup_test_mcp().await;
         let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
 
-        for _ in 0..2 {
-            let result = mcp
-                .favorite_recipe(LenientParameters::for_test(FavoriteRecipeInput {
-                    slug: seeded.slug.clone(),
-                    is_favorite: true,
-                }))
-                .await
-                .expect("favorite_recipe returns Ok");
-            assert_ne!(result.is_error, Some(true));
+        for value in [true, false] {
+            for call in 1..=2 {
+                let result = mcp
+                    .favorite_recipe(LenientParameters::for_test(FavoriteRecipeInput {
+                        slug: seeded.slug.clone(),
+                        is_favorite: value,
+                    }))
+                    .await
+                    .expect("favorite_recipe returns Ok");
+                assert_ne!(result.is_error, Some(true));
+                let body = tool_result_json(&result);
+                assert_eq!(
+                    body["is_favorite"],
+                    serde_json::json!(value),
+                    "call {call} of is_favorite={value}: {body}"
+                );
+            }
+            assert_eq!(reload_recipe(&mcp, &seeded.slug).await.is_favorite, value);
         }
-        assert!(reload_recipe(&mcp, &seeded.slug).await.is_favorite);
     }
 
     #[tokio::test]
@@ -2739,7 +2739,20 @@ mod tests {
         // up a real Default value would clobber the seeded rating here.
         let mcp = setup_test_mcp().await;
         let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
-        seed_favorite_and_rating(&mcp, &seeded.id, true, Some(4.0)).await;
+        // The rating goes in through the service because no MCP tool
+        // writes it; the flag goes in the same way to keep the seed to one
+        // call.
+        RecipeService::update(
+            &mcp.db,
+            seeded.id.clone(),
+            crate::dto::UpdateRecipeDto {
+                is_favorite: Some(true),
+                rating: Some(4.0),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed favorite + rating");
 
         let result = mcp
             .favorite_recipe(LenientParameters::for_test(FavoriteRecipeInput {
