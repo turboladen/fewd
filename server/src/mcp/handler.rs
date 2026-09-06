@@ -686,7 +686,7 @@ impl FewdMcp {
 
     #[tool(
         name = "import_recipe_url",
-        description = "Import a recipe from a public web URL (food blog, recipe site, etc.) and save it. Use this BEFORE `create_recipe` when the recipe lives online — the server fetches the page, extracts schema.org/Recipe data (JSON-LD first, html2text fallback), parses ingredients via the same pipeline as manual entry, and persists. Returns the saved recipe in the same shape as `create_recipe`. Errors actionably if the page is unreachable, paywalled, or unparsable — fall back to `create_recipe` with manually-pasted fields in that case. The source URL is recorded automatically. Call `list_recipes` or `search_recipes` after import to pick the slug for `create_meal`.",
+        description = "Import a recipe from a public web URL (food blog, recipe site, etc.) and save it. Use this BEFORE `create_recipe` when the recipe lives online — the server fetches the page, extracts schema.org/Recipe data (JSON-LD first, html2text fallback), parses ingredients via the same pipeline as manual entry, and persists. Returns the saved recipe in the same shape as `create_recipe`. Errors actionably if the page is unreachable, paywalled, or unparsable — fall back to `create_recipe` with manually-pasted fields in that case. The source URL is recorded automatically. Call `list_curated_recipes` or `search_recipes` after import to pick the slug for `create_meal`.",
         input_schema = rmcp::handler::server::common::schema_for_type::<ImportRecipeUrlInput>()
     )]
     async fn import_recipe_url(
@@ -3553,6 +3553,103 @@ mod tests {
                  embedding-similarity selection. Full description: {description:?}",
                 tool.name, INTENT_VERB_ALLOWLIST,
             );
+        }
+    }
+
+    // ─── Dangling tool references ───────────────────────────────────
+    //
+    // Descriptions cross-reference each other by name — that is how the
+    // LLM learns the API's graph ("call `search_recipes` FIRST", "use
+    // `unrate_recipe` to clear it"). A name that does not resolve sends
+    // the model at a tool that is not there, and it recovers only by
+    // spending a failed call. `import_recipe_url` shipped exactly that,
+    // pointing at a `list_recipes` that was never registered.
+    //
+    // Nothing else catches it. The tool still compiles, registers, and
+    // answers calls; the intent-verb guard reads the first word and the
+    // embedded-example guard reads the trailing payload, and neither
+    // looks at the prose between. It catches the forward-reference case
+    // too — a description naming a tool that does not exist YET, which
+    // is what a stacked PR produces when it mentions a sibling still
+    // under review.
+
+    /// Pull the identifier-shaped spans out of a description: text
+    /// between backticks made only of lowercase letters, digits, and
+    /// underscores. Anything containing a space, brace, or quote is a
+    /// code fragment or a JSON example rather than a name.
+    fn backticked_identifiers(description: &str) -> Vec<&str> {
+        description
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .filter(|s| {
+                !s.is_empty()
+                    && s.chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+            })
+            .collect()
+    }
+
+    #[test]
+    fn tool_descriptions_only_reference_tools_that_exist() {
+        // A backticked identifier counts as a tool reference when it
+        // starts with one of fewd's tool-name verbs. Every other
+        // identifier in a description is a field name (`min_rating`,
+        // `servings`), a literal (`true`), or a diet tag (`vegetarian`),
+        // and nothing structural separates those from a tool name.
+        //
+        // A new tool whose name starts with a new verb needs that verb
+        // added here. Adding one only ever checks more identifiers, so
+        // the direction to guard is removal: dropping a prefix to quiet a
+        // failure exempts every reference sharing it, which is the
+        // tempting fix when the failure names a `list_*` tool. The
+        // registered-tool loop below closes that off — a prefix that no
+        // longer covers a live tool fails before any description is
+        // read.
+        const TOOL_NAME_PREFIXES: &[&str] = &[
+            "whoami",
+            "get_",
+            "list_",
+            "create_",
+            "update_",
+            "search_",
+            "import_",
+            "rate_",
+            "unrate_",
+            "favorite_",
+        ];
+
+        let router = FewdMcp::tool_router();
+        let tools = router.list_all();
+        let registered: HashSet<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+        let mut known: Vec<&str> = registered.iter().copied().collect();
+        known.sort_unstable();
+
+        // Every registered tool must itself match a prefix, so trimming
+        // the list can't silently stop covering a tool that exists.
+        for name in &known {
+            assert!(
+                TOOL_NAME_PREFIXES.iter().any(|p| name.starts_with(p)),
+                "{name} matches no entry in TOOL_NAME_PREFIXES, so references to it are \
+                 never checked. Add its prefix."
+            );
+        }
+
+        for tool in &tools {
+            let description = tool.description.as_deref().unwrap_or("");
+            for referenced in backticked_identifiers(description) {
+                if !TOOL_NAME_PREFIXES.iter().any(|p| referenced.starts_with(p)) {
+                    continue;
+                }
+                assert!(
+                    registered.contains(referenced),
+                    "{}: description references `{referenced}`, which is not a registered \
+                     tool. Correct it to one of {known:?} — or, if `{referenced}` is a field \
+                     name rather than a tool, rename it so it stops matching \
+                     TOOL_NAME_PREFIXES.",
+                    tool.name,
+                );
+            }
         }
     }
 
