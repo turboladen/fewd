@@ -324,8 +324,9 @@ pub struct ImportRecipeUrlInput {
 /// has to know the current state and repeating a call leaves the recipe in
 /// the same state.
 //
-// Doc comments here ship to the LLM verbatim as the tool's input-schema
-// `description` — keep rustdoc links and internal identifiers out of `///`.
+// Every `///` on the input structs below ships to the LLM verbatim as
+// that tool's input-schema `description`, so keep rustdoc links and
+// internal identifiers out of them.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct FavoriteRecipeInput {
     /// Slug of the recipe to favorite or unfavorite (case-insensitive).
@@ -346,8 +347,6 @@ pub struct FavoriteRecipeInput {
 /// the authority on what was recorded. A value that does not round into
 /// 1–5 is rejected rather than clamped.
 //
-// Doc comments here ship to the LLM verbatim as the tool's input-schema
-// `description` — keep rustdoc links and internal identifiers out of `///`.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct RateRecipeInput {
     /// Slug of the recipe to rate (case-insensitive). Call
@@ -399,8 +398,6 @@ pub struct UnrateRecipeInput {
 // `create_recipe_input_to_dto`'s rejection, so create and update agree on
 // what a valid recipe name is.
 //
-// Doc comments here ship to the LLM verbatim as the tool's input-schema
-// `description` — keep rustdoc links and internal identifiers out of `///`.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct UpdateRecipeInput {
     /// Slug of the recipe to update (case-insensitive). Call
@@ -731,6 +728,21 @@ mod tests {
         assert!(dto.rating.is_none());
     }
 
+    // Name the fields a converter actually writes. `UpdateRecipeDto`
+    // serializes every field, so reading the keys back rather than
+    // listing them means a field added later is covered here without
+    // anyone remembering to extend an assertion list.
+    fn written_fields(dto: &UpdateRecipeDto) -> Vec<String> {
+        serde_json::to_value(dto)
+            .expect("UpdateRecipeDto serializes")
+            .as_object()
+            .expect("a DTO serializes to an object")
+            .iter()
+            .filter(|(_, value)| !value.is_null())
+            .map(|(key, _)| key.clone())
+            .collect()
+    }
+
     #[test]
     fn favorite_input_writes_only_is_favorite() {
         // Pins the explicit-literal converter: every column except
@@ -743,35 +755,7 @@ mod tests {
                 is_favorite: value,
             });
             assert_eq!(dto.is_favorite, Some(value));
-            assert!(dto.rating.is_none(), "rating, is_favorite {value}");
-            assert!(dto.name.is_none(), "name, is_favorite {value}");
-            assert!(
-                dto.description.is_none(),
-                "description, is_favorite {value}"
-            );
-            assert!(dto.prep_time.is_none(), "prep_time, is_favorite {value}");
-            assert!(dto.cook_time.is_none(), "cook_time, is_favorite {value}");
-            assert!(dto.total_time.is_none(), "total_time, is_favorite {value}");
-            assert!(dto.servings.is_none(), "servings, is_favorite {value}");
-            assert!(
-                dto.portion_size.is_none(),
-                "portion_size, is_favorite {value}"
-            );
-            assert!(
-                dto.instructions.is_none(),
-                "instructions, is_favorite {value}"
-            );
-            assert!(
-                dto.ingredients.is_none(),
-                "ingredients, is_favorite {value}"
-            );
-            assert!(
-                dto.nutrition_per_serving.is_none(),
-                "nutrition_per_serving, is_favorite {value}"
-            );
-            assert!(dto.tags.is_none(), "tags, is_favorite {value}");
-            assert!(dto.notes.is_none(), "notes, is_favorite {value}");
-            assert!(dto.icon.is_none(), "icon, is_favorite {value}");
+            assert_eq!(written_fields(&dto), ["is_favorite"], "is_favorite {value}");
         }
     }
 
@@ -854,20 +838,7 @@ mod tests {
     fn rate_input_writes_only_rating() {
         let dto = rate_recipe_input_to_dto(mk_rate(4.0)).expect("valid rating");
         assert_eq!(dto.rating, Some(4.0));
-        assert!(dto.is_favorite.is_none(), "is_favorite");
-        assert!(dto.name.is_none(), "name");
-        assert!(dto.description.is_none(), "description");
-        assert!(dto.prep_time.is_none(), "prep_time");
-        assert!(dto.cook_time.is_none(), "cook_time");
-        assert!(dto.total_time.is_none(), "total_time");
-        assert!(dto.servings.is_none(), "servings");
-        assert!(dto.portion_size.is_none(), "portion_size");
-        assert!(dto.instructions.is_none(), "instructions");
-        assert!(dto.ingredients.is_none(), "ingredients");
-        assert!(dto.nutrition_per_serving.is_none(), "nutrition_per_serving");
-        assert!(dto.tags.is_none(), "tags");
-        assert!(dto.notes.is_none(), "notes");
-        assert!(dto.icon.is_none(), "icon");
+        assert_eq!(written_fields(&dto), ["rating"]);
     }
 
     #[test]

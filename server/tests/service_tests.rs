@@ -358,9 +358,6 @@ async fn recipe_tags_are_trimmed_on_create_and_update() {
 
 #[tokio::test]
 async fn recipe_clear_rating_sets_column_to_null() {
-    // `RecipeService::update` cannot express this — `UpdateRecipeDto.rating`
-    // is an `Option<f64>` whose `None` means "leave unchanged" — so
-    // `clear_rating` is the only path to a NULL rating.
     let db = setup_db().await;
     let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
         .await
@@ -378,7 +375,7 @@ async fn recipe_clear_rating_sets_column_to_null() {
     .unwrap();
     assert_eq!(rated.rating, Some(4.0));
 
-    let cleared = RecipeService::clear_rating(&db, recipe.id.clone())
+    let cleared = RecipeService::clear_rating(&db, rated.clone())
         .await
         .unwrap();
 
@@ -401,18 +398,6 @@ async fn recipe_clear_rating_sets_column_to_null() {
     assert_eq!(cleared.ingredients, rated.ingredients);
     assert_eq!(cleared.tags, rated.tags);
     assert_eq!(cleared.created_at, rated.created_at);
-}
-
-#[tokio::test]
-async fn recipe_clear_rating_unknown_id_returns_record_not_found() {
-    let db = setup_db().await;
-    let err = RecipeService::clear_rating(&db, "no-such-recipe".to_string())
-        .await
-        .expect_err("an unknown id must not silently succeed");
-    assert!(
-        matches!(err, sea_orm::DbErr::RecordNotFound(_)),
-        "expected RecordNotFound, got {err:?}"
-    );
 }
 
 #[tokio::test]

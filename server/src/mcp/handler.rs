@@ -642,9 +642,6 @@ impl FewdMcp {
             Err(e) => return Ok(e),
         };
 
-        // The range check lives in the converter so an out-of-range value
-        // never reaches `RecipeService::update`, whose own rejection is a
-        // `DbErr` that `db_error` flattens into an opaque "database error".
         let dto = match rate_recipe_input_to_dto(input) {
             Ok(dto) => dto,
             Err(e) => return Ok(tool_user_error(e.to_string())),
@@ -674,10 +671,7 @@ impl FewdMcp {
             Err(e) => return Ok(e),
         };
 
-        // `RecipeService::update` cannot express this: `UpdateRecipeDto`'s
-        // `rating` is an `Option<f64>` whose `None` means "leave
-        // unchanged", so clearing needs its own service call.
-        let updated = RecipeService::clear_rating(&self.db, existing.id)
+        let updated = RecipeService::clear_rating(&self.db, existing)
             .await
             .map_err(db_error)?;
         let brief = recipe_to_brief(&updated).map_err(internal_error)?;
@@ -1034,8 +1028,7 @@ fn tool_user_error(message: impl Into<String>) -> CallToolResult {
 // SQLite compares TEXT with BINARY collation, so the lowercasing is what
 // makes the documented "case-insensitive" contract true. The blank guard
 // keeps the diagnostic honest: `"no recipe with slug ''"` describes a
-// typo, and a blank slug is a missing value. Same treatment `update_person`
-// gives its `name`.
+// typo, and a blank slug is a missing value.
 fn normalize_slug(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -2499,8 +2492,6 @@ mod tests {
 
     #[tokio::test]
     async fn update_recipe_empty_slug_returns_input_error_not_unknown_recipe() {
-        // A blank slug is a missing value, not a typo — it deserves the
-        // input-level diagnostic rather than "no recipe with slug ''".
         let mcp = setup_test_mcp().await;
         for raw in ["", "   ", "\t\n"] {
             let result = mcp
@@ -2688,6 +2679,34 @@ mod tests {
         assert_eq!(reloaded.total_minutes, Some(120));
     }
 
+    // Compare every column except the ones the tool under test may write,
+    // plus `updated_at`, which every write stamps. Serializing the row
+    // rather than listing fields means a column added to `recipe::Model`
+    // is covered here without anyone remembering to extend a list — the
+    // three call sites had already drifted to 9, 21 and 19 columns.
+    fn assert_recipe_unchanged_except(
+        before: &recipe::Model,
+        after: &recipe::Model,
+        written: &[&str],
+    ) {
+        let others = |model: &recipe::Model| {
+            let mut value = serde_json::to_value(model).expect("recipe::Model serializes");
+            let object = value
+                .as_object_mut()
+                .expect("a recipe serializes to an object");
+            object.remove("updated_at");
+            for field in written {
+                object.remove(*field);
+            }
+            value
+        };
+        assert_eq!(
+            others(before),
+            others(after),
+            "every column outside {written:?} must survive"
+        );
+    }
+
     #[tokio::test]
     async fn update_recipe_never_touches_out_of_scope_columns() {
         // `is_favorite` and `rating` belong to separate tools, and
@@ -2722,12 +2741,7 @@ mod tests {
         assert_eq!(after.servings, 6, "the in-scope field must have changed");
         assert!(after.is_favorite);
         assert_eq!(after.rating, Some(5.0));
-        assert_eq!(after.source, before.source);
-        assert_eq!(after.source_url, before.source_url);
-        assert_eq!(after.times_planned, before.times_planned);
-        assert_eq!(after.last_planned, before.last_planned);
-        assert_eq!(after.slug, before.slug);
-        assert_eq!(after.created_at, before.created_at);
+        assert_recipe_unchanged_except(&before, &after, &["servings"]);
     }
 
     // ─── favorite_recipe ────────────────────────────────────────────
@@ -2852,26 +2866,7 @@ mod tests {
 
         let after = reload_recipe(&mcp, &seeded.slug).await;
         assert!(after.is_favorite, "the in-scope field must have changed");
-        assert_eq!(after.name, before.name);
-        assert_eq!(after.description, before.description);
-        assert_eq!(after.servings, before.servings);
-        assert_eq!(after.instructions, before.instructions);
-        assert_eq!(after.prep_time, before.prep_time);
-        assert_eq!(after.cook_time, before.cook_time);
-        assert_eq!(after.total_time, before.total_time);
-        assert_eq!(after.rating, before.rating);
-        assert_eq!(after.ingredients, before.ingredients);
-        assert_eq!(after.tags, before.tags);
-        assert_eq!(after.notes, before.notes);
-        assert_eq!(after.icon, before.icon);
-        assert_eq!(after.nutrition_per_serving, before.nutrition_per_serving);
-        assert_eq!(after.total_minutes, before.total_minutes);
-        assert_eq!(after.source, before.source);
-        assert_eq!(after.source_url, before.source_url);
-        assert_eq!(after.times_planned, before.times_planned);
-        assert_eq!(after.last_planned, before.last_planned);
-        assert_eq!(after.slug, before.slug);
-        assert_eq!(after.created_at, before.created_at);
+        assert_recipe_unchanged_except(&before, &after, &["is_favorite"]);
     }
 
     #[test]
@@ -2919,8 +2914,6 @@ mod tests {
 
     #[tokio::test]
     async fn favorite_recipe_empty_slug_returns_input_error_not_unknown_recipe() {
-        // A blank slug is a missing value, not a typo — the message has to
-        // say so rather than reporting "no recipe with slug ''".
         let mcp = setup_test_mcp().await;
         for raw in ["", "   ", "\t\n"] {
             let result = mcp
@@ -3136,23 +3129,7 @@ mod tests {
         let after = reload_recipe(&mcp, &seeded.slug).await;
         assert_eq!(after.rating, None, "the in-scope field must have changed");
         assert!(after.is_favorite, "is_favorite must survive a clear");
-        assert_eq!(after.name, before.name);
-        assert_eq!(after.description, before.description);
-        assert_eq!(after.servings, before.servings);
-        assert_eq!(after.instructions, before.instructions);
-        assert_eq!(after.ingredients, before.ingredients);
-        assert_eq!(after.tags, before.tags);
-        assert_eq!(after.notes, before.notes);
-        assert_eq!(after.icon, before.icon);
-        assert_eq!(after.nutrition_per_serving, before.nutrition_per_serving);
-        assert_eq!(after.prep_time, before.prep_time);
-        assert_eq!(after.cook_time, before.cook_time);
-        assert_eq!(after.total_time, before.total_time);
-        assert_eq!(after.total_minutes, before.total_minutes);
-        assert_eq!(after.times_planned, before.times_planned);
-        assert_eq!(after.last_planned, before.last_planned);
-        assert_eq!(after.slug, before.slug);
-        assert_eq!(after.created_at, before.created_at);
+        assert_recipe_unchanged_except(&before, &after, &["rating"]);
     }
 
     #[tokio::test]
@@ -3586,25 +3563,14 @@ mod tests {
 
     #[test]
     fn tool_descriptions_only_reference_tools_that_exist() {
-        // A backticked identifier counts as a tool reference when it
-        // starts with one of fewd's tool-name verbs; every other one is a
-        // field name (`min_rating`), a literal (`true`), or a diet tag
-        // (`vegetarian`). That bounds the reach: a name that does not
-        // exist is caught only when it shares a verb with one that does,
-        // so `plan_week` passes silently. A new tool built on a new verb
-        // needs that verb added here.
-        const TOOL_NAME_PREFIXES: &[&str] = &[
-            "whoami",
-            "get_",
-            "list_",
-            "create_",
-            "update_",
-            "search_",
-            "import_",
-            "rate_",
-            "unrate_",
-            "favorite_",
-        ];
+        use super::super::schemas::diet_tags::DIET_TAGS;
+
+        // Everything a description names in backticks has to resolve to
+        // something the server exposes: a registered tool, an input field
+        // on some tool's schema, or a diet tag. These are the only words
+        // that are none of those — JSON literals, and a person field no
+        // tool accepts as input.
+        const NON_TOOL_WORDS: &[&str] = &["true", "false", "null", "dietary_goals"];
 
         let router = FewdMcp::tool_router();
         let tools = router.list_all();
@@ -3612,32 +3578,39 @@ mod tests {
         let mut known: Vec<&str> = registered.iter().copied().collect();
         known.sort_unstable();
 
-        // Adding a prefix only ever checks more identifiers, so the
-        // direction to guard is removal: dropping one exempts every
-        // reference sharing it, which is the tempting fix when a failure
-        // names a `list_*` tool. This loop closes that off — a prefix
-        // that no longer covers a live tool fails here, before any
-        // description is read.
-        for name in &known {
-            assert!(
-                TOOL_NAME_PREFIXES.iter().any(|p| name.starts_with(p)),
-                "{name} matches no entry in TOOL_NAME_PREFIXES, so references to it are \
-                 never checked. Add its prefix."
+        // Schemas nest — an ingredient's fields live under `$defs` — so
+        // collect property names at every depth rather than only the top.
+        fn field_names(schema: &serde_json::Value, out: &mut HashSet<String>) {
+            let Some(object) = schema.as_object() else {
+                return;
+            };
+            if let Some(properties) = object.get("properties").and_then(|p| p.as_object()) {
+                out.extend(properties.keys().cloned());
+            }
+            for value in object.values() {
+                field_names(value, out);
+            }
+        }
+        let mut fields: HashSet<String> = HashSet::new();
+        for tool in &tools {
+            field_names(
+                &serde_json::Value::Object((*tool.input_schema).clone()),
+                &mut fields,
             );
         }
 
         for tool in &tools {
             let description = tool.description.as_deref().unwrap_or("");
             for referenced in backticked_identifiers(description) {
-                if !TOOL_NAME_PREFIXES.iter().any(|p| referenced.starts_with(p)) {
-                    continue;
-                }
+                let resolves = registered.contains(referenced)
+                    || fields.contains(referenced)
+                    || DIET_TAGS.iter().any(|(tag, _)| *tag == referenced)
+                    || NON_TOOL_WORDS.contains(&referenced);
                 assert!(
-                    registered.contains(referenced),
+                    resolves,
                     "{}: description references `{referenced}`, which is not a registered \
-                     tool. Correct it to one of {known:?} — or, if `{referenced}` is a field \
-                     name rather than a tool, rename it so it stops matching \
-                     TOOL_NAME_PREFIXES.",
+                     tool, an input field, or a diet tag. Correct it to one of {known:?} — \
+                     or, if it is a literal rather than a name, add it to NON_TOOL_WORDS.",
                     tool.name,
                 );
             }

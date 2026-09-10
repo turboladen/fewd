@@ -412,7 +412,8 @@ impl RecipeService {
         q.order_by_asc(recipe::Column::Slug).all(db).await
     }
 
-    /// Remove a recipe's star rating.
+    /// Remove a recipe's star rating. Takes the loaded row, which every
+    /// caller already holds from resolving the recipe.
     //
     // Not expressible through `update`: `UpdateRecipeDto.rating` is
     // `Option<f64>` and `update` gates on `if let Some(rating)`, so no
@@ -421,12 +422,10 @@ impl RecipeService {
     // fails that comparison — an unrated recipe and a 1-star recipe answer
     // different searches, so a rating recorded wrong is otherwise
     // permanent.
-    pub async fn clear_rating(db: &DatabaseConnection, id: String) -> Result<recipe::Model, DbErr> {
-        let existing = Recipe::find_by_id(id)
-            .one(db)
-            .await?
-            .ok_or(DbErr::RecordNotFound("Recipe not found".to_string()))?;
-
+    pub async fn clear_rating(
+        db: &DatabaseConnection,
+        existing: recipe::Model,
+    ) -> Result<recipe::Model, DbErr> {
         let mut recipe: recipe::ActiveModel = existing.into();
         recipe.rating = Set(None);
         recipe.updated_at = Set(chrono::Utc::now());
