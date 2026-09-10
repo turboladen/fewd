@@ -386,6 +386,10 @@ async fn recipe_clear_rating_sets_column_to_null() {
     // Everything else has to survive: a `clear_rating` that rebuilt the
     // ActiveModel from defaults would pass a bare rating assertion.
     assert!(cleared.is_favorite, "is_favorite must survive");
+    // Strict `>` is load-bearing, not incidental: a `clear_rating` that
+    // never stamps `updated_at` leaves the two equal, which a `>=` would
+    // accept. SQLite stores this column to microsecond precision and two
+    // round trips separate the writes, so the comparison has room.
     assert!(
         cleared.updated_at > rated.updated_at,
         "clearing is a write and must stamp updated_at"
