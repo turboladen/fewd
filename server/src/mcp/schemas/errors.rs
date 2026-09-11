@@ -38,6 +38,11 @@ pub enum InputError {
     NonPositiveServingsCount(f64),
     UnknownMealType(String),
     EmptyName(&'static str),
+    /// Carries the rating exactly as the caller sent it.
+    //
+    // The range check runs on the rounded value, so reporting that instead
+    // would reject 5.6 with "(got 6)" — a number the caller never sent.
+    RatingOutOfRange(f64),
     InvalidDate {
         field: &'static str,
         value: String,
@@ -94,6 +99,10 @@ impl std::fmt::Display for InputError {
                 "meal_type must be one of Breakfast, Lunch, Dinner, or Snack (case-insensitive; got '{mt}')."
             ),
             Self::EmptyName(field) => write!(f, "{field} must not be empty or whitespace-only."),
+            Self::RatingOutOfRange(n) => write!(
+                f,
+                "rating must be a whole number from 1 to 5 (got {n}). Fractional values round to the nearest star. Call unrate_recipe to remove a rating entirely — 0 is not a rating."
+            ),
             Self::InvalidDate { field, value } => write!(
                 f,
                 "{field} must be in YYYY-MM-DD format (got '{value}')."
