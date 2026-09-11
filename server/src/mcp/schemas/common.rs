@@ -204,6 +204,22 @@ pub(super) fn format_date(dt: DateTime<Utc>) -> String {
     dt.format("%Y-%m-%d").to_string()
 }
 
+/// Coerce an update tool's empty or whitespace-only string field to "no
+/// change". Returns the value untouched when it carries any non-whitespace
+/// character.
+//
+// No scalar on a person or a recipe has a clear-to-empty path — neither the
+// web UI nor the HTTP client sends one — so `Some("")` reaching a service
+// would be a back-door clear that forks that invariant. A field whose blank
+// value means "no change" routes through here, so the rule holds in one place
+// rather than per-field. A field that rejects a blank value instead — a
+// recipe's `name`, a lookup `slug` — validates it at the converter and returns
+// an actionable error, because there a blank is a missing value rather than an
+// attempt to unset one.
+pub(super) fn blank_to_none(value: Option<String>) -> Option<String> {
+    value.filter(|s| !s.trim().is_empty())
+}
+
 // ─── Value-type conversions (DTO ↔ MCP) ──────────────────────────
 
 pub(super) fn ingredient_out(ing: &IngredientDto) -> IngredientOut {

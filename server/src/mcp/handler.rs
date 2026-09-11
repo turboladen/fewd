@@ -32,9 +32,10 @@ use super::schemas::errors::{InputError, ResolveError};
 use super::schemas::{
     create_meal_input_to_dto, create_recipe_input_to_dto, diet_tags_payload, meal_to_brief,
     person_to_prefs, recipe_to_brief, recipe_to_full, render_diet_tags_markdown,
-    render_family_overview, shopping_item_from_dto, update_person_input_to_dto, CreateMealError,
-    CreateMealInput, CreateRecipeInput, DateRangeParams, EmptyParams, GetRecipeParams,
-    ImportRecipeUrlInput, PrintableInput, SearchRecipesParams, UpdatePersonInput,
+    render_family_overview, shopping_item_from_dto, update_person_input_to_dto,
+    update_recipe_input_to_dto, CreateMealError, CreateMealInput, CreateRecipeInput,
+    DateRangeParams, EmptyParams, GetRecipeParams, ImportRecipeUrlInput, PrintableInput,
+    SearchRecipesParams, UpdatePersonInput, UpdateRecipeInput,
 };
 use super::AuthenticatedPerson;
 
@@ -169,7 +170,7 @@ impl FewdMcp {
 
     #[tool(
         name = "list_diet_tags",
-        description = "Translate a family member's free-form dietary goals into the recipe tags `search_recipes` understands — call BEFORE `search_recipes` when planning around diets. Returns the canonical diet-tag vocabulary (each tag with a one-line meaning). Workflow: read each person's `dietary_goals` (via `list_people` / `get_family_overview`), map it onto one or more tags here, then call `search_recipes(tags=[...])` once per constraint — multiple tags AND together, so search per-person-constraint and intersect the results yourself rather than one over-narrow multi-tag call. Apply the same tags on `create_recipe` so new recipes are discoverable this way. Equivalent to the `fewd://diet-tags` resource.",
+        description = "Translate a family member's free-form dietary goals into the recipe tags `search_recipes` understands — call BEFORE `search_recipes` when planning around diets. Returns the canonical diet-tag vocabulary (each tag with a one-line meaning). Workflow: read each person's `dietary_goals` (via `list_people` / `get_family_overview`), map it onto one or more tags here, then call `search_recipes(tags=[...])` once per constraint — multiple tags AND together, so search per-person-constraint and intersect the results yourself rather than one over-narrow multi-tag call. Apply the same tags on `create_recipe` — or on `update_recipe` for a recipe already in the catalog — so recipes are discoverable this way. Equivalent to the `fewd://diet-tags` resource.",
         input_schema = rmcp::handler::server::common::schema_for_type::<EmptyParams>()
     )]
     async fn list_diet_tags(
@@ -215,7 +216,7 @@ impl FewdMcp {
 
     #[tool(
         name = "get_recipe",
-        description = "Read the full recipe — call AFTER `search_recipes` or `list_curated_recipes` returned a slug worth inspecting (when the user wants ingredients, instructions, nutrition, or prep time). Returns ingredients (with amounts and units), instructions, nutrition, prep/cook time, and any parent recipe it was adapted from.",
+        description = "Read the full recipe — call AFTER `search_recipes` or `list_curated_recipes` returned a slug worth inspecting (when the user wants ingredients, instructions, nutrition, or prep time). Returns ingredients (with amounts and units), instructions, nutrition, prep/cook time, and any parent recipe it was adapted from. Call this before `update_recipe` too: its list fields replace whole, so you need the current values to send back a complete one.",
         input_schema = rmcp::handler::server::common::schema_for_type::<GetRecipeParams>()
     )]
     async fn get_recipe(
@@ -226,36 +227,45 @@ impl FewdMcp {
             Ok(v) => v,
             Err(e) => return Ok(e),
         };
-        let normalized = params.slug.trim().to_lowercase();
-        let recipe = RecipeService::get_by_slug(&self.db, normalized.clone())
+        let Some(normalized) = normalize_slug(&params.slug) else {
+            return Ok(tool_user_error(InputError::EmptyName("slug").to_string()));
+        };
+        let recipe = RecipeService::get_by_slug(&self.db, normalized)
             .await
             .map_err(db_error)?;
         let Some(recipe) = recipe else {
-            return Ok(tool_user_error(format!(
-                "no recipe with slug '{}'. Call list_curated_recipes for the shortlist or search_recipes with a filter to find valid slugs.",
-                params.slug
-            )));
+            return Ok(tool_user_error(
+                ResolveError::UnknownRecipe(params.slug).to_string(),
+            ));
         };
 
-        let parent_slug = match recipe.parent_recipe_id.as_deref() {
-            None => None,
-            Some(parent_id) => {
-                let parent = RecipeService::get_by_id(&self.db, parent_id.to_string())
-                    .await
-                    .map_err(db_error)?;
-                if parent.is_none() {
-                    tracing::warn!(
-                        recipe_slug = %recipe.slug,
-                        parent_recipe_id = parent_id,
-                        "recipe references a parent that no longer exists; omitting parent_recipe_slug"
-                    );
-                }
-                parent.map(|p| p.slug)
-            }
-        };
-
+        let parent_slug = self.parent_slug_for(&recipe).await?;
         let out = recipe_to_full(&recipe, parent_slug).map_err(internal_error)?;
         tool_json_result(&out)
+    }
+
+    /// Resolve a recipe's stored `parent_recipe_id` into the slug callers
+    /// use to address it. Yields `None` both when the recipe has no parent
+    /// and when the parent row is gone, so a dangling reference degrades to
+    /// a missing slug instead of failing the call.
+    async fn parent_slug_for(
+        &self,
+        recipe: &crate::entities::recipe::Model,
+    ) -> Result<Option<String>, McpError> {
+        let Some(parent_id) = recipe.parent_recipe_id.as_deref() else {
+            return Ok(None);
+        };
+        let parent = RecipeService::get_by_id(&self.db, parent_id.to_string())
+            .await
+            .map_err(db_error)?;
+        if parent.is_none() {
+            tracing::warn!(
+                recipe_slug = %recipe.slug,
+                parent_recipe_id = parent_id,
+                "recipe references a parent that no longer exists; omitting parent_recipe_slug"
+            );
+        }
+        Ok(parent.map(|p| p.slug))
     }
 
     #[tool(
@@ -479,7 +489,7 @@ impl FewdMcp {
 
     #[tool(
         name = "create_recipe",
-        description = "Add a new recipe when the user describes one not already in the catalog — call `search_recipes` FIRST to check for duplicates (the LLM should resolve 'this is the same as carbonara, edit that one' rather than create a near-twin). The slug is auto-generated from the name (with a numeric suffix on collisions). Apply any applicable diet tags from `list_diet_tags` (e.g. `vegetarian`, `gluten-free`, `low-carb`) to `tags` so the recipe is later discoverable by dietary goal via `search_recipes`. Returns the full created recipe. Example: {\"name\":\"Beef Taco Bowls\",\"source\":\"manual\",\"servings\":4,\"instructions\":\"Brown beef; assemble bowls.\",\"ingredients\":[{\"name\":\"ground beef\",\"amount\":{\"kind\":\"single\",\"value\":1.0},\"unit\":\"pound\"}]}",
+        description = "Add a new recipe when the user describes one not already in the catalog — call `search_recipes` FIRST to check for duplicates (the LLM should resolve 'this is the same as carbonara, edit that one' by calling `update_recipe` on the existing slug rather than creating a near-twin). The slug is auto-generated from the name (with a numeric suffix on collisions). Apply any applicable diet tags from `list_diet_tags` (e.g. `vegetarian`, `gluten-free`, `low-carb`) to `tags` so the recipe is later discoverable by dietary goal via `search_recipes`. Returns the full created recipe. Example: {\"name\":\"Beef Taco Bowls\",\"source\":\"manual\",\"servings\":4,\"instructions\":\"Brown beef; assemble bowls.\",\"ingredients\":[{\"name\":\"ground beef\",\"amount\":{\"kind\":\"single\",\"value\":1.0},\"unit\":\"pound\"}]}",
         input_schema = rmcp::handler::server::common::schema_for_type::<CreateRecipeInput>()
     )]
     async fn create_recipe(
@@ -499,7 +509,15 @@ impl FewdMcp {
         {
             None => None,
             Some(slug) => {
-                let normalized = slug.trim().to_lowercase();
+                // `parent_recipe_slug` is optional, so the recovery the LLM
+                // needs is "drop the field" — a bare EmptyName message would
+                // leave it hunting for a valid parent it never wanted.
+                let Some(normalized) = normalize_slug(slug) else {
+                    return Ok(tool_user_error(format!(
+                        "{} Omit it or use a valid slug from search_recipes.",
+                        InputError::EmptyName("parent_recipe_slug")
+                    )));
+                };
                 let parent = RecipeService::get_by_slug(&self.db, normalized)
                     .await
                     .map_err(db_error)?;
@@ -524,6 +542,43 @@ impl FewdMcp {
             .await
             .map_err(db_error)?;
         let full = recipe_to_full(&created, parent_slug_canonical).map_err(internal_error)?;
+        tool_json_result(&full)
+    }
+
+    #[tool(
+        name = "update_recipe",
+        description = "Revise an existing recipe when the user corrects or improves one already in the catalog — call `search_recipes` or `get_recipe` FIRST for the `slug` and the current values (use `create_recipe` instead when the dish isn't in the catalog at all). Returns the full updated recipe. The recipe is identified by `slug` (case-insensitive); every other field is optional, and only the fields you send are written — omitted or null fields are left unchanged, and an empty or whitespace-only string means 'no change', so no writable string field can be blanked (`name` is the one writable exception: a blank one is rejected outright rather than ignored, and a blank `slug` is rejected too since it identifies the row). `ingredients`, `tags`, `instructions`, `nutrition_per_serving`, `portion_size` and the time fields REPLACE the stored value whole and are never merged — a partial `ingredients` array silently drops every ingredient you left out, so read the current list with `get_recipe` and send it back complete. Passing `[]` clears `tags` or `ingredients`. Renaming with `name` does NOT change the slug: the slug is pinned at creation, so keep using the original slug afterwards. Two fields carry couplings the server will not infer for you: send `total_time` whenever you change `prep_time` or `cook_time`, or the recipe keeps advertising its old duration; and send a rescaled `ingredients` array whenever you resize a recipe with `servings`, because the shopping list divides the stored amounts by `servings` and will otherwise buy the wrong quantities (send `servings` on its own only to correct a count that was recorded wrong). Not writable here: `is_favorite`, `rating`, `source`, `source_url`, the parent recipe, and the slug. Example: {\"slug\":\"beef-taco-bowls\",\"notes\":\"double the chili powder\"}",
+        input_schema = rmcp::handler::server::common::schema_for_type::<UpdateRecipeInput>()
+    )]
+    async fn update_recipe(
+        &self,
+        input: LenientParameters<UpdateRecipeInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let input = match input.into_tool_input("update_recipe") {
+            Ok(v) => v,
+            Err(e) => return Ok(e),
+        };
+        let Some(normalized) = normalize_slug(&input.slug) else {
+            return Ok(tool_user_error(InputError::EmptyName("slug").to_string()));
+        };
+        let existing = RecipeService::get_by_slug(&self.db, normalized)
+            .await
+            .map_err(db_error)?;
+        let Some(existing) = existing else {
+            return Ok(tool_user_error(
+                ResolveError::UnknownRecipe(input.slug).to_string(),
+            ));
+        };
+
+        let dto = match update_recipe_input_to_dto(input) {
+            Ok(dto) => dto,
+            Err(e) => return Ok(tool_user_error(e.to_string())),
+        };
+        let updated = RecipeService::update(&self.db, existing.id, dto)
+            .await
+            .map_err(db_error)?;
+        let parent_slug = self.parent_slug_for(&updated).await?;
+        let full = recipe_to_full(&updated, parent_slug).map_err(internal_error)?;
         tool_json_result(&full)
     }
 
@@ -684,9 +739,11 @@ impl ServerHandler for FewdMcp {
                  (2) PLAN recipes — `list_curated_recipes` for the family shortlist; \
                  `search_recipes` with filters (tags, max time, ingredient, \
                  excludes_for_persons, …) for targeted lookups; `get_recipe` for full \
-                 details on a slug; `create_recipe` only when nothing matches. To plan \
-                 around dietary goals, map each member's `dietary_goals` to tags via \
-                 `list_diet_tags`, then filter `search_recipes` by `tags`. \
+                 details on a slug; `create_recipe` only when nothing matches; \
+                 `update_recipe` when an existing recipe needs correcting rather \
+                 than replacing. To plan around dietary goals, map each member's \
+                 `dietary_goals` to tags via `list_diet_tags`, then filter \
+                 `search_recipes` by `tags`. \
                  (3) CHECK existing schedule — `list_meals` over the target date range \
                  to see what's already booked and avoid duplicates. \
                  (4) SCHEDULE meals — `create_meal` per date+slot, assigning family \
@@ -864,6 +921,24 @@ fn internal_error(detail: String) -> McpError {
 /// dropped, so they're reserved for transport / internal failures.
 fn tool_user_error(message: impl Into<String>) -> CallToolResult {
     CallToolResult::error(vec![Content::text(message.into())])
+}
+
+/// Normalize a caller-supplied recipe slug for lookup. Returns `None` when
+/// the slug is empty or whitespace-only, so the caller reports a missing
+/// value instead of a failed lookup.
+//
+// Stored slugs are lowercase by construction (`migration::slug::slugify`), and
+// SQLite compares TEXT with BINARY collation, so the lowercasing is what
+// makes the documented "case-insensitive" contract true. The blank guard
+// keeps the diagnostic honest: `"no recipe with slug ''"` describes a
+// typo, and a blank slug is a missing value. Same treatment `update_person`
+// gives its `name`.
+fn normalize_slug(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_lowercase())
 }
 
 /// Reject a list-returning tool call when the pre-conversion row count
@@ -1362,6 +1437,176 @@ mod tests {
         assert_tool_user_error(result, &["ghost-pasta", "list_curated_recipes"]);
     }
 
+    // Parse a successful tool result's single text block back into JSON.
+    // Substring assertions on the serialized `CallToolResult` can't tell a
+    // field's value from the same text appearing elsewhere in the payload,
+    // which matters when a test is asserting the shape of a whole record.
+    fn tool_result_json(result: &CallToolResult) -> serde_json::Value {
+        let text = result
+            .content
+            .first()
+            .expect("a successful tool result carries one content block")
+            .as_text()
+            .expect("tool results are text")
+            .text
+            .clone();
+        serde_json::from_str(&text).expect("tool result body is JSON")
+    }
+
+    #[tokio::test]
+    async fn get_recipe_returns_the_full_record() {
+        // The main read path. `update_recipe` reshaped this function twice
+        // — the ResolveError swap and the parent_slug_for extraction — so
+        // the fields it hands back are pinned here rather than inferred
+        // from the error-path tests.
+        use super::super::schemas::GetRecipeParams;
+
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let result = mcp
+            .get_recipe(LenientParameters::for_test(GetRecipeParams {
+                slug: seeded.slug.clone(),
+            }))
+            .await
+            .expect("get_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+
+        let body = tool_result_json(&result);
+        assert_eq!(body["slug"], "beef-taco-bowls");
+        assert_eq!(body["name"], "Beef Taco Bowls");
+        assert_eq!(body["description"], "original description");
+        assert_eq!(body["source"], "manual");
+        assert_eq!(body["servings"], 4);
+        assert_eq!(body["instructions"], "Original instructions");
+        assert_eq!(body["notes"], "original note");
+        assert_eq!(body["icon"], "🍝");
+        assert_eq!(body["is_favorite"], false);
+        assert_eq!(body["times_planned"], 0);
+        // No parent was seeded, so the resolved slug is absent rather than
+        // stale — the null half of what `parent_slug_for` returns.
+        assert_eq!(body["parent_recipe_slug"], serde_json::Value::Null);
+
+        assert_eq!(body["tags"], serde_json::json!(["dinner", "italian"]));
+        assert_eq!(
+            body["total_time"],
+            serde_json::json!({"value": 30, "unit": "minutes"})
+        );
+        assert_eq!(body["nutrition_per_serving"]["calories"], 400);
+        assert_eq!(body["nutrition_per_serving"]["protein_grams"], 30);
+
+        // Ingredients arrive as the structured shape, not flattened text:
+        // a tagged `amount` plus a separate `unit`.
+        let ingredients = body["ingredients"]
+            .as_array()
+            .expect("ingredients is an array");
+        assert_eq!(ingredients.len(), 2);
+        assert_eq!(ingredients[0]["name"], "garlic");
+        assert_eq!(ingredients[0]["unit"], "clove");
+        assert_eq!(
+            ingredients[0]["amount"],
+            serde_json::json!({"kind": "single", "value": 2.0})
+        );
+        assert_eq!(ingredients[1]["name"], "olive oil");
+    }
+
+    #[tokio::test]
+    async fn get_recipe_empty_slug_returns_input_error_not_unknown_recipe() {
+        // `normalize_slug`'s blank guard, from the `get_recipe` side. A
+        // missing slug must not be reported as a lookup miss.
+        use super::super::schemas::GetRecipeParams;
+
+        let mcp = setup_test_mcp().await;
+        for raw in ["", "   ", "\t\n"] {
+            let result = mcp
+                .get_recipe(LenientParameters::for_test(GetRecipeParams {
+                    slug: raw.into(),
+                }))
+                .await;
+            assert_tool_user_error(result, &["slug", "empty"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn create_recipe_blank_parent_slug_returns_input_error() {
+        // A blank `parent_recipe_slug` is a malformed reference, not an
+        // omitted one — the LLM should be told to drop the field rather
+        // than hunting for a recipe named "".
+        let mcp = setup_test_mcp().await;
+        let input: CreateRecipeInput = serde_json::from_value(serde_json::json!({
+            "name": "Test Recipe",
+            "source": "manual",
+            "parent_recipe_slug": "   ",
+            "servings": 4,
+            "instructions": "Stir.",
+            "ingredients": [],
+        }))
+        .expect("CreateRecipeInput JSON shape");
+        let result = mcp.create_recipe(LenientParameters::for_test(input)).await;
+        assert_tool_user_error(result, &["parent_recipe_slug", "empty"]);
+    }
+
+    // ─── Parent-recipe resolution ───────────────────────────────────
+    //
+    // `parent_slug_for` translates a stored `parent_recipe_id` into the
+    // slug the LLM can actually feed back to `get_recipe`. Both branches
+    // are covered here because the dangling-parent branch is reachable
+    // only through a delete that the MCP surface can't perform — without
+    // a test it would be exercised for the first time in production.
+
+    // The two names are chosen so neither slug is a substring of the
+    // other — a `contains` assertion on "grandma-bolognese" can only be
+    // satisfied by the parent reference, never by the child's own row.
+    #[tokio::test]
+    async fn get_recipe_echoes_parent_recipe_slug() {
+        use super::super::schemas::GetRecipeParams;
+
+        let mcp = setup_test_mcp().await;
+        let parent = seed_recipe(&mcp, "Grandma Bolognese").await;
+        assert_eq!(parent.slug, "grandma-bolognese");
+        let child = seed_recipe_with_parent(&mcp, "Weeknight Ragu", &parent.id).await;
+
+        let result = mcp
+            .get_recipe(LenientParameters::for_test(GetRecipeParams {
+                slug: child.slug.clone(),
+            }))
+            .await
+            .expect("get_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+        let body = serde_json::to_string(&result).expect("serializes");
+        assert!(
+            body.contains("grandma-bolognese"),
+            "response must echo the parent's canonical slug: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_recipe_with_dangling_parent_id_succeeds_with_null_parent_slug() {
+        use super::super::schemas::GetRecipeParams;
+
+        let mcp = setup_test_mcp().await;
+        let parent = seed_recipe(&mcp, "Grandma Bolognese").await;
+        let child = seed_recipe_with_parent(&mcp, "Weeknight Ragu", &parent.id).await;
+        RecipeService::delete(&mcp.db, parent.id.clone())
+            .await
+            .expect("parent deletes");
+
+        let result = mcp
+            .get_recipe(LenientParameters::for_test(GetRecipeParams {
+                slug: child.slug.clone(),
+            }))
+            .await
+            .expect("get_recipe returns Ok");
+        // A recipe whose parent row is gone stays readable: the dangling
+        // reference degrades to a null slug instead of failing the call.
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+        let body = serde_json::to_string(&result).expect("serializes");
+        assert!(
+            !body.contains("grandma-bolognese"),
+            "a deleted parent must not leave a stale slug in the response: {body}"
+        );
+    }
+
     #[tokio::test]
     async fn list_meals_invalid_date_returns_tool_level_error() {
         let mcp = setup_test_mcp().await;
@@ -1568,33 +1813,111 @@ mod tests {
         assert_tool_user_error(result, &["Bob", "list_people"]);
     }
 
-    use crate::dto::CreateRecipeDto;
+    use crate::dto::{
+        CreateRecipeDto, IngredientAmountDto, IngredientDto, NutritionDto, TimeValueDto,
+    };
     use crate::entities::recipe;
 
+    fn bare_recipe_dto(name: &str) -> CreateRecipeDto {
+        CreateRecipeDto {
+            name: name.into(),
+            description: None,
+            source: "manual".into(),
+            source_url: None,
+            parent_recipe_id: None,
+            prep_time: None,
+            cook_time: None,
+            total_time: None,
+            servings: 4,
+            portion_size: None,
+            instructions: "Mix and cook".into(),
+            ingredients: vec![],
+            nutrition_per_serving: None,
+            tags: vec![],
+            notes: None,
+            icon: None,
+        }
+    }
+
     async fn seed_recipe(mcp: &FewdMcp, name: &str) -> recipe::Model {
+        RecipeService::create(&mcp.db, bare_recipe_dto(name))
+            .await
+            .expect("seed recipe")
+    }
+
+    async fn seed_recipe_with_parent(
+        mcp: &FewdMcp,
+        name: &str,
+        parent_recipe_id: &str,
+    ) -> recipe::Model {
         RecipeService::create(
             &mcp.db,
             CreateRecipeDto {
-                name: name.into(),
-                description: None,
-                source: "manual".into(),
-                source_url: None,
-                parent_recipe_id: None,
-                prep_time: None,
-                cook_time: None,
-                total_time: None,
-                servings: 4,
-                portion_size: None,
-                instructions: "Mix and cook".into(),
-                ingredients: vec![],
-                nutrition_per_serving: None,
-                tags: vec![],
-                notes: None,
-                icon: None,
+                parent_recipe_id: Some(parent_recipe_id.into()),
+                ..bare_recipe_dto(name)
             },
         )
         .await
-        .expect("seed recipe")
+        .expect("seed child recipe")
+    }
+
+    // `seed_recipe` above is shared with the `create_meal` tests and seeds
+    // empty lists and no optional scalars. The `update_recipe` tests need
+    // prior state they can watch get clobbered or preserved, so they layer
+    // that content over the same base rather than perturbing the shared
+    // helper.
+    async fn seed_recipe_with_content(mcp: &FewdMcp, name: &str) -> recipe::Model {
+        RecipeService::create(
+            &mcp.db,
+            CreateRecipeDto {
+                description: Some("original description".into()),
+                source_url: Some("https://example.com/original".into()),
+                prep_time: Some(TimeValueDto {
+                    value: 10,
+                    unit: "minutes".into(),
+                }),
+                cook_time: Some(TimeValueDto {
+                    value: 20,
+                    unit: "minutes".into(),
+                }),
+                total_time: Some(TimeValueDto {
+                    value: 30,
+                    unit: "minutes".into(),
+                }),
+                instructions: "Original instructions".into(),
+                ingredients: vec![
+                    IngredientDto {
+                        name: "garlic".into(),
+                        prep: None,
+                        amount: IngredientAmountDto::Single { value: 2.0 },
+                        unit: "clove".into(),
+                        notes: None,
+                        or_alternative: None,
+                    },
+                    IngredientDto {
+                        name: "olive oil".into(),
+                        prep: None,
+                        amount: IngredientAmountDto::Single { value: 1.0 },
+                        unit: "tablespoon".into(),
+                        notes: None,
+                        or_alternative: None,
+                    },
+                ],
+                nutrition_per_serving: Some(NutritionDto {
+                    calories: Some(400),
+                    protein_grams: Some(30),
+                    carbs_grams: Some(20),
+                    fat_grams: Some(10),
+                    notes: Some("estimated".into()),
+                }),
+                tags: vec!["dinner".into(), "italian".into()],
+                notes: Some("original note".into()),
+                icon: Some("🍝".into()),
+                ..bare_recipe_dto(name)
+            },
+        )
+        .await
+        .expect("seed recipe with content")
     }
 
     /// Cross-boundary regression guard (fewd-lb2): a meal created through the
@@ -1958,6 +2281,348 @@ mod tests {
         assert_eq!(reloaded.notes.as_deref(), Some("normalized lookup"));
     }
 
+    // ─── update_recipe ──────────────────────────────────────────────
+    //
+    // Same shape as the update_person block above: assert the call is not
+    // a tool-level error, then re-read the row through `RecipeService` —
+    // the service the `/api/recipes` route uses — so a tool that builds a
+    // convincing response without writing is caught.
+
+    fn mk_update_recipe(slug: &str) -> UpdateRecipeInput {
+        UpdateRecipeInput {
+            slug: slug.into(),
+            ..Default::default()
+        }
+    }
+
+    async fn reload_recipe(mcp: &FewdMcp, slug: &str) -> recipe::Model {
+        RecipeService::get_by_slug(&mcp.db, slug.into())
+            .await
+            .expect("lookup succeeds")
+            .expect("recipe still exists")
+    }
+
+    #[tokio::test]
+    async fn update_recipe_happy_path_writes_and_returns_canonical_state() {
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let result = mcp
+            .update_recipe(LenientParameters::for_test(UpdateRecipeInput {
+                servings: Some(6),
+                notes: Some("doubles well".into()),
+                ..mk_update_recipe(&seeded.slug)
+            }))
+            .await
+            .expect("update_recipe returns Ok");
+        assert_ne!(
+            result.is_error,
+            Some(true),
+            "happy path must not be a tool-level error: {result:?}"
+        );
+        let body = serde_json::to_string(&result).expect("serializes");
+        assert!(body.contains("doubles well"), "{body}");
+
+        let reloaded = reload_recipe(&mcp, &seeded.slug).await;
+        assert_eq!(reloaded.servings, 6);
+        assert_eq!(reloaded.notes.as_deref(), Some("doubles well"));
+    }
+
+    #[tokio::test]
+    async fn update_recipe_partial_update_leaves_other_fields_untouched() {
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let result = mcp
+            .update_recipe(LenientParameters::for_test(UpdateRecipeInput {
+                servings: Some(6),
+                ..mk_update_recipe(&seeded.slug)
+            }))
+            .await
+            .expect("update_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true));
+
+        let reloaded = reload_recipe(&mcp, &seeded.slug).await;
+        assert_eq!(reloaded.servings, 6);
+        // Everything else survives byte-for-byte from the seed.
+        assert_eq!(reloaded.name, seeded.name);
+        assert_eq!(reloaded.description, seeded.description);
+        assert_eq!(reloaded.instructions, seeded.instructions);
+        assert_eq!(reloaded.ingredients, seeded.ingredients);
+        assert_eq!(reloaded.tags, seeded.tags);
+        assert_eq!(reloaded.notes, seeded.notes);
+        assert_eq!(reloaded.icon, seeded.icon);
+        assert_eq!(reloaded.nutrition_per_serving, seeded.nutrition_per_serving);
+        assert_eq!(reloaded.prep_time, seeded.prep_time);
+        assert_eq!(reloaded.cook_time, seeded.cook_time);
+        assert_eq!(reloaded.total_time, seeded.total_time);
+    }
+
+    #[tokio::test]
+    async fn update_recipe_rename_keeps_slug() {
+        // MCP-layer counterpart to `service_tests::recipe_slug_survives_rename`.
+        // The slug is the LLM's only handle on a recipe, so a rename that
+        // rewrote it would strand every slug the model is holding.
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+        assert_eq!(seeded.slug, "beef-taco-bowls");
+
+        let result = mcp
+            .update_recipe(LenientParameters::for_test(UpdateRecipeInput {
+                name: Some("Chicken Taco Bowls".into()),
+                ..mk_update_recipe(&seeded.slug)
+            }))
+            .await
+            .expect("update_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true));
+
+        let reloaded = reload_recipe(&mcp, "beef-taco-bowls").await;
+        assert_eq!(reloaded.name, "Chicken Taco Bowls");
+        assert_eq!(reloaded.slug, "beef-taco-bowls");
+    }
+
+    #[tokio::test]
+    async fn update_recipe_unknown_slug_returns_tool_level_error_not_protocol_error() {
+        let mcp = setup_test_mcp().await;
+        let result = mcp
+            .update_recipe(LenientParameters::for_test(mk_update_recipe("ghost-pasta")))
+            .await;
+        assert_tool_user_error(result, &["ghost-pasta", "search_recipes"]);
+    }
+
+    #[tokio::test]
+    async fn update_recipe_empty_slug_returns_input_error_not_unknown_recipe() {
+        // A blank slug is a missing value, not a typo — it deserves the
+        // input-level diagnostic rather than "no recipe with slug ''".
+        let mcp = setup_test_mcp().await;
+        for raw in ["", "   ", "\t\n"] {
+            let result = mcp
+                .update_recipe(LenientParameters::for_test(mk_update_recipe(raw)))
+                .await;
+            assert_tool_user_error(result, &["slug", "empty"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn update_recipe_empty_tags_array_clears_tags() {
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+        assert_eq!(seeded.tags, "[\"dinner\",\"italian\"]");
+
+        let result = mcp
+            .update_recipe(LenientParameters::for_test(UpdateRecipeInput {
+                tags: Some(vec![]),
+                ..mk_update_recipe(&seeded.slug)
+            }))
+            .await
+            .expect("update_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true));
+
+        let reloaded = reload_recipe(&mcp, &seeded.slug).await;
+        assert_eq!(reloaded.tags, "[]");
+        // Clearing one list must not disturb the other.
+        assert_eq!(reloaded.ingredients, seeded.ingredients);
+    }
+
+    #[tokio::test]
+    async fn update_recipe_ingredients_replace_the_whole_list() {
+        // The destructive path the tool description warns hardest about: a
+        // shorter array is a replacement, not a merge, so every ingredient
+        // the caller left out is gone. Built from JSON because that is the
+        // shape an LLM sends.
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let input: UpdateRecipeInput = serde_json::from_value(serde_json::json!({
+            "slug": seeded.slug,
+            "ingredients": [{
+                "name": "ground beef",
+                "amount": { "kind": "single", "value": 1.0 },
+                "unit": "pound",
+            }],
+        }))
+        .expect("partial UpdateRecipeInput deserializes");
+        let result = mcp
+            .update_recipe(LenientParameters::for_test(input))
+            .await
+            .expect("update_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+
+        let reloaded = reload_recipe(&mcp, &seeded.slug).await;
+        let stored: Vec<IngredientDto> =
+            serde_json::from_str(&reloaded.ingredients).expect("stored ingredients parse");
+        assert_eq!(stored.len(), 1, "omitted ingredients must be gone");
+        assert_eq!(stored[0].name, "ground beef");
+        // Replacing one list must leave the other alone.
+        assert_eq!(reloaded.tags, seeded.tags);
+    }
+
+    #[tokio::test]
+    async fn update_recipe_zero_servings_returns_tool_level_error() {
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let result = mcp
+            .update_recipe(LenientParameters::for_test(UpdateRecipeInput {
+                servings: Some(0),
+                ..mk_update_recipe(&seeded.slug)
+            }))
+            .await;
+        assert_tool_user_error(result, &["servings", ">= 1"]);
+
+        let reloaded = reload_recipe(&mcp, &seeded.slug).await;
+        assert_eq!(reloaded.servings, 4, "rejected input must not have written");
+    }
+
+    #[tokio::test]
+    async fn update_recipe_slug_lookup_is_case_and_whitespace_insensitive() {
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let result = mcp
+            .update_recipe(LenientParameters::for_test(UpdateRecipeInput {
+                servings: Some(6),
+                ..mk_update_recipe("  BEEF-TACO-BOWLS  ")
+            }))
+            .await
+            .expect("update_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+
+        let reloaded = reload_recipe(&mcp, &seeded.slug).await;
+        assert_eq!(reloaded.servings, 6);
+    }
+
+    #[tokio::test]
+    async fn update_recipe_empty_instructions_is_no_op() {
+        // Instructions are NOT NULL and have no clear path. A blank value
+        // must leave the stored text alone rather than blanking a recipe
+        // the family cooks from.
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        for raw in ["", "   ", "\t\n"] {
+            let result = mcp
+                .update_recipe(LenientParameters::for_test(UpdateRecipeInput {
+                    instructions: Some(raw.into()),
+                    ..mk_update_recipe(&seeded.slug)
+                }))
+                .await
+                .expect("update_recipe returns Ok");
+            assert_ne!(result.is_error, Some(true));
+
+            let reloaded = reload_recipe(&mcp, &seeded.slug).await;
+            assert_eq!(
+                reloaded.instructions, "Original instructions",
+                "blank instructions {raw:?} must not overwrite the stored text"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn update_recipe_partial_nutrition_nulls_the_other_fields() {
+        // The nutrition block is one JSON column, so it can only be
+        // replaced whole. Pinned because the description promises exactly
+        // this and a caller sending one field WILL lose the rest.
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        // Built from JSON rather than a struct literal: this is the exact
+        // shape an LLM sends, and it exercises the `#[serde(default)]`
+        // partial-input path at the same time.
+        let input: UpdateRecipeInput = serde_json::from_value(serde_json::json!({
+            "slug": seeded.slug,
+            "nutrition_per_serving": { "calories": 500 },
+        }))
+        .expect("partial UpdateRecipeInput deserializes");
+        let result = mcp
+            .update_recipe(LenientParameters::for_test(input))
+            .await
+            .expect("update_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true));
+
+        let reloaded = reload_recipe(&mcp, &seeded.slug).await;
+        let stored: crate::dto::NutritionDto = serde_json::from_str(
+            reloaded
+                .nutrition_per_serving
+                .as_deref()
+                .expect("nutrition written"),
+        )
+        .expect("stored nutrition parses");
+        assert_eq!(stored.calories, Some(500));
+        assert_eq!(stored.protein_grams, None);
+        assert_eq!(stored.carbs_grams, None);
+        assert_eq!(stored.fat_grams, None);
+        assert_eq!(stored.notes, None);
+    }
+
+    #[tokio::test]
+    async fn update_recipe_total_time_rewrites_the_search_time_column() {
+        // `total_minutes` is the derived column `search_recipes`'
+        // `max_total_time_minutes` filter compares against, and this tool is
+        // the only MCP path that writes it. An hour-authored update has to
+        // normalize to 120 minutes, or the recipe answers time-filtered
+        // searches with its old duration.
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+        assert_eq!(seeded.total_minutes, Some(30));
+
+        let input: UpdateRecipeInput = serde_json::from_value(serde_json::json!({
+            "slug": seeded.slug,
+            "total_time": { "value": 2, "unit": "hours" },
+        }))
+        .expect("partial UpdateRecipeInput deserializes");
+        let result = mcp
+            .update_recipe(LenientParameters::for_test(input))
+            .await
+            .expect("update_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+
+        let reloaded = reload_recipe(&mcp, &seeded.slug).await;
+        assert_eq!(reloaded.total_minutes, Some(120));
+    }
+
+    #[tokio::test]
+    async fn update_recipe_never_touches_out_of_scope_columns() {
+        // `is_favorite` and `rating` belong to separate tools, and
+        // `source` / `source_url` / the planning counters aren't writable
+        // from the MCP surface at all. Non-default values are seeded first
+        // so a regression that wrote `None` over them is visible.
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+        RecipeService::update(
+            &mcp.db,
+            seeded.id.clone(),
+            crate::dto::UpdateRecipeDto {
+                is_favorite: Some(true),
+                rating: Some(5.0),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed favorite + rating");
+        let before = reload_recipe(&mcp, &seeded.slug).await;
+
+        let result = mcp
+            .update_recipe(LenientParameters::for_test(UpdateRecipeInput {
+                servings: Some(6),
+                ..mk_update_recipe(&seeded.slug)
+            }))
+            .await
+            .expect("update_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true));
+
+        let after = reload_recipe(&mcp, &seeded.slug).await;
+        assert_eq!(after.servings, 6, "the in-scope field must have changed");
+        assert!(after.is_favorite);
+        assert_eq!(after.rating, Some(5.0));
+        assert_eq!(after.source, before.source);
+        assert_eq!(after.source_url, before.source_url);
+        assert_eq!(after.times_planned, before.times_planned);
+        assert_eq!(after.last_planned, before.last_planned);
+        assert_eq!(after.slug, before.slug);
+        assert_eq!(after.created_at, before.created_at);
+    }
+
     // ─── LenientParameters extraction layer ─────────────────────────
     //
     // Direct unit tests for `LenientParameters::extract`, the static
@@ -2267,6 +2932,7 @@ mod tests {
             "Check",     // list_meals
             "Produce",   // get_shopping_list
             "Add",       // create_recipe
+            "Revise",    // update_recipe
             "Import",    // import_recipe_url
             "Schedule",  // create_meal
         ];
@@ -2327,5 +2993,49 @@ mod tests {
             .expect("create_recipe embedded example must deserialize into CreateRecipeInput");
         serde_json::from_str::<UpdatePersonInput>(&example("update_person"))
             .expect("update_person embedded example must deserialize into UpdatePersonInput");
+        serde_json::from_str::<UpdateRecipeInput>(&example("update_recipe"))
+            .expect("update_recipe embedded example must deserialize into UpdateRecipeInput");
+    }
+
+    #[test]
+    fn every_parameterized_tool_declares_a_non_empty_input_schema() {
+        // The rmcp `#[tool]` macro only derives an input schema from a
+        // literal `Parameters<T>` ident in the signature, so a
+        // `LenientParameters<T>` tool that omits `input_schema =
+        // schema_for_type::<T>()` ships an empty schema and the LLM can't
+        // discover any of its inputs. Nothing else in the tree catches
+        // that — the tool still compiles, registers, and answers calls.
+        const NO_ARG_TOOLS: &[&str] = &[
+            "whoami",
+            "list_curated_recipes",
+            "list_people",
+            "get_family_overview",
+            "list_diet_tags",
+        ];
+
+        for tool in FewdMcp::tool_router().list_all() {
+            let property_count = tool
+                .input_schema
+                .get("properties")
+                .and_then(|v| v.as_object())
+                .map_or(0, serde_json::Map::len);
+            if NO_ARG_TOOLS.contains(&tool.name.as_ref()) {
+                assert_eq!(
+                    property_count, 0,
+                    "{}: takes parameters now — drop it from NO_ARG_TOOLS so the \
+                     empty-schema guard covers it",
+                    tool.name
+                );
+            } else {
+                assert!(
+                    property_count > 0,
+                    "{}: empty input schema. Add `input_schema = \
+                     rmcp::handler::server::common::schema_for_type::<T>()` to its \
+                     #[tool] attribute — see LenientParameters' docstring — or add \
+                     it to NO_ARG_TOOLS if it genuinely takes no parameters.",
+                    tool.name
+                );
+            }
+        }
     }
 }
