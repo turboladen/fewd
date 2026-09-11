@@ -426,6 +426,74 @@ Expect: tool-level error citing "servings must be >= 1", and the recipe unchange
 
 ---
 
+### `favorite_recipe`
+
+State-changing, but single-column and reversible — the safest of the write tools to exercise. Seed a recipe first (`create_recipe`) and substitute its slug for `test-recipe` throughout.
+
+**Happy path — favorite it:**
+
+```json
+{ "slug": "test-recipe", "is_favorite": true }
+```
+
+Expect: the same brief row `search_recipes` returns — slug, name, description, tags, icon, servings, total time, how many times it has been planned, when it was last planned, rating, is_favorite — with `is_favorite: true`. The brief row is deliberately smaller than `get_recipe`'s: it carries enough to confirm the write, not the ingredients or instructions.
+
+Then call `list_curated_recipes`: the recipe now appears at the front of the shortlist. Favorites are listed first and are never truncated.
+
+**Unfavorite it:**
+
+```json
+{ "slug": "test-recipe", "is_favorite": false }
+```
+
+Expect: `is_favorite: false`, and the recipe drops back out of the favorites tier of `list_curated_recipes`.
+
+**Not a toggle — repeat the same call:**
+
+```json
+{ "slug": "test-recipe", "is_favorite": true }
+```
+
+Send this twice. Expect: `is_favorite: true` both times. A second call does not flip it back off. This is the difference from the web UI's star button, which toggles — here the value you send is the value you get, so the LLM never has to know the current state first.
+
+**Pairs with the `search_recipes` filter:**
+
+```json
+{ "is_favorite": true }
+```
+
+Expect: `search_recipes` returns exactly the recipes you favorited above. `is_favorite` counts as a filter on its own, so this is not a rejected bare call.
+
+**Nothing else changes:**
+
+Call `get_recipe` on the slug before and after a `favorite_recipe` call. Expect: every other field — name, servings, ingredients, tags, nutrition, notes, rating — is identical. This tool writes one column.
+
+**Error path — unknown slug:**
+
+```json
+{ "slug": "this-recipe-does-not-exist", "is_favorite": true }
+```
+
+Expect: tool-level error naming the bad slug and pointing at `list_curated_recipes` / `search_recipes` — the same message `update_recipe` and `create_meal` produce.
+
+**Error path — empty slug:**
+
+```json
+{ "slug": "   ", "is_favorite": true }
+```
+
+Expect: tool-level error saying `slug` must not be empty or whitespace-only, NOT "no recipe with slug ''".
+
+**Error path — missing `is_favorite`:**
+
+```json
+{ "slug": "test-recipe" }
+```
+
+Expect: tool-level error naming the missing field. `is_favorite` is required on purpose — a default would be `false`, so an omission would silently unfavorite the recipe instead of failing.
+
+---
+
 ### `create_meal`
 
 State-changing. Schedules a meal on a date with per-person serving assignments.
