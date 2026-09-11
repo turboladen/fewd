@@ -25,14 +25,20 @@ function readState() {
   return JSON.parse(readFileSync(STATE, 'utf8'));
 }
 
+// Abort the current command. This throws rather than exiting so that a
+// `finally` block still runs — `smoke` tears its server down there, and
+// `process.exit` would skip it and leak the child. The top-level catch
+// prints the message and exits 1.
 function die(msg) {
-  console.error(`driver: ${msg}`);
-  process.exit(1);
+  throw new Error(msg);
 }
 
 function run(cmd, args, opts = {}) {
   return new Promise((res, rej) => {
     const p = spawn(cmd, args, { cwd: REPO, stdio: 'inherit', ...opts });
+    // A spawn failure (missing binary) emits 'error' and may never emit
+    // 'exit', which would hang the driver instead of reporting it.
+    p.on('error', rej);
     p.on('exit', (code) => (code === 0 ? res() : rej(new Error(`${cmd} exited ${code}`))));
   });
 }
@@ -57,8 +63,21 @@ async function boot({ fresh = true } = {}) {
   const fd = openSync(LOG, 'w');
   const proc = Bun.spawn([bin], {
     cwd: REPO,
-    // PORT=0 asks the kernel for a free port; main.rs logs the bound one.
-    env: { ...process.env, DATABASE_PATH: db, PORT: '0', RUST_LOG: process.env.RUST_LOG ?? 'info' },
+    env: {
+      ...process.env,
+      DATABASE_PATH: db,
+      // PORT=0 asks the kernel for a free port; main.rs logs the bound one.
+      PORT: '0',
+      // The bound port is read back out of the log, so the directive that
+      // carries that line is pinned last (most specific wins) — a surrounding
+      // `RUST_LOG=warn` would otherwise silence it and every boot would fail
+      // with "never announced a port".
+      RUST_LOG: `${process.env.RUST_LOG ?? 'info'},fewd_server=info`,
+      // An inherited MCP_ALLOWED_HOSTS (the dietpi deploy exports one) would
+      // put the smoke test's off-allowlist Host on the allowlist and turn its
+      // 403 assertion into a spurious failure.
+      MCP_ALLOWED_HOSTS: '',
+    },
     stdout: fd,
     stderr: fd,
   });
@@ -125,10 +144,10 @@ async function api(state, method, path, body) {
 
 // ─── MCP ────────────────────────────────────────────────────────
 
-/// Pull the JSON-RPC payload out of a Streamable HTTP response. The
-/// transport answers POSTs with an SSE stream, so the body arrives as
-/// `data: {...}` lines interleaved with keep-alive `data:`/`id:`/`retry:`
-/// frames — JSON.parse on the raw body always fails.
+// Pull the JSON-RPC payload out of a Streamable HTTP response. The
+// transport answers POSTs with an SSE stream, so the body arrives as
+// `data: {...}` lines interleaved with keep-alive `data:`/`id:`/`retry:`
+// frames — JSON.parse on the raw body always fails.
 function parseSse(text) {
   for (const line of text.split('\n')) {
     if (line.startsWith('data: ') && line[6] === '{') return JSON.parse(line.slice(6));
@@ -159,10 +178,10 @@ async function mcpPost(state, payload, extraHeaders = {}) {
   return { res, text: await res.text() };
 }
 
-/// initialize → capture `mcp-session-id` → notifications/initialized.
-/// rmcp's `initialize` is served by `get_info(&self)` and never reads the
-/// request extensions, so the auth identity only reaches tools after the
-/// notification lands; skipping it makes every tools/call fail.
+// initialize → capture `mcp-session-id` → notifications/initialized.
+// rmcp's `initialize` is served by `get_info(&self)` and never reads the
+// request extensions, so the auth identity only reaches tools after the
+// notification lands; skipping it makes every tools/call fail.
 async function handshake(state) {
   if (state.session) return state;
   const { res, text } = await mcpPost(state, {
@@ -203,8 +222,8 @@ async function mcp(state, method, params) {
   return body.result;
 }
 
-/// Tool results arrive as `content: [{type:"text", text}]`; most fewd tools
-/// put JSON in that text, so unwrap one layer when it parses.
+// Tool results arrive as `content: [{type:"text", text}]`; most fewd tools
+// put JSON in that text, so unwrap one layer when it parses.
 function toolText(result) {
   const text = (result.content ?? []).map((c) => c.text ?? '').join('\n');
   try {
@@ -268,6 +287,9 @@ async function smoke() {
     const list = await api(state, 'GET', '/api/shopping-list?start_date=2026-09-14&end_date=2026-09-14');
     const beef = list.find((i) => i.ingredient_name === 'ground beef');
     if (!beef) throw new Error('shopping list missing the planned recipe');
+    // total_amount is optional on the wire (an unparsed amount aggregates to
+    // null), so read it defensively rather than dereferencing into a TypeError.
+    if (!beef.total_amount) throw new Error('shopping list line for beef carries no aggregated amount');
     ok('GET /api/shopping-list', `${list.length} lines, beef scaled to ${beef.total_amount.value} ${beef.total_unit}`);
 
     console.log('▸ MCP');
@@ -336,12 +358,15 @@ try {
       down();
       break;
     case 'api':
+      if (!rest[0] || !rest[1]) die('usage: api <METHOD> <path> [json]');
       print(await api(readState(), rest[0].toUpperCase(), rest[1], rest[2] ? JSON.parse(rest[2]) : undefined));
       break;
     case 'mcp':
+      if (!rest[0]) die('usage: mcp <method> [params-json]');
       print(await mcp(readState(), rest[0], rest[1] ? JSON.parse(rest[1]) : undefined));
       break;
     case 'tool':
+      if (!rest[0]) die('usage: tool <name> [args-json]');
       print(toolText(await mcp(readState(), 'tools/call', { name: rest[0], arguments: rest[1] ? JSON.parse(rest[1]) : {} })));
       break;
     default:

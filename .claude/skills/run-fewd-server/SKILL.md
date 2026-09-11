@@ -174,20 +174,23 @@ answer 200 within ~2s of boot.
   slot stores fine and then never renders.
 - **`PORT=0` gets you a kernel-assigned port**, which `main.rs` logs as
   `Server running on http://localhost:<port>`. That is how the driver avoids
-  fighting `just dev` for :3000.
+  fighting `just dev` for :3000. The driver reads the port back out of that
+  line, so it pins `fewd_server=info` on top of whatever `RUST_LOG` it
+  inherits; it also clears `MCP_ALLOWED_HOSTS` for the child, since an
+  inherited allowlist would let the smoke test's off-allowlist `Host` through.
 - **Two servers happily share one SQLite file** (WAL mode) — a leaked instance
   does not announce itself with a lock error. If results look stale, run
   `down`, then `pgrep -fl 'debug/fewd-server'`.
 
 ## Troubleshooting
 
-| Symptom                                                                              | Fix                                                                                                                       |
-| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `driver: server never announced a port` with an empty log                            | A previous instance leaked. `bun …/driver.mjs down`, then `pkill -f 'target/debug/fewd-server'`, then retry.              |
-| `server exited 101` with `Failed to initialize database: … "file is not a database"` | The scratch DB is corrupt. `rm -rf target/fewd-driver` and re-run.                                                        |
-| `driver: no running instance`                                                        | `api`/`mcp`/`tool` need `up` first; `smoke` tears itself down.                                                            |
-| `tools/call → 401: {"error":"invalid or revoked token"}`                             | The token in `state.json` was revoked, or the instance was rebooted onto a fresh DB. Re-run `up`.                         |
-| `tools/call → 401: {"error":"missing Authorization: Bearer <mcp-token>"}`            | Hand-rolled request without the header. Mint one via `POST /api/people/{id}/mcp-token`.                                   |
-| MCP call returns 404                                                                 | Stale `mcp-session-id`; the driver clears it and re-handshakes automatically. Hand-rolled clients must redo `initialize`. |
-| `no JSON frame in MCP response`                                                      | The body was not SSE. The status code is in the message just above it — start there.                                      |
-| `<tool>: missing field 'x'. Check the tool's input schema.`                          | Read the real schema with the `tools/list` snippet above; MCP inputs are not the HTTP DTOs.                               |
+| Symptom                                                                              | Fix                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `driver: server never announced a port` with an empty log                            | A previous instance leaked: `bun …/driver.mjs down`, then `pkill -f 'target/debug/fewd-server'`, then retry. If the log has content but no port, the `Server running on http://localhost:<port>` line in `main.rs` moved and the scrape needs updating. |
+| `server exited 101` with `Failed to initialize database: … "file is not a database"` | The scratch DB is corrupt. `rm -rf target/fewd-driver` and re-run.                                                                                                                                                                                      |
+| `driver: no running instance`                                                        | `api`/`mcp`/`tool` need `up` first; `smoke` tears itself down.                                                                                                                                                                                          |
+| `tools/call → 401: {"error":"invalid or revoked token"}`                             | The token in `state.json` was revoked, or the instance was rebooted onto a fresh DB. Re-run `up`.                                                                                                                                                       |
+| `tools/call → 401: {"error":"missing Authorization: Bearer <mcp-token>"}`            | Hand-rolled request without the header. Mint one via `POST /api/people/{id}/mcp-token`.                                                                                                                                                                 |
+| MCP call returns 404                                                                 | Stale `mcp-session-id`; the driver clears it and re-handshakes automatically. Hand-rolled clients must redo `initialize`.                                                                                                                               |
+| `no JSON frame in MCP response`                                                      | The body was not SSE. The status code is in the message just above it — start there.                                                                                                                                                                    |
+| `<tool>: missing field 'x'. Check the tool's input schema.`                          | Read the real schema with the `tools/list` snippet above; MCP inputs are not the HTTP DTOs.                                                                                                                                                             |
