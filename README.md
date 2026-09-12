@@ -94,8 +94,10 @@ Cross-compiles for ARM64, copies the binary and service file, and restarts the s
 ### Verify
 
 ```bash
-ssh user@hostname "systemctl status fewd"     # Should show active (running)
-ssh user@hostname "journalctl -u fewd -n 20"  # View recent logs
+ssh user@hostname "systemctl status fewd"             # Should show active (running); auto-restart or start-limit-hit means a crash loop
+ssh user@hostname "journalctl -u fewd -n 20"          # View recent logs
+curl -fsS http://hostname:3000/api/version            # git_sha should match the deployed commit
+ssh user@hostname "systemctl show -p NRestarts fewd"  # After 30s, should print NRestarts=0; anything higher means it crashed
 ```
 
 Then open `http://hostname:3000` in a browser.
@@ -103,9 +105,10 @@ Then open `http://hostname:3000` in a browser.
 ### Useful commands
 
 ```bash
-ssh user@hostname "sudo systemctl stop fewd"       # Stop
-ssh user@hostname "sudo systemctl restart fewd"     # Restart
-ssh user@hostname "journalctl -u fewd -f"           # Live log tail
+ssh user@hostname "sudo systemctl stop fewd"         # Stop
+ssh user@hostname "sudo systemctl restart fewd"      # Restart
+ssh user@hostname "sudo systemctl reset-failed fewd" # Reset the crash-loop counter so start/restart work again
+ssh user@hostname "journalctl -u fewd -f"            # Live log tail
 ```
 
 ## MCP Server

@@ -1,6 +1,15 @@
 [Unit]
 Description=fewd — family meal planner & cocktail manager
 After=network.target
+# Crash-loop cap: systemd allows 5 starts in a 300s window that opens at the
+# first start, and refuses the 6th (Result: start-limit-hit), leaving the unit
+# failed. With RestartSec=5 a panic on boot reaches that state in about 30s. A
+# process that runs longer than 55s before each crash never trips the cap.
+# Manual starts count toward the limit. Once it trips, systemd does not start
+# the unit again on its own, and a manual start is refused until
+# `systemctl reset-failed fewd` runs or that 300s window closes.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple

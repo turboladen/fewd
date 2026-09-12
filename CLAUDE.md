@@ -243,9 +243,13 @@ via `rust-embed` (`server/src/main.rs`: `#[folder = "../dist"]`). There is no
 separate `dist/` sync; if `dist/` is stale the binary is stale.
 
 The recipe copies `deploy/fewd.service` to **both** `/opt/fewd/` and
-`/etc/systemd/system/`, then `daemon-reload` + restart — so unit-file edits
-(`RUST_LOG`, `Restart=always`, `MCP_ALLOWED_HOSTS`) propagate. Don't hand-roll a
-partial deploy; omitting the `/etc` copy caused the `fewd-82e` 403 regression.
+`/etc/systemd/system/`, then `daemon-reload` + start — so unit-file edits
+(`RUST_LOG`, `Restart=always` with its start-limit cap, `MCP_ALLOWED_HOSTS`)
+propagate. Don't hand-roll a partial deploy; omitting the `/etc` copy caused the
+`fewd-82e` 403 regression. The recipe runs `systemctl reset-failed` before it
+starts the unit, so a deploy recovers a unit that tripped the cap. Outside the
+recipe, a tripped unit refuses manual starts and restarts until
+`sudo systemctl reset-failed fewd` runs; `deploy/fewd.service` explains the cap.
 
 ## Common Tasks
 
