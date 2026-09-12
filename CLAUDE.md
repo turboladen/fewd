@@ -228,8 +228,11 @@ bun .claude/skills/verify/verify.mjs   # every CI gate, one pass, ~30s — the /
 just ci                                # fail-fast subset; what the pre-push hook runs
 ```
 
-`just ci` and `scripts/ci-check.sh` both omit the migration drift smoke test and
-`bun install --frozen-lockfile`. Use `/verify` before a PR. Consolidation: `fewd-t2b`.
+`just ci` (14s warm) omits the migration drift smoke test and `bun install
+--frozen-lockfile` — the two gates that pass locally and fail in CI — and stops
+at the first failure. Keep it that way: the pre-push hook that runs it has a
+300s budget, and the migration gate builds `--release`, which costs a second
+warm but minutes against a cold `target/`. Use `/verify` (19s warm) before a PR.
 
 ### Deploying to the dietpi box
 

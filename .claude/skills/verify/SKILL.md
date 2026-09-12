@@ -15,14 +15,20 @@ Run it from the repo root. A warm full run is about **30 seconds**.
 bun .claude/skills/verify/verify.mjs
 ```
 
-## Why not `just ci` or `scripts/ci-check.sh`
+## Why not `just ci`
 
-Both exist and both are incomplete. Neither runs the **migration drift smoke
-test** or the **frozen-lockfile check** — and those are the two gates that pass
-locally and fail in CI, because they only break on a release build or a fresh
-checkout. Use them for a quick pass; use this before a PR.
+`just ci` is the fast pre-push gate (14s warm), and it is incomplete on
+purpose. It runs neither the **migration drift smoke test** nor the
+**frozen-lockfile check** — the two gates that pass locally and fail in CI,
+because one needs a release build and the other a fresh checkout.
 
-`just ci` also fails fast, so it shows you one problem at a time.
+Folding them in is tempting, since warm they cost about a second. Don't: the
+migration gate builds `--release`, which runs to minutes against a cold or
+stale `target/`, and `.claude/hooks/ci-before-push.sh` gets 300s before it
+blocks the push. Every push would be a gamble on the state of `target/`.
+
+`just ci` also fails fast, so it shows one problem at a time. Use it while
+working; use this before a PR.
 
 ## Gates
 
