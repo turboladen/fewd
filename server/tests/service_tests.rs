@@ -8,9 +8,9 @@ use fewd_lib::services::person_service::PersonService;
 use fewd_lib::services::prompt_builder::PromptBuilder;
 use fewd_lib::services::recipe_adapter::{PersonAdaptOptions, RecipeAdapter};
 use fewd_lib::services::recipe_enhancer;
-use fewd_lib::services::recipe_import_service::drop_unusable_import_times;
 use fewd_lib::services::recipe_scaler;
 use fewd_lib::services::recipe_service::{RecipeService, SearchFilters};
+use fewd_lib::services::recipe_times::drop_unusable_import_times;
 use fewd_lib::services::seed_data;
 use fewd_lib::services::service_error::{ServiceError, ValidationError};
 use fewd_lib::services::settings_service::SettingsService;
@@ -882,11 +882,86 @@ async fn imported_recipe_with_an_unusable_time_is_created_without_it() {
         recipe.prep_time.as_deref(),
         Some(r#"{"value":10,"unit":"minutes"}"#)
     );
-    assert_ne!(
+    assert_eq!(
         recipe.total_time.as_deref(),
-        Some(r#"{"value":1,"unit":"moons"}"#),
-        "the unusable total must not be stored"
+        Some(r#"{"value":10,"unit":"minutes"}"#),
+        "the dropped total is derived from prep instead"
     );
+}
+
+#[tokio::test]
+async fn recipe_update_cook_time_moves_total_and_time_filtered_search() {
+    // A 10 + 20 = 30 minute recipe whose cook time grows to 90 must stop
+    // answering a 35-minute search, whether or not the caller also resends
+    // the stale total the way the web form does.
+    for resend_stale_total in [false, true] {
+        let db = setup_db().await;
+        let recipe = RecipeService::create(
+            &db,
+            CreateRecipeDto {
+                prep_time: Some(minutes(10)),
+                cook_time: Some(minutes(20)),
+                total_time: Some(minutes(30)),
+                ..test_recipe_dto("Pasta")
+            },
+        )
+        .await
+        .unwrap();
+
+        let updated = RecipeService::update(
+            &db,
+            recipe.id,
+            UpdateRecipeDto {
+                prep_time: resend_stale_total.then(|| minutes(10)),
+                cook_time: Some(minutes(90)),
+                total_time: resend_stale_total.then(|| minutes(30)),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            updated.total_time.as_deref(),
+            Some(r#"{"value":100,"unit":"minutes"}"#),
+            "resend_stale_total = {resend_stale_total}"
+        );
+        assert_eq!(updated.total_minutes, Some(100));
+        let quick = RecipeService::search_filtered(
+            &db,
+            SearchFilters {
+                max_total_time_minutes: Some(35),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            quick.is_empty(),
+            "resend_stale_total = {resend_stale_total}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn recipe_create_without_total_derives_it_from_prep_and_cook() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(
+        &db,
+        CreateRecipeDto {
+            prep_time: Some(minutes(15)),
+            cook_time: Some(minutes(45)),
+            ..test_recipe_dto("Pasta")
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        recipe.total_time.as_deref(),
+        Some(r#"{"value":60,"unit":"minutes"}"#)
+    );
+    assert_eq!(recipe.total_minutes, Some(60));
 }
 
 // --- MealService Tests ---

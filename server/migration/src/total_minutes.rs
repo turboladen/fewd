@@ -24,7 +24,7 @@ pub fn total_time_to_minutes(value: i32, unit: &str) -> Option<i32> {
     value.checked_mul(minutes_per_unit)
 }
 
-/// The units [`canonical_time_unit`] recognizes, phrased for an error message.
+/// Lists the units [`canonical_time_unit`] recognizes, phrased for an error message.
 pub const ACCEPTED_TIME_UNITS: &str =
     "minutes, hours, or days (singular or plural; min, mins, m, hr, hrs, h, and d also work)";
 
