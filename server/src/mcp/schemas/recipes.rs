@@ -14,6 +14,7 @@ use super::common::{
     NutritionOut, PortionSizeOut, TimeOut,
 };
 use super::errors::InputError;
+use super::McpToolInput;
 
 /// Trimmed recipe shape for list/search. Omits ingredients/instructions to
 /// keep tool payloads small — use `get_recipe` for the full record.
@@ -63,6 +64,7 @@ pub struct RecipeFull {
 /// before building the service-layer query. Bare / wildcard calls are
 /// rejected with a pointer at `list_curated_recipes`.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SearchRecipesParams {
     /// Case-insensitive substring on the recipe name. Empty string and `*`
     /// are treated as no-query (and don't count as a filter on their own).
@@ -109,6 +111,8 @@ pub struct SearchRecipesParams {
     #[serde(default)]
     pub includes_ingredient_substrings: Option<Vec<String>>,
 }
+
+impl McpToolInput for SearchRecipesParams {}
 
 impl SearchRecipesParams {
     /// Reject the all-empty / wildcard-only case. The full archive is
@@ -206,6 +210,7 @@ impl SearchRecipesParams {
 /// Input for `create_recipe`. Mirrors [`CreateRecipeDto`] but replaces
 /// `parent_recipe_id` with a slug reference the LLM can actually produce.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CreateRecipeInput {
     pub name: String,
     #[serde(default)]
@@ -240,6 +245,31 @@ pub struct CreateRecipeInput {
     /// Optional emoji / icon character to display next to the recipe.
     #[serde(default)]
     pub icon: Option<String>,
+}
+
+// The recipe write inputs share these redirects. Each names where the field
+// can be set, never the tool that rejected it, since tools share types.
+const RATING_REDIRECT: (&str, &str) = (
+    "rating",
+    "Call rate_recipe to set a rating, or unrate_recipe to clear it.",
+);
+const IS_FAVORITE_REDIRECT: (&str, &str) = ("is_favorite", "Call favorite_recipe to set it.");
+const DERIVED_FROM_MEALS: &str =
+    "The server derives it from meals scheduled with create_meal; omit it.";
+const TIMES_PLANNED_REDIRECT: (&str, &str) = ("times_planned", DERIVED_FROM_MEALS);
+const LAST_PLANNED_REDIRECT: (&str, &str) = ("last_planned", DERIVED_FROM_MEALS);
+
+impl McpToolInput for CreateRecipeInput {
+    const FIELD_REDIRECTS: &'static [(&'static str, &'static str)] = &[
+        RATING_REDIRECT,
+        IS_FAVORITE_REDIRECT,
+        TIMES_PLANNED_REDIRECT,
+        LAST_PLANNED_REDIRECT,
+        (
+            "slug",
+            "The server generates the slug from `name`; omit it.",
+        ),
+    ];
 }
 
 pub fn recipe_to_brief(recipe: &recipe::Model) -> Result<RecipeBrief, String> {
@@ -310,12 +340,15 @@ pub fn recipe_to_full(
 /// tool_user_error). The handler additionally rejects non-http(s) schemes for a
 /// clearer error than the downstream SSRF guard would produce.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ImportRecipeUrlInput {
     /// Public http(s) URL of the recipe page. The server fetches it, extracts
     /// schema.org/Recipe data (JSON-LD first, html2text fallback), parses the
     /// result with Claude into the same shape as `create_recipe`, and persists.
     pub url: url::Url,
 }
+
+impl McpToolInput for ImportRecipeUrlInput {}
 
 /// Input for the `favorite_recipe` MCP tool. `slug` identifies the row and
 /// is never written; `is_favorite` is the only column this tool touches.
@@ -328,6 +361,7 @@ pub struct ImportRecipeUrlInput {
 // that tool's input-schema `description`, so keep rustdoc links and
 // internal identifiers out of them.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FavoriteRecipeInput {
     /// Slug of the recipe to favorite or unfavorite (case-insensitive).
     /// Call `search_recipes` or `get_recipe` first to find it.
@@ -339,6 +373,8 @@ pub struct FavoriteRecipeInput {
     pub is_favorite: bool,
 }
 
+impl McpToolInput for FavoriteRecipeInput {}
+
 /// Input for the `rate_recipe` MCP tool. `slug` identifies the row and is
 /// never written; `rating` is the only column this tool touches.
 ///
@@ -348,6 +384,7 @@ pub struct FavoriteRecipeInput {
 /// 1–5 is rejected rather than clamped.
 //
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RateRecipeInput {
     /// Slug of the recipe to rate (case-insensitive). Call
     /// `search_recipes` or `get_recipe` first to find it.
@@ -359,16 +396,21 @@ pub struct RateRecipeInput {
     pub rating: f64,
 }
 
+impl McpToolInput for RateRecipeInput {}
+
 /// Input for the `unrate_recipe` MCP tool. Removing a rating is not the
 /// same as rating 1 star: `search_recipes`'s `min_rating` filter excludes
 /// unrated recipes entirely, so a cleared recipe drops out of every
 /// rating-filtered search rather than ranking at the bottom.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UnrateRecipeInput {
     /// Slug of the recipe whose rating to remove (case-insensitive). Call
     /// `search_recipes` or `get_recipe` first to find it.
     pub slug: String,
 }
+
+impl McpToolInput for UnrateRecipeInput {}
 
 /// Input for the `update_recipe` MCP tool. `slug` identifies the row to
 /// update and is never written — renaming leaves the slug alone, so the
@@ -391,7 +433,8 @@ pub struct UnrateRecipeInput {
 ///
 /// `is_favorite`, `rating`, `source`, `source_url`, the parent recipe, and
 /// the slug are not writable here. Use `favorite_recipe` to set
-/// `is_favorite`.
+/// `is_favorite`, and `rate_recipe` to set `rating` or `unrate_recipe` to
+/// clear it.
 //
 // The blank-string coercion runs through `blank_to_none`, which carries
 // the invariant it protects. A blank `name` instead mirrors
@@ -399,6 +442,7 @@ pub struct UnrateRecipeInput {
 // what a valid recipe name is.
 //
 #[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateRecipeInput {
     /// Slug of the recipe to update (case-insensitive). Call
     /// `search_recipes` or `get_recipe` first to find it. This is a lookup
@@ -458,6 +502,15 @@ pub struct UpdateRecipeInput {
     /// Emoji / icon character displayed next to the recipe.
     #[serde(default)]
     pub icon: Option<String>,
+}
+
+impl McpToolInput for UpdateRecipeInput {
+    const FIELD_REDIRECTS: &'static [(&'static str, &'static str)] = &[
+        RATING_REDIRECT,
+        IS_FAVORITE_REDIRECT,
+        TIMES_PLANNED_REDIRECT,
+        LAST_PLANNED_REDIRECT,
+    ];
 }
 
 pub fn create_recipe_input_to_dto(

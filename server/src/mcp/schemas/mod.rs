@@ -56,3 +56,20 @@ pub(super) use recipes::{
     UnrateRecipeInput, UpdateRecipeInput,
 };
 pub(super) use shopping::shopping_item_from_dto;
+
+/// Marks a type as the top-level input of an MCP tool. Every implementor, and
+/// every type nested inside one, must carry `#[serde(deny_unknown_fields)]` so
+/// a misspelled or unsupported field is rejected instead of silently dropped.
+///
+/// `FIELD_REDIRECTS` pairs a field this type rejects with recovery advice:
+/// the tool that sets the field, or an instruction to omit it. The advice
+/// must not assume which tool received the input, because several tools may
+/// share one type.
+//
+// Keep `#[serde(flatten)]` out of tool inputs. serde ignores
+// `deny_unknown_fields` on the flattened type. On the outer struct the
+// attribute catches a flattened struct's unknown fields, but it reports every
+// field of a flattened enum as unknown, so valid input fails too.
+pub(super) trait McpToolInput: serde::de::DeserializeOwned {
+    const FIELD_REDIRECTS: &'static [(&'static str, &'static str)] = &[];
+}
