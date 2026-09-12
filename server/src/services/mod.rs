@@ -20,6 +20,7 @@ pub mod recipe_import_service;
 pub mod recipe_parser;
 pub mod recipe_scaler;
 pub mod recipe_service;
+pub mod recipe_variant;
 pub mod seed_data;
 pub mod settings_service;
 pub mod shopping_service;
