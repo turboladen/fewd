@@ -5,6 +5,7 @@ use sea_orm::*;
 
 use crate::dto::{CreateRecipeDto, UpdateRecipeDto};
 use crate::entities::recipe::{self, Entity as Recipe};
+use crate::services::recipe_times::{resolve_times, SentTimes, StoredTimes};
 use crate::services::service_error::{whole_star_rating, ServiceError};
 use crate::services::to_json;
 
@@ -39,7 +40,8 @@ pub struct SearchFilters {
     pub tags: Vec<String>,
     /// Maximum recipe total time in minutes, compared against the normalized
     /// `total_minutes` column (so hour-authored recipes match correctly).
-    /// Recipes with no `total_time` or an unrecognized unit are excluded.
+    /// Recipes with no `total_time` are excluded, as are rows whose stored
+    /// `total_time` unit is unrecognized.
     pub max_total_time_minutes: Option<i32>,
     pub min_rating: Option<f64>,
     pub is_favorite: Option<bool>,
@@ -102,19 +104,24 @@ impl RecipeService {
     pub async fn create(
         db: &DatabaseConnection,
         data: CreateRecipeDto,
-    ) -> Result<recipe::Model, DbErr> {
+    ) -> Result<recipe::Model, ServiceError> {
         let now = chrono::Utc::now();
         let base_slug = migration::slugify(&data.name);
 
+        let times = resolve_times(
+            StoredTimes::default(),
+            &SentTimes {
+                prep_time: data.prep_time,
+                cook_time: data.cook_time,
+                total_time: data.total_time,
+            },
+        )?;
+
         // Serialize the JSON fields once; reuse across retries.
-        let prep_time = data.prep_time.map(|t| to_json(&t)).transpose()?;
-        let cook_time = data.cook_time.map(|t| to_json(&t)).transpose()?;
-        // Compute normalized minutes before `total_time` is moved into the JSON map.
-        let total_minutes = data
-            .total_time
-            .as_ref()
-            .and_then(|t| migration::total_minutes::total_time_to_minutes(t.value, &t.unit));
-        let total_time = data.total_time.map(|t| to_json(&t)).transpose()?;
+        let prep_time = times.prep_time.map(|t| to_json(&t.to_dto())).transpose()?;
+        let cook_time = times.cook_time.map(|t| to_json(&t.to_dto())).transpose()?;
+        let total_minutes = times.total_time.as_ref().map(|t| t.minutes);
+        let total_time = times.total_time.map(|t| to_json(&t.to_dto())).transpose()?;
         let portion_size = data.portion_size.map(|p| to_json(&p)).transpose()?;
         let ingredients = to_json(&data.ingredients)?;
         let nutrition_per_serving = data
@@ -158,12 +165,13 @@ impl RecipeService {
             match model.insert(db).await {
                 Ok(r) => return Ok(r),
                 Err(e) if is_slug_conflict(&e) => continue,
-                Err(e) => return Err(e),
+                Err(e) => return Err(e.into()),
             }
         }
         Err(DbErr::Custom(format!(
             "Could not find a unique recipe slug after {MAX_SLUG_ATTEMPTS} attempts"
-        )))
+        ))
+        .into())
     }
 
     pub async fn update(
@@ -176,6 +184,19 @@ impl RecipeService {
             .await?
             .ok_or(DbErr::RecordNotFound("Recipe not found".to_string()))?;
 
+        let times = resolve_times(
+            StoredTimes {
+                prep_time: existing.prep_time.as_deref(),
+                cook_time: existing.cook_time.as_deref(),
+                total_time: existing.total_time.as_deref(),
+            },
+            &SentTimes {
+                prep_time: data.prep_time,
+                cook_time: data.cook_time,
+                total_time: data.total_time,
+            },
+        )?;
+
         let mut recipe: recipe::ActiveModel = existing.into();
 
         if let Some(name) = data.name {
@@ -184,18 +205,15 @@ impl RecipeService {
         if let Some(description) = data.description {
             recipe.description = Set(Some(description));
         }
-        if let Some(prep_time) = data.prep_time {
-            recipe.prep_time = Set(Some(to_json(&prep_time)?));
+        if let Some(prep_time) = times.prep_time {
+            recipe.prep_time = Set(Some(to_json(&prep_time.to_dto())?));
         }
-        if let Some(cook_time) = data.cook_time {
-            recipe.cook_time = Set(Some(to_json(&cook_time)?));
+        if let Some(cook_time) = times.cook_time {
+            recipe.cook_time = Set(Some(to_json(&cook_time.to_dto())?));
         }
-        if let Some(total_time) = data.total_time {
-            recipe.total_minutes = Set(migration::total_minutes::total_time_to_minutes(
-                total_time.value,
-                &total_time.unit,
-            ));
-            recipe.total_time = Set(Some(to_json(&total_time)?));
+        if let Some(total_time) = times.total_time {
+            recipe.total_minutes = Set(Some(total_time.minutes));
+            recipe.total_time = Set(Some(to_json(&total_time.to_dto())?));
         }
         if let Some(servings) = data.servings {
             recipe.servings = Set(servings);
@@ -355,7 +373,8 @@ impl RecipeService {
             // Compare the normalized `total_minutes` column (populated from
             // total_time via migration::total_minutes, regardless of whether the
             // unit was minutes or hours). Recipes with NULL total_minutes — no
-            // total_time, or an unrecognized unit — are excluded (NULL <= n is NULL).
+            // total_time, or a stored total_time whose unit is unrecognized —
+            // are excluded (NULL <= n is NULL).
             q = q.filter(recipe::Column::TotalMinutes.lte(n));
         }
 

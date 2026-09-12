@@ -1,3 +1,4 @@
+use migration::total_minutes::ACCEPTED_TIME_UNITS;
 use sea_orm::DbErr;
 
 /// Failure modes returned by service writes that validate their input.
@@ -38,6 +39,20 @@ impl From<ValidationError> for ServiceError {
 pub enum ValidationError {
     /// Carries the rating exactly as the caller sent it.
     RatingOutOfRange(f64),
+    /// A recipe time field (`prep_time`, `cook_time`, `total_time`) carries
+    /// a unit that is not minutes, hours, or days.
+    UnrecognizedTimeUnit {
+        field: &'static str,
+        unit: String,
+    },
+    NegativeTime {
+        field: &'static str,
+        value: i32,
+    },
+    /// The duration does not fit in whole minutes.
+    TimeTooLarge {
+        field: &'static str,
+    },
 }
 
 impl std::fmt::Display for ValidationError {
@@ -47,6 +62,16 @@ impl std::fmt::Display for ValidationError {
                 f,
                 "rating must be a whole number from 1 to 5 (got {n}). Fractional values round to the nearest star."
             ),
+            Self::UnrecognizedTimeUnit { field, unit } => write!(
+                f,
+                "{field} unit '{unit}' is not recognized. Use {ACCEPTED_TIME_UNITS}."
+            ),
+            Self::NegativeTime { field, value } => {
+                write!(f, "{field} must not be negative (got {value}).")
+            }
+            Self::TimeTooLarge { field } => {
+                write!(f, "{field} is too long to store as whole minutes.")
+            }
         }
     }
 }

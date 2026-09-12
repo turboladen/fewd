@@ -10,7 +10,7 @@ use fewd_lib::services::drink_recipe_service::DrinkRecipeService;
 use fewd_lib::services::recipe_service::RecipeService;
 use fewd_lib::AppState;
 use migration::MigratorTrait;
-use sea_orm::{Database, DatabaseConnection};
+use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, IntoActiveModel, Set};
 use tower::ServiceExt;
 
 async fn setup_db() -> DatabaseConnection {
@@ -93,6 +93,75 @@ async fn update_recipe_with_out_of_range_rating_answers_400() {
 
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert!(message(&body).contains("1 to 5"), "{body}");
+}
+
+#[tokio::test]
+async fn update_recipe_with_unrecognized_time_unit_answers_400() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, recipe_dto("Pasta"))
+        .await
+        .expect("seed recipe");
+
+    let (status, body) = send_json(
+        app(&db),
+        "PUT",
+        &format!("/api/recipes/{}", recipe.id),
+        serde_json::json!({ "total_time": { "value": 3, "unit": "sols" } }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    for fragment in ["total_time", "'sols'", "minutes", "hours", "days"] {
+        assert!(message(&body).contains(fragment), "{fragment:?} in {body}");
+    }
+}
+
+#[tokio::test]
+async fn create_recipe_with_unrecognized_time_unit_answers_400() {
+    let db = setup_db().await;
+    let mut body = serde_json::to_value(recipe_dto("Pasta")).expect("dto serializes");
+    body["prep_time"] = serde_json::json!({ "value": 10, "unit": "fortnights" });
+
+    let (status, response) = send_json(app(&db), "POST", "/api/recipes", body).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+    assert!(message(&response).contains("prep_time"), "{response}");
+    let all = RecipeService::get_all(&db).await.expect("list recipes");
+    assert!(all.is_empty(), "nothing may be created");
+}
+
+#[tokio::test]
+async fn name_only_edit_resending_a_legacy_time_unit_succeeds() {
+    // The web form resends every time field on each save, including a
+    // stored unit it cannot represent, so validating the untouched field
+    // would make this recipe impossible to rename.
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, recipe_dto("Pasta"))
+        .await
+        .expect("seed recipe");
+    let legacy_total = r#"{"value":3,"unit":"fortnights"}"#;
+    let mut row = recipe.into_active_model();
+    row.total_time = Set(Some(legacy_total.to_string()));
+    let recipe = row.update(&db).await.expect("seed legacy unit");
+
+    let (status, body) = send_json(
+        app(&db),
+        "PUT",
+        &format!("/api/recipes/{}", recipe.id),
+        serde_json::json!({
+            "name": "Pasta Night",
+            "total_time": { "value": 3, "unit": "fortnights" },
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["name"], "Pasta Night");
+    assert_eq!(
+        body["total_time"], legacy_total,
+        "legacy value is untouched"
+    );
+    assert!(body["total_minutes"].is_null());
 }
 
 #[tokio::test]

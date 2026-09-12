@@ -75,8 +75,7 @@ pub struct SearchRecipesParams {
     /// Maximum recipe total time in minutes. The recipe's `total_time` is
     /// normalized to minutes regardless of its authored unit (minutes, hours,
     /// or days), so an hour-authored recipe matches correctly. Recipes with no
-    /// total time — or a `total_time` whose unit can't be recognized — are
-    /// excluded.
+    /// total time are excluded.
     #[serde(default)]
     pub max_total_time_minutes: Option<i32>,
     /// Minimum star rating. Recipes with no rating are excluded.
@@ -409,10 +408,10 @@ pub struct UpdateRecipeInput {
     pub name: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
-    /// Hands-on time. The `unit` is stored as written and never validated,
-    /// so prefer minutes, hours, or days — singular, plural, or the `min` /
-    /// `hr` / `d` abbreviations — to stay readable alongside the rest of
-    /// the catalog.
+    /// Hands-on time. The `unit` must be minutes, hours, or days (singular,
+    /// plural, or the `min` / `hr` / `d` abbreviations) and is stored in its
+    /// plural form. Any other unit rejects the whole call, writing nothing.
+    /// A value equal to the stored duration is ignored.
     #[serde(default)]
     pub prep_time: Option<TimeOut>,
     /// Time on the heat. Same `unit` vocabulary as `prep_time`.
@@ -420,10 +419,9 @@ pub struct UpdateRecipeInput {
     pub cook_time: Option<TimeOut>,
     /// Replaces the stored total time. Send this whenever `prep_time` or
     /// `cook_time` changes, or the recipe keeps advertising its old
-    /// duration. Unlike `prep_time` and `cook_time`, this `unit` carries
-    /// consequences — it is the only one parsed, and a unit outside
-    /// minutes / hours / days drops the recipe out of every time-filtered
-    /// `search_recipes` call.
+    /// duration. This is the duration `search_recipes`'
+    /// `max_total_time_minutes` filter compares, and it takes the same
+    /// `unit` vocabulary as `prep_time`.
     #[serde(default)]
     pub total_time: Option<TimeOut>,
     /// Servings the recipe is authored for. Must be at least 1. Changing
@@ -522,11 +520,6 @@ pub fn update_recipe_input_to_dto(input: UpdateRecipeInput) -> Result<UpdateReci
         description: blank_to_none(input.description),
         prep_time: input.prep_time.map(time_in),
         cook_time: input.cook_time.map(time_in),
-        // An unrecognized `unit` makes total_time_to_minutes return None,
-        // which writes total_minutes = NULL, and search_recipes'
-        // max_total_time_minutes excludes NULL rows — so a bad-unit update
-        // drops the recipe out of every time-filtered search behind a
-        // success response. Tracked as fewd-2nr; not addressed here.
         total_time: input.total_time.map(time_in),
         servings: input.servings,
         portion_size: input.portion_size.map(portion_in),
