@@ -31,9 +31,9 @@ checkout. Use them for a quick pass; use this before a PR.
 | `fmt`       | `cargo fmt --all -- --check`                               | CI    | 0.1s  |
 | `dprint`    | `dprint check`                                             | CI    | 0.1s  |
 | `typos`     | `typos --config .typos.toml`                               | CI    | 0.0s  |
+| `lockfile`  | `bun install --frozen-lockfile`                            | CI    | 0.1s  |
 | `lint`      | `bun run lint` (eslint)                                    | CI    | 4s    |
 | `types`     | `bunx tsc --noEmit`                                        | extra | 1s    |
-| `lockfile`  | `bun install --frozen-lockfile`                            | CI    | 0.1s  |
 | `fe-test`   | `bun run test` (vitest)                                    | CI    | 3s    |
 | `clippy`    | `cargo clippy --all-targets --all-features -- -D warnings` | CI    | 0.4s  |
 | `rust-test` | `cargo test --all-features`                                | CI    | 6–16s |
@@ -51,6 +51,7 @@ runtime break in the API/MCP surface.
 bun .claude/skills/verify/verify.mjs --fast      # skip migration drift (the only release build)
 bun .claude/skills/verify/verify.mjs --ci-only   # merge-blocking gates only
 bun .claude/skills/verify/verify.mjs --fix       # cargo fmt + dprint fmt + eslint --fix, then verify
+                                                 # with --only, just that gate's fixer
 bun .claude/skills/verify/verify.mjs --only lint # one gate
 bun .claude/skills/verify/verify.mjs --list      # gate ids and tiers
 ```
@@ -93,9 +94,10 @@ PASS
 - **The migration gate is the only one that builds `--release`.** Warm it is
   about a second; after a server-side code change expect ~35s while the
   release binary rebuilds, and minutes from a cold `target/`.
-- **It needs port 3099 free.** It pre-flights and fails in 0.1s with
-  `Port 3099 is already bound (PID …)` rather than spending the build first.
-  `just db-reset` uses the same port. Set `SMOKE_TEST_PORT` to move it.
+- **The `migration` gate needs port 3099 free.** It pre-flights and fails in
+  0.1s with `Port 3099 is already bound (PID …)` rather than spending the build
+  first. `just db-reset` uses the same port. Set `SMOKE_TEST_PORT` to move it.
+  The `smoke` gate binds `PORT=0`, so it needs no free port of its own.
 - **Formatters exit non-zero when they leave something behind.** In `--fix`,
   `left issues it cannot fix` next to eslint means unused variables or type
   errors remain — the gate run below names them.
