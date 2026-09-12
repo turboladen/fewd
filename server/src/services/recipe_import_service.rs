@@ -7,6 +7,7 @@ use url::Url;
 use crate::dto::CreateRecipeDto;
 use crate::services::claude_client::{ClaudeClient, ClaudeError};
 use crate::services::recipe_adapter::strip_code_fences;
+use crate::services::recipe_times::check_time;
 
 /// Result of an AI import: the extracted recipe DTO plus token usage
 #[derive(Debug, Serialize)]
@@ -380,9 +381,91 @@ fn truncate_content(content: &str, max_chars: usize) -> &str {
     &content[..end]
 }
 
+/// Drop each time field of an AI-extracted recipe that
+/// [`RecipeService::create`](crate::services::recipe_service::RecipeService::create)
+/// would reject, logging a warning for each one. Call it on every recipe
+/// the model produces, whether it is saved at once (import) or handed back
+/// as a draft the client saves later (adapt, suggest).
+//
+// Tokens are already spent by then, and a unit the model invented is not
+// something the person can fix (the web form's unit select cannot even
+// show it), so losing one time field is the better failure than losing the
+// recipe. Direct create and update calls still reject the same values.
+pub fn drop_unusable_import_times(dto: &mut CreateRecipeDto) {
+    let recipe = dto.name.clone();
+    for (field, slot) in [
+        ("prep_time", &mut dto.prep_time),
+        ("cook_time", &mut dto.cook_time),
+        ("total_time", &mut dto.total_time),
+    ] {
+        let Some(time) = slot.as_ref() else {
+            continue;
+        };
+        if let Err(error) = check_time(field, time) {
+            tracing::warn!(%recipe, %error, "dropping unusable time from imported recipe");
+            *slot = None;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn imported(
+        prep: Option<(i32, &str)>,
+        cook: Option<(i32, &str)>,
+        total: Option<(i32, &str)>,
+    ) -> CreateRecipeDto {
+        let time = |t: Option<(i32, &str)>| {
+            t.map(|(value, unit)| crate::dto::TimeValueDto {
+                value,
+                unit: unit.into(),
+            })
+        };
+        CreateRecipeDto {
+            name: "Imported".into(),
+            description: None,
+            source: "url_import".into(),
+            source_url: None,
+            parent_recipe_id: None,
+            prep_time: time(prep),
+            cook_time: time(cook),
+            total_time: time(total),
+            servings: 4,
+            portion_size: None,
+            instructions: String::new(),
+            ingredients: vec![],
+            nutrition_per_serving: None,
+            tags: vec![],
+            notes: None,
+            icon: None,
+        }
+    }
+
+    #[test]
+    fn drop_unusable_import_times_clears_only_the_unusable_fields() {
+        let mut dto = imported(
+            Some((20, "fortnights")),
+            Some((30, "mins")),
+            Some((-5, "minutes")),
+        );
+        drop_unusable_import_times(&mut dto);
+        assert!(dto.prep_time.is_none(), "unrecognized unit is dropped");
+        assert_eq!(
+            dto.cook_time.as_ref().map(|t| (t.value, t.unit.as_str())),
+            Some((30, "mins")),
+            "a usable field is left for create to canonicalize"
+        );
+        assert!(dto.total_time.is_none(), "negative value is dropped");
+    }
+
+    #[test]
+    fn drop_unusable_import_times_leaves_a_clean_import_alone() {
+        let mut dto = imported(Some((1, "hour")), None, Some((75, "minutes")));
+        drop_unusable_import_times(&mut dto);
+        assert!(dto.prep_time.is_some() && dto.total_time.is_some());
+    }
 
     #[test]
     fn test_extract_jsonld_recipe() {

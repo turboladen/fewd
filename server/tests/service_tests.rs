@@ -8,6 +8,7 @@ use fewd_lib::services::person_service::PersonService;
 use fewd_lib::services::prompt_builder::PromptBuilder;
 use fewd_lib::services::recipe_adapter::{PersonAdaptOptions, RecipeAdapter};
 use fewd_lib::services::recipe_enhancer;
+use fewd_lib::services::recipe_import_service::drop_unusable_import_times;
 use fewd_lib::services::recipe_scaler;
 use fewd_lib::services::recipe_service::{RecipeService, SearchFilters};
 use fewd_lib::services::seed_data;
@@ -714,6 +715,178 @@ async fn recipe_rating_rejects_invalid_values() {
             _
         )))
     ));
+}
+
+fn minutes(value: i32) -> TimeValueDto {
+    TimeValueDto {
+        value,
+        unit: "minutes".to_string(),
+    }
+}
+
+#[tokio::test]
+async fn recipe_create_rejects_unrecognized_time_unit_and_inserts_nothing() {
+    // An unrecognized unit would store total_minutes = NULL, which hides
+    // the recipe from every time-filtered search behind a success response.
+    let db = setup_db().await;
+    let result = RecipeService::create(
+        &db,
+        CreateRecipeDto {
+            total_time: Some(TimeValueDto {
+                value: 2,
+                unit: "fortnights".to_string(),
+            }),
+            ..test_recipe_dto("Pasta")
+        },
+    )
+    .await;
+
+    assert!(matches!(
+        result,
+        Err(ServiceError::Validation(
+            ValidationError::UnrecognizedTimeUnit {
+                field: "total_time",
+                ..
+            }
+        ))
+    ));
+    assert!(RecipeService::get_all(&db).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn recipe_update_rejects_changed_bad_unit_and_leaves_row_unchanged() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(
+        &db,
+        CreateRecipeDto {
+            cook_time: Some(minutes(20)),
+            total_time: Some(minutes(30)),
+            ..test_recipe_dto("Pasta")
+        },
+    )
+    .await
+    .unwrap();
+
+    let result = RecipeService::update(
+        &db,
+        recipe.id.clone(),
+        UpdateRecipeDto {
+            name: Some("Renamed".to_string()),
+            cook_time: Some(TimeValueDto {
+                value: 4,
+                unit: "sols".to_string(),
+            }),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    assert!(matches!(
+        result,
+        Err(ServiceError::Validation(
+            ValidationError::UnrecognizedTimeUnit {
+                field: "cook_time",
+                ..
+            }
+        ))
+    ));
+    let reloaded = RecipeService::get_by_id(&db, recipe.id.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reloaded, recipe, "a rejected update writes nothing");
+}
+
+#[tokio::test]
+async fn recipe_create_stores_time_units_in_canonical_form() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(
+        &db,
+        CreateRecipeDto {
+            prep_time: Some(TimeValueDto {
+                value: 15,
+                unit: "Mins".to_string(),
+            }),
+            total_time: Some(TimeValueDto {
+                value: 2,
+                unit: "hr".to_string(),
+            }),
+            ..test_recipe_dto("Pasta")
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        recipe.prep_time.as_deref(),
+        Some(r#"{"value":15,"unit":"minutes"}"#)
+    );
+    assert_eq!(
+        recipe.total_time.as_deref(),
+        Some(r#"{"value":2,"unit":"hours"}"#)
+    );
+    assert_eq!(recipe.total_minutes, Some(120));
+}
+
+#[tokio::test]
+async fn recipe_update_resending_a_legacy_unit_unchanged_succeeds() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let legacy_total = r#"{"value":3,"unit":"fortnights"}"#;
+    let mut row = recipe.into_active_model();
+    row.total_time = Set(Some(legacy_total.to_string()));
+    let recipe = fewd_lib::entities::recipe::Entity::update(row)
+        .exec(&db)
+        .await
+        .unwrap();
+
+    let updated = RecipeService::update(
+        &db,
+        recipe.id,
+        UpdateRecipeDto {
+            name: Some("Pasta Night".to_string()),
+            total_time: Some(TimeValueDto {
+                value: 3,
+                unit: "fortnights".to_string(),
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(updated.name, "Pasta Night");
+    assert_eq!(updated.total_time.as_deref(), Some(legacy_total));
+    assert_eq!(updated.total_minutes, None);
+}
+
+#[tokio::test]
+async fn imported_recipe_with_an_unusable_time_is_created_without_it() {
+    // AI import paths sanitize before create, so a model-invented unit costs
+    // one time field instead of the whole import.
+    let db = setup_db().await;
+    let mut dto = CreateRecipeDto {
+        prep_time: Some(minutes(10)),
+        total_time: Some(TimeValueDto {
+            value: 1,
+            unit: "moons".to_string(),
+        }),
+        ..test_recipe_dto("Imported Stew")
+    };
+    drop_unusable_import_times(&mut dto);
+
+    let recipe = RecipeService::create(&db, dto).await.unwrap();
+    assert_eq!(
+        recipe.prep_time.as_deref(),
+        Some(r#"{"value":10,"unit":"minutes"}"#)
+    );
+    assert_ne!(
+        recipe.total_time.as_deref(),
+        Some(r#"{"value":1,"unit":"moons"}"#),
+        "the unusable total must not be stored"
+    );
 }
 
 // --- MealService Tests ---
@@ -1640,6 +1813,20 @@ fn adapter_parse_response_strips_markdown_fences() {
 fn adapter_parse_response_invalid_json() {
     let result = RecipeAdapter::parse_response("not json at all", "id-1");
     assert!(result.is_err());
+}
+
+#[test]
+fn adapter_parse_response_drops_a_time_create_would_reject() {
+    // The draft goes back to the web form, whose unit select cannot show a
+    // model-invented unit, so saving it would fail with no visible cause.
+    let json = r#"{"name": "Test", "source": "x", "servings": 2, "instructions": "Do it",
+        "ingredients": [], "tags": [],
+        "prep_time": {"value": 10, "unit": "minutes"},
+        "cook_time": {"value": 2, "unit": "moons"}}"#;
+
+    let result = RecipeAdapter::parse_response(json, "parent-1").unwrap();
+    assert!(result.prep_time.is_some());
+    assert!(result.cook_time.is_none());
 }
 
 #[tokio::test]

@@ -22,7 +22,9 @@ use crate::entities::person;
 use crate::services::meal_service::MealService;
 use crate::services::person_service::PersonService;
 use crate::services::printable_service::{self, PersonNameMap};
-use crate::services::recipe_import_service::{ImportError, RecipeImportService};
+use crate::services::recipe_import_service::{
+    drop_unusable_import_times, ImportError, RecipeImportService,
+};
 use crate::services::recipe_service::{RecipeService, SearchFilters};
 use crate::services::service_error::ServiceError;
 use crate::services::settings_service::SettingsService;
@@ -559,9 +561,10 @@ impl FewdMcp {
             Ok(dto) => dto,
             Err(e) => return Ok(tool_user_error(e.to_string())),
         };
-        let created = RecipeService::create(&self.db, dto)
-            .await
-            .map_err(db_error)?;
+        let created = match RecipeService::create(&self.db, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
         let full = recipe_to_full(&created, parent_slug_canonical).map_err(internal_error)?;
         tool_json_result(&full)
     }
@@ -779,14 +782,16 @@ impl FewdMcp {
         // will harmonize both surfaces on the canonical form.
         let mut dto = result.recipe;
         dto.source_url = Some(url.to_string());
+        drop_unusable_import_times(&mut dto);
 
         // Match the HTTP-route token meter so MCP imports show up in usage stats.
         SettingsService::increment_token_usage(&self.db, result.input_tokens, result.output_tokens)
             .await;
 
-        let created = RecipeService::create(&self.db, dto)
-            .await
-            .map_err(db_error)?;
+        let created = match RecipeService::create(&self.db, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
         let full = recipe_to_full(&created, None).map_err(internal_error)?;
         tool_json_result(&full)
     }
@@ -2691,6 +2696,43 @@ mod tests {
 
         let reloaded = reload_recipe(&mcp, &seeded.slug).await;
         assert_eq!(reloaded.total_minutes, Some(120));
+    }
+
+    #[tokio::test]
+    async fn update_recipe_with_unrecognized_time_unit_is_a_tool_error_and_writes_nothing() {
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let input: UpdateRecipeInput = serde_json::from_value(serde_json::json!({
+            "slug": seeded.slug,
+            "notes": "should not land",
+            "total_time": { "value": 3, "unit": "fortnights" },
+        }))
+        .expect("partial UpdateRecipeInput deserializes");
+        let result = mcp.update_recipe(LenientParameters::for_test(input)).await;
+
+        assert_tool_user_error(result, &["total_time", "'fortnights'", "minutes", "hours"]);
+        let reloaded = reload_recipe(&mcp, &seeded.slug).await;
+        assert_recipe_unchanged_except(&seeded, &reloaded, &[]);
+    }
+
+    #[tokio::test]
+    async fn create_recipe_with_unrecognized_time_unit_is_a_tool_error_and_creates_nothing() {
+        let mcp = setup_test_mcp().await;
+        let input: CreateRecipeInput = serde_json::from_value(serde_json::json!({
+            "name": "Moon Stew",
+            "source": "manual",
+            "servings": 4,
+            "instructions": "Simmer.",
+            "ingredients": [],
+            "cook_time": { "value": 2, "unit": "sols" },
+        }))
+        .expect("CreateRecipeInput deserializes");
+        let result = mcp.create_recipe(LenientParameters::for_test(input)).await;
+
+        assert_tool_user_error(result, &["cook_time", "'sols'", "days"]);
+        let all = RecipeService::get_all(&mcp.db).await.expect("list recipes");
+        assert!(all.is_empty(), "nothing may be created: {all:?}");
     }
 
     // Compare every column except the ones the tool under test may write,

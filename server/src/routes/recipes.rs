@@ -17,7 +17,7 @@ use crate::services::claude_client::{ClaudeClient, ProgressEvent};
 use crate::services::person_service::PersonService;
 use crate::services::recipe_adapter::RecipeAdapter;
 use crate::services::recipe_enhancer;
-use crate::services::recipe_import_service::RecipeImportService;
+use crate::services::recipe_import_service::{drop_unusable_import_times, RecipeImportService};
 use crate::services::recipe_parser::RecipeParser;
 use crate::services::recipe_scaler;
 use crate::services::recipe_service::RecipeService;
@@ -351,6 +351,7 @@ pub async fn import_url(
                         dto.source = "url_import".to_string();
                         dto.parent_recipe_id = None;
                         dto.source_url = Some(url);
+                        drop_unusable_import_times(&mut dto);
 
                         match RecipeService::create(&db, dto).await {
                             Ok(recipe) => {
@@ -426,7 +427,9 @@ pub async fn import_file(
     SettingsService::increment_token_usage(&state.db, result.input_tokens, result.output_tokens)
         .await;
 
-    RecipeService::create(&state.db, result.recipe)
+    let mut dto = result.recipe;
+    drop_unusable_import_times(&mut dto);
+    RecipeService::create(&state.db, dto)
         .await
         .map(|r| (StatusCode::CREATED, Json(r)))
         .map_err(AppError::from)
