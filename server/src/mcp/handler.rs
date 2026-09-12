@@ -24,6 +24,7 @@ use crate::services::person_service::PersonService;
 use crate::services::printable_service::{self, PersonNameMap};
 use crate::services::recipe_import_service::{ImportError, RecipeImportService};
 use crate::services::recipe_service::{RecipeService, SearchFilters};
+use crate::services::service_error::ServiceError;
 use crate::services::settings_service::SettingsService;
 use crate::services::shopping_service::ShoppingService;
 
@@ -587,9 +588,10 @@ impl FewdMcp {
             Ok(dto) => dto,
             Err(e) => return Ok(tool_user_error(e.to_string())),
         };
-        let updated = RecipeService::update(&self.db, existing.id, dto)
-            .await
-            .map_err(db_error)?;
+        let updated = match RecipeService::update(&self.db, existing.id, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
         let parent_slug = self.parent_slug_for(&updated).await?;
         let full = recipe_to_full(&updated, parent_slug).map_err(internal_error)?;
         tool_json_result(&full)
@@ -614,9 +616,10 @@ impl FewdMcp {
         };
 
         let dto = favorite_recipe_input_to_dto(input);
-        let updated = RecipeService::update(&self.db, existing.id, dto)
-            .await
-            .map_err(db_error)?;
+        let updated = match RecipeService::update(&self.db, existing.id, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
         // The brief shape carries both `is_favorite` and `rating`, so it
         // confirms the write without re-shipping ingredients and
         // instructions on every call.
@@ -646,9 +649,10 @@ impl FewdMcp {
             Ok(dto) => dto,
             Err(e) => return Ok(tool_user_error(e.to_string())),
         };
-        let updated = RecipeService::update(&self.db, existing.id, dto)
-            .await
-            .map_err(db_error)?;
+        let updated = match RecipeService::update(&self.db, existing.id, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
         let brief = recipe_to_brief(&updated).map_err(internal_error)?;
         tool_json_result(&brief)
     }
@@ -1003,6 +1007,16 @@ fn tool_json_result<T: Serialize>(value: &T) -> Result<CallToolResult, McpError>
 fn db_error(err: sea_orm::DbErr) -> McpError {
     tracing::error!(?err, "MCP tool: database error");
     McpError::internal_error("database error", None)
+}
+
+/// Route a service failure to the channel its caller can act on: a broken
+/// domain rule becomes a tool-level error carrying the actionable message,
+/// and a database failure stays an opaque protocol error.
+fn service_error(err: ServiceError) -> Result<CallToolResult, McpError> {
+    match err {
+        ServiceError::Validation(e) => Ok(tool_user_error(e.to_string())),
+        ServiceError::Database(e) => Err(db_error(e)),
+    }
 }
 
 fn internal_error(detail: String) -> McpError {
@@ -3036,11 +3050,9 @@ mod tests {
 
     #[tokio::test]
     async fn rate_recipe_out_of_range_rejects_and_writes_nothing() {
-        // The whole reason the range check lives in the converter: an
-        // out-of-range value that reached `RecipeService::update` would
-        // come back as `db_error`'s opaque "database error", which tells
-        // the LLM nothing it can act on. The surviving 4.0 proves the
-        // rejection happened before the write.
+        // The converter's own range check is what adds the `unrate_recipe`
+        // hint for a caller who sent 0 to clear a rating. The surviving 4.0
+        // proves the rejection happened before the write.
         let mcp = setup_test_mcp().await;
         let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
         assert_ne!(rate(&mcp, &seeded.slug, 4.0).await.is_error, Some(true));

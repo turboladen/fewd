@@ -4,6 +4,8 @@ use axum::Json;
 use sea_orm::DbErr;
 use serde::Serialize;
 
+use crate::services::service_error::ServiceError;
+
 #[derive(Serialize)]
 struct ErrorBody {
     message: String,
@@ -44,5 +46,14 @@ impl IntoResponse for AppError {
 impl From<DbErr> for AppError {
     fn from(err: DbErr) -> Self {
         AppError::Database(err)
+    }
+}
+
+impl From<ServiceError> for AppError {
+    fn from(err: ServiceError) -> Self {
+        match err {
+            ServiceError::Validation(e) => AppError::BadRequest(e.to_string()),
+            ServiceError::Database(e) => AppError::Database(e),
+        }
     }
 }
