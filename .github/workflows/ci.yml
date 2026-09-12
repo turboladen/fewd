@@ -1,11 +1,11 @@
 name: CI
 
-# Verification jobs for open pull requests. The push-triggered dprint
-# auto-formatter lives in `auto-format.yml` so the two event types don't
-# produce duplicate/skipped jobs in the same workflow run.
+# Verification jobs for open pull requests, whatever their base branch, so a PR
+# stacked on a feature branch gets the same checks as one targeting main. The
+# push-triggered dprint auto-formatter lives in `auto-format.yml` so the two
+# event types don't produce duplicate/skipped jobs in the same workflow run.
 on:
   pull_request:
-    branches: [main, develop]
 
 # Cancel older in-progress runs on the same PR when a new commit lands.
 concurrency:
@@ -113,10 +113,21 @@ jobs:
       - name: Check for typos
         run: typos --config .typos.toml
 
+  # A job skipped because a dependency failed reports success to branch
+  # protection, so this job runs even after a failure and fails itself unless
+  # every dependency succeeded.
   all-checks:
     name: All Checks Passed
+    if: ${{ !cancelled() }}
     needs: [rust-checks, frontend-checks, typos-check]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Fail unless every check succeeded
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "::error::A required check did not succeed: $(jq -c 'map_values(.result)' <<<"$NEEDS")"
+          exit 1
       - run: echo "All checks passed!"

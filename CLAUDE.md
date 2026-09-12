@@ -181,13 +181,19 @@ sqlite3 <path-to-fewd.db>
 
 ### Workflows
 
-**`.github/workflows/ci.yml`** - Verification jobs on `pull_request` (the
-push-triggered formatter lives in `auto-format.yml`, kept separate so the two
-event types don't produce duplicate/skipped jobs):
+**`.github/workflows/ci.yml`** - Verification jobs on every `pull_request`,
+whatever its base branch (the push-triggered formatter lives in
+`auto-format.yml`, kept separate so the two event types don't produce
+duplicate/skipped jobs):
 
 - ✅ Rust: `cargo fmt --check`, `cargo clippy`, `cargo test`, plus the migration drift smoke test
 - ✅ TypeScript: `dprint check`, `bun run lint`, `bun run test`
 - ✅ Typos: `typos --config .typos.toml`
+
+Checks run against the base as it stood when the run started, so a push to the
+base branch or a retarget refreshes nothing until the PR's next push. Don't add
+`edited` to the trigger types to cover retargets: title and body edits would then
+re-run CI and cancel in-progress runs through the `concurrency` group.
 
 **`.github/workflows/auto-format.yml`** - Auto-formats code on push (every branch except `main`).
 
@@ -211,8 +217,10 @@ things follow from that runner choice and are easy to break:
 - Workflow-level `permissions: contents: read` + per-job `timeout-minutes` are
   set; the `auto-format` job keeps job-level `contents: write` (job-level perms
   replace, not merge with, workflow-level) so its push still works.
-- **Job names/IDs are branch-protection required status checks** — renaming a
-  job silently breaks the merge gate. Don't rename casually.
+- **Job names are not required status checks today** (main has no branch
+  protection); keep them stable anyway so enabling protection later needs no
+  rename. `All Checks Passed` is the one to require: it runs even when a
+  dependency fails, because a job skipped by a failed `needs` counts as passing.
 
 There is **no tag-triggered build workflow**. Releases are notes-only: an
 annotated tag (`vYYYY-MM-DD`, with a `.N` suffix for same-day hotfixes —
