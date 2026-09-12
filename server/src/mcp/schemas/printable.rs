@@ -16,6 +16,7 @@ use serde::{Deserialize, Deserializer};
 
 use super::common::validate_date_yyyy_mm_dd;
 use super::errors::InputError;
+use super::McpToolInput;
 use crate::dto::MealType;
 
 /// Hard cap on the date span for a single printable. The template is sized
@@ -37,6 +38,7 @@ pub const MAX_DONT_FORGET_ITEMS: usize = 8;
 pub const MAX_PREP_NOTES_PER_DAY: usize = 6;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PrintableInput {
     /// Inclusive start date in YYYY-MM-DD format.
     pub start_date: String,
@@ -45,8 +47,8 @@ pub struct PrintableInput {
     /// sized for a single fridge-printable sheet.
     pub end_date: String,
     /// Which meal slots to include. Defaults to `["Dinner"]` — fridge
-    /// cards almost always show dinners only. The headline title and the
-    /// `head_title` adapt to non-Dinner slots when widened. Pass multiple
+    /// cards almost always show dinners only. The headline and the page
+    /// title adapt to non-Dinner slots when widened. Pass multiple
     /// (case-insensitive; same canonical Title Case as `create_meal`) to
     /// include more.
     #[serde(default = "default_include")]
@@ -83,8 +85,8 @@ pub struct PrintableInput {
     /// reminder pills in the meal's tag row ("Marinate morning of",
     /// "Defrost the fish at lunch"). Overlays with dates outside
     /// `[start_date, end_date]` are silently dropped (stale overlays from
-    /// a prior call are a common LLM case). Malformed date strings are
-    /// rejected with `InputError::InvalidDate` so the LLM can correct.
+    /// a prior call are a common LLM case). A malformed date fails the
+    /// whole call with an error that names the field.
     #[serde(default)]
     pub day_overlays: Vec<DayOverlay>,
     /// Optional left-footer subtitle ("Back-friendly week · Hot weather
@@ -94,7 +96,10 @@ pub struct PrintableInput {
     pub foot_note: Option<String>,
 }
 
+impl McpToolInput for PrintableInput {}
+
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DontForgetItem {
     /// Bolded prefix (e.g. "Wed night:", "Fri morning:"). Must not be
     /// empty.
@@ -104,13 +109,12 @@ pub struct DontForgetItem {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DayOverlay {
-    /// Date this overlay applies to. Accepts YYYY-MM-DD strings on the
-    /// wire; parsed at deserialize time so malformed dates surface as a
-    /// JSON-RPC validation error rather than disappearing silently at
-    /// render. Out-of-range dates (valid but outside `[start, end]`) are
-    /// dropped at render time, since stale overlays from prior calls are
-    /// a common LLM case.
+    /// Date this overlay applies to, in YYYY-MM-DD format. A malformed date
+    /// fails the whole call with an error that names this field. A valid
+    /// date outside `[start_date, end_date]` is dropped at render time,
+    /// since stale overlays from prior calls are a common LLM case.
     #[serde(deserialize_with = "deserialize_naive_date")]
     pub date: NaiveDate,
     /// Optional short badge under the day name ("Time Crunch",
@@ -253,10 +257,9 @@ fn default_true() -> bool {
     true
 }
 
-/// Parse YYYY-MM-DD into `NaiveDate` at deserialize time so malformed dates
-/// surface as JSON-RPC parameter errors (caught by `LenientParameters` and
-/// surfaced as a tool-level error) rather than silently disappearing at
-/// render time when the overlay-by-date map is built.
+/// Parse YYYY-MM-DD into `NaiveDate` at deserialize time, so a malformed date
+/// fails the tool call with a tool-level error instead of vanishing when the
+/// renderer builds its overlay-by-date map.
 fn deserialize_naive_date<'de, D>(deserializer: D) -> Result<NaiveDate, D::Error>
 where
     D: Deserializer<'de>,

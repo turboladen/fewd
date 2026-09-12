@@ -12,6 +12,7 @@ use super::common::{
     ingredient_in, ingredient_out, parse_json, validate_date_yyyy_mm_dd, IngredientOut,
 };
 use super::errors::{CreateMealError, InputError, ResolveError};
+use super::McpToolInput;
 
 /// One serving within a meal. The `kind` discriminator distinguishes a recipe
 /// assignment from an ad-hoc item list.
@@ -44,6 +45,7 @@ pub struct MealBrief {
 /// Input for `create_meal`. Uses `person_name` and `recipe_slug` instead of
 /// the underlying UUIDs — the tool resolves them.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CreateMealInput {
     /// Date of the meal in YYYY-MM-DD format.
     pub date: String,
@@ -59,11 +61,13 @@ pub struct CreateMealInput {
     pub servings: Vec<ServingInput>,
 }
 
+impl McpToolInput for CreateMealInput {}
+
 /// One serving assignment within a meal. `kind = "recipe"` references an
 /// existing recipe; `kind = "adhoc"` carries a loose ingredient list for
 /// people who are eating something off-menu.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ServingInput {
     Recipe {
         /// Must match an active family member's name (case-insensitive).

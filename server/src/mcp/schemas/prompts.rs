@@ -17,6 +17,7 @@ use crate::dto::deserialize_optional_string_empty_as_none;
 /// week; the four optional fields are the recurring categories a human tends to
 /// forget — surfacing each as its own form field is the point.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct WeeklyDinnerPlanArgs {
     /// Monday of the week to plan, in YYYY-MM-DD format. Any day of the week is
     /// accepted and snapped to that week's Monday — the plan always covers
