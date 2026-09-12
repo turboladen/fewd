@@ -86,7 +86,8 @@ pub struct TimeWrites {
 ///
 /// A sent field equal to the stored one is not a change. Equal means the
 /// same minutes, or, when the stored value cannot be parsed, the same value
-/// and a unit that matches after trimming and ignoring case.
+/// and a unit that matches after trimming and ignoring case or as an alias
+/// of the same recognized unit (`min` and `minutes`).
 ///
 /// A changed total is written as sent. Otherwise, when prep or cook
 /// changes, a stored total T becomes max(T + Σ(new − old), longer phase),
@@ -167,7 +168,7 @@ fn changed_time(
         return Ok(None);
     };
     if let Stored::Unparsable(Some(old)) = stored {
-        if old.value == sent.value && old.unit.trim().eq_ignore_ascii_case(sent.unit.trim()) {
+        if old.value == sent.value && same_unit(&old.unit, &sent.unit) {
             return Ok(None);
         }
     }
@@ -176,6 +177,16 @@ fn changed_time(
         return Ok(None);
     }
     Ok(Some(new))
+}
+
+/// Reports whether two units match after trimming and ignoring case, or are
+/// aliases of the same recognized unit.
+fn same_unit(a: &str, b: &str) -> bool {
+    a.trim().eq_ignore_ascii_case(b.trim())
+        || matches!(
+            (canonical_time_unit(a), canonical_time_unit(b)),
+            (Some((x, _)), Some((y, _))) if x == y
+        )
 }
 
 /// Carries one phase's share of a derived total.
@@ -273,7 +284,9 @@ fn express_minutes(minutes: i32, preferred: [Option<&'static str>; 2]) -> Checke
 }
 
 /// Drops each time field of an AI-generated recipe that [`check_time`]
-/// rejects, logging a warning for each one. Call it on every recipe the
+/// rejects, and drops the longer phase when a recipe with no total has a
+/// prep + cook sum too long for whole minutes, logging a warning for each
+/// field it drops. Call it on every recipe the
 /// model produces, whether it is saved at once (import) or handed back as a
 /// draft the client saves later (adapt, suggest).
 //
@@ -293,6 +306,26 @@ pub fn drop_unusable_import_times(dto: &mut CreateRecipeDto) {
         };
         if let Err(error) = check_time(field, time) {
             tracing::warn!(%recipe, %error, "dropping unusable time from imported recipe");
+            *slot = None;
+        }
+    }
+    // Create derives a missing total as prep + cook, and that sum can
+    // overflow even when each phase fits, which would reject the recipe.
+    if dto.total_time.is_none() {
+        let minutes = |field: &'static str, slot: &Option<TimeValueDto>| {
+            slot.as_ref()
+                .and_then(|time| check_time(field, time).ok())
+                .map_or(0, |checked| checked.minutes)
+        };
+        let prep = minutes("prep_time", &dto.prep_time);
+        let cook = minutes("cook_time", &dto.cook_time);
+        if prep.checked_add(cook).is_none() {
+            let (field, slot) = if prep >= cook {
+                ("prep_time", &mut dto.prep_time)
+            } else {
+                ("cook_time", &mut dto.cook_time)
+            };
+            tracing::warn!(%recipe, field, "dropping imported time whose derived total overflows");
             *slot = None;
         }
     }
@@ -789,5 +822,27 @@ mod tests {
         )
         .unwrap();
         assert_eq!(writes, TimeWrites::default());
+    }
+
+    #[test]
+    fn invalid_legacy_value_echoed_with_a_unit_alias_is_unchanged() {
+        let stored = row(Some((-5, "minutes")), None, None);
+        let writes = resolve_times(stored.stored(), &sent(Some((-5, "min")), None, None)).unwrap();
+        assert_eq!(writes, TimeWrites::default());
+    }
+
+    #[test]
+    fn drop_unusable_import_times_drops_the_longer_phase_when_the_derived_total_overflows() {
+        // Each phase fits in whole minutes; their sum does not.
+        let mut dto = imported(Some((1_000_000, "days")), Some((900_000, "days")), None);
+        drop_unusable_import_times(&mut dto);
+        assert!(dto.prep_time.is_none(), "the longer phase is dropped");
+        assert!(dto.cook_time.is_some(), "the shorter phase is kept");
+        let request = SentTimes {
+            prep_time: dto.prep_time.clone(),
+            cook_time: dto.cook_time.clone(),
+            total_time: dto.total_time.clone(),
+        };
+        assert!(resolve_times(StoredTimes::default(), &request).is_ok());
     }
 }

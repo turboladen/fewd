@@ -429,7 +429,8 @@ pub struct UpdateRecipeInput {
     /// `cook_time` shifts the stored total by the same amount, so resting or
     /// marinating time survives without this field. A phase the recipe had
     /// no value for is assumed to fit inside the stored total and does not
-    /// move it; only the floor, the longer of the two phases, can raise it.
+    /// move it. A total adjusted this way never drops below the longer of
+    /// the two phases.
     /// A value equal to the stored total counts as unchanged and does not
     /// stop that adjustment.
     /// When a stored time has a unit outside minutes, hours, or days, the
