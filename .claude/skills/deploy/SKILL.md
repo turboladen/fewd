@@ -12,7 +12,7 @@ disable-model-invocation: true
 
 ## Deploy Steps
 
-1. Run CI checks: `./scripts/ci-check.sh`
+1. Run every gate: `bun .claude/skills/verify/verify.mjs` (the `/verify` skill)
 2. Build frontend: `bun run build`
 3. Build server for target architecture: `bun run build:server:arm64` (or appropriate target)
 4. Confirm with user before deploying
