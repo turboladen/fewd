@@ -163,7 +163,7 @@ The MCP server lives at `server/src/mcp/`, mounted at `/mcp` on the existing Axu
 
 Module layout:
 
-- `mcp/mod.rs` — router factory + bearer-auth middleware (`Authorization: Bearer <family-member-name>`)
+- `mcp/mod.rs` — router factory + bearer-auth middleware (`Authorization: Bearer <mcp-token>` — a per-person 256-bit opaque token, argon2id-hashed; mint with `POST /api/people/{id}/mcp-token`)
 - `mcp/handler.rs` — `FewdMcp` struct + tool methods (one per `#[tool]`) + `ServerHandler` impl
 - `mcp/lookups.rs` — shared name/id resolution helpers (`MealLookups`)
 - `mcp/schemas/` — LLM-friendly input/output types, split by domain (common, recipes, meals, people, shopping, errors)

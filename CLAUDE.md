@@ -224,14 +224,12 @@ after the work is merged + synced with origin.
 ### Running CI Locally
 
 ```bash
-# Full CI check (what runs in GitHub)
-./scripts/ci-check.sh
-
-# Or manually:
-cargo fmt --check && cargo clippy -- -D warnings && cargo test
-dprint check && bun run lint && bun run test
-typos
+bun .claude/skills/verify/verify.mjs   # every CI gate, one pass, ~30s — the /verify skill
+just ci                                # fail-fast subset; what the pre-push hook runs
 ```
+
+`just ci` and `scripts/ci-check.sh` both omit the migration drift smoke test and
+`bun install --frozen-lockfile`. Use `/verify` before a PR. Consolidation: `fewd-t2b`.
 
 ### Deploying to the dietpi box
 
@@ -321,11 +319,14 @@ cargo clean
 cargo build
 ```
 
+**Rust build fails with `no associated function named 'get'` for `Assets`**
+
+`dist/` is missing; RustEmbed reports the real cause first, then three misleading `E0599`s. `mkdir -p dist && touch dist/.gitkeep`, or `bun run build`.
+
 **TypeScript errors after pulling**
 
 ```bash
-rm -rf node_modules bun.lockb
-bun install
+rm -rf node_modules && bun install    # keep bun.lock — CI runs --frozen-lockfile against it
 ```
 
 ## Key Patterns
@@ -360,6 +361,10 @@ Both invariants are enforced at the MCP boundary by `canonical_meal_type` and `d
 ### CSRF protection on state-changing POST routes
 
 State-changing POST routes (rotation, provisioning, anything that mutates server state without a JSON body in the normal client flow) must take a `Json<T>` body extractor — even an empty `#[derive(Deserialize)] struct Empty {}`. HTML form posts are CORS-simple and bypass preflight without a body type; requiring `Content-Type: application/json` forces preflight, which the locked-down CORS allowlist then rejects from non-allowed origins. DELETE is non-simple by method so it's already preflighted. See `routes::people::provision_mcp_token` for an example.
+
+### MCP wire shapes are not the HTTP DTOs
+
+Ingredient amounts are tagged `{"type":"single"}` over `/api` and `{"kind":"single"}` over `/mcp`; recipes are addressed by uuid `id` over HTTP and by `slug` over MCP. Read a tool's schema from `tools/list` rather than reusing a DTO.
 
 ### Database path
 
