@@ -7,7 +7,7 @@ use crate::entities::{meal, person, recipe};
 use crate::services::claude_client::{ClaudeClient, ClaudeError, SendMessageResponse};
 use crate::services::prompt_builder::PromptBuilder;
 use crate::services::recipe_adapter::{strip_code_fences, PersonAdaptOptions, RecipeAdapter};
-use crate::services::recipe_import_service::drop_unusable_import_times;
+use crate::services::recipe_times::drop_unusable_import_times;
 
 /// The "character" or vibe of the meal suggestions
 #[derive(Debug, Deserialize, Serialize, Clone)]

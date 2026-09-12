@@ -1,14 +1,16 @@
 use migration::total_minutes::ACCEPTED_TIME_UNITS;
 use sea_orm::DbErr;
 
-/// Failure modes returned by service writes that validate their input.
+/// Describes how a service write that validates its input can fail.
 #[derive(Debug)]
 pub enum ServiceError {
     /// The input broke a domain rule. The message names the field and the
-    /// accepted values, so the caller can retry with corrected input; the
-    /// HTTP layer answers 400 and the MCP layer returns a tool-level error.
+    /// accepted values, so the caller can retry with corrected input.
+    //
+    // The HTTP layer answers 400 and the MCP layer returns a tool-level error.
     Validation(ValidationError),
-    /// SeaORM / SQLite failure. Bubbles through the standard error pipeline.
+    /// Wraps a SeaORM or SQLite failure, which bubbles through the standard
+    /// error pipeline.
     Database(DbErr),
 }
 
@@ -33,8 +35,12 @@ impl From<ValidationError> for ServiceError {
     }
 }
 
-/// A domain rule a write broke. The `Display` text is shown to callers
-/// verbatim, so it names the field and says how to fix the value.
+impl std::error::Error for ServiceError {}
+
+impl std::error::Error for ValidationError {}
+
+/// Names the domain rule a write broke. The `Display` text is shown to
+/// callers verbatim, so it names the field and says how to fix the value.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValidationError {
     /// Carries the rating exactly as the caller sent it.

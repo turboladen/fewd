@@ -6,7 +6,7 @@ use crate::dto::CreateRecipeDto;
 use crate::entities::{person, recipe};
 use crate::services::claude_client::{ClaudeClient, ClaudeError, SendMessageResponse};
 use crate::services::prompt_builder::PromptBuilder;
-use crate::services::recipe_import_service::drop_unusable_import_times;
+use crate::services::recipe_times::drop_unusable_import_times;
 
 /// Controls which profile fields to include per person in the adaptation prompt
 #[derive(Debug, Deserialize, Serialize, Clone)]
