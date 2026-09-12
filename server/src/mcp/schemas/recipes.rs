@@ -426,10 +426,12 @@ pub struct UpdateRecipeInput {
     #[serde(default)]
     pub cook_time: Option<TimeOut>,
     /// Sets a new total time; omit it otherwise. Changing `prep_time` or
-    /// `cook_time` keeps the old remainder, total minus (prep + cook), so
-    /// resting or marinating time survives without this field, though the
-    /// total never drops below the longer of the two. A value equal to the
-    /// stored total counts as unchanged and does not stop that adjustment.
+    /// `cook_time` shifts the stored total by the same amount, so resting or
+    /// marinating time survives without this field. A phase the recipe had
+    /// no value for is assumed to fit inside the stored total and does not
+    /// move it; only the floor, the longer of the two phases, can raise it.
+    /// A value equal to the stored total counts as unchanged and does not
+    /// stop that adjustment.
     /// When a stored time has a unit outside minutes, hours, or days, the
     /// total is left as stored instead, so send this field too.
     /// This is the duration `search_recipes`' `max_total_time_minutes`

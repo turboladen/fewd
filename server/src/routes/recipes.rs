@@ -22,6 +22,7 @@ use crate::services::recipe_parser::RecipeParser;
 use crate::services::recipe_scaler;
 use crate::services::recipe_service::RecipeService;
 use crate::services::recipe_times::drop_unusable_import_times;
+use crate::services::service_error::ServiceError;
 use crate::services::settings_service::SettingsService;
 use crate::AppState;
 
@@ -359,13 +360,18 @@ pub async fn import_url(
                                 let value = serde_json::to_value(&recipe).unwrap_or_default();
                                 let _ = sse_tx.send(SsePayload::Complete(value)).await;
                             }
-                            Err(e) => {
+                            Err(ServiceError::Validation(e)) => {
+                                tracing::warn!("Imported recipe failed validation: {}", e);
+                                let _ = sse_tx
+                                    .send(SsePayload::Error(format!("Failed to save recipe: {e}")))
+                                    .await;
+                            }
+                            // The DbErr text carries SQLite detail, so it
+                            // stays in the log and the client gets a label.
+                            Err(ServiceError::Database(e)) => {
                                 tracing::error!("Failed to save imported recipe: {}", e);
                                 let _ = sse_tx
-                                    .send(SsePayload::Error(format!(
-                                        "Failed to save recipe: {}",
-                                        e
-                                    )))
+                                    .send(SsePayload::Error("Failed to save recipe".to_string()))
                                     .await;
                             }
                         }
