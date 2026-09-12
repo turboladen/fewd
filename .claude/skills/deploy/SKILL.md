@@ -15,7 +15,8 @@ disable-model-invocation: true
 1. Run every gate: `bun .claude/skills/verify/verify.mjs` (the `/verify` skill)
 2. Confirm the target host with the user — a deploy restarts a live service
 3. Deploy: `just deploy <user>@<host>`
-4. Confirm the service came up: `ssh <user>@<host> "systemctl status fewd"`
+4. Confirm the new build is serving: `curl -fsS http://<host>:3000/api/version`
+   — `git_sha` in the response should match the commit you deployed
 5. Regenerate the migration baseline snapshot, following
    `server/tests/fixtures/schema-snapshots/README.md`
 
@@ -28,8 +29,10 @@ before `daemon-reload` and restart, which is how unit-file edits reach the
 running service. Run the recipe as a whole; a hand-rolled subset that skips the
 `/etc` copy leaves systemd loading a stale unit (the `fewd-82e` 403 regression).
 
-The recipe prints its success line as soon as `systemctl start` returns, so step
-4 is what tells you the server bound its port instead of crash-looping.
+The recipe prints its success line as soon as `systemctl start` returns, and the
+unit sets `Restart=always` with `RestartSec=5`, so `systemctl status` can show
+`active (running)` for a server that is crash-looping. Step 4 is the check that
+proves the port is bound and the SHA you deployed is the one answering.
 
 A host that has never run fewd needs `just setup-remote <user>@<host>` first: it
 creates `/opt/fewd`, stages the unit file there, and runs
