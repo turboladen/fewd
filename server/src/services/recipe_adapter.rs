@@ -6,6 +6,7 @@ use crate::dto::CreateRecipeDto;
 use crate::entities::{person, recipe};
 use crate::services::claude_client::{ClaudeClient, ClaudeError, SendMessageResponse};
 use crate::services::prompt_builder::PromptBuilder;
+use crate::services::recipe_times::drop_unusable_import_times;
 
 /// Controls which profile fields to include per person in the adaptation prompt
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -175,6 +176,7 @@ Rules:
         // Force correct source and parent link regardless of what Claude returned
         dto.source = "ai_adapted".to_string();
         dto.parent_recipe_id = Some(original_recipe_id.to_string());
+        drop_unusable_import_times(&mut dto);
 
         Ok(dto)
     }

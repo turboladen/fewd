@@ -7,6 +7,7 @@ use crate::dto::{
     CreateRecipeDto, IngredientDto, NutritionDto, PortionSizeDto, TimeValueDto, UpdateRecipeDto,
 };
 use crate::entities::recipe;
+use crate::services::service_error::whole_star_rating;
 
 use super::common::{
     blank_to_none, format_date, ingredient_in, ingredient_out, nutrition_in, nutrition_out,
@@ -75,7 +76,7 @@ pub struct SearchRecipesParams {
     /// Maximum recipe total time in minutes. The recipe's `total_time` is
     /// normalized to minutes regardless of its authored unit (minutes, hours,
     /// or days), so an hour-authored recipe matches correctly. Recipes with no
-    /// total time — or a `total_time` whose unit can't be recognized — are
+    /// total time, or whose stored total uses an unrecognized unit, are
     /// excluded.
     #[serde(default)]
     pub max_total_time_minutes: Option<i32>,
@@ -217,10 +218,16 @@ pub struct CreateRecipeInput {
     /// Slug of the recipe this was adapted from, if any.
     #[serde(default)]
     pub parent_recipe_slug: Option<String>,
+    /// Hands-on time. The `unit` must be minutes, hours, or days (singular,
+    /// plural, or the `min` / `hr` / `d` abbreviations); any other unit
+    /// rejects the call.
     #[serde(default)]
     pub prep_time: Option<TimeOut>,
+    /// Time on the heat. Same `unit` vocabulary as `prep_time`.
     #[serde(default)]
     pub cook_time: Option<TimeOut>,
+    /// Omit to store `prep_time` + `cook_time`. Send it when the real total
+    /// differs, such as when it includes resting time or overlapping steps.
     #[serde(default)]
     pub total_time: Option<TimeOut>,
     /// Servings the recipe is authored for (e.g. 4). Per-person scaling
@@ -409,21 +416,28 @@ pub struct UpdateRecipeInput {
     pub name: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
-    /// Hands-on time. The `unit` is stored as written and never validated,
-    /// so prefer minutes, hours, or days — singular, plural, or the `min` /
-    /// `hr` / `d` abbreviations — to stay readable alongside the rest of
-    /// the catalog.
+    /// Hands-on time. The `unit` must be minutes, hours, or days (singular,
+    /// plural, or the `min` / `hr` / `d` abbreviations) and is stored in its
+    /// plural form. Any other unit rejects the whole call, writing nothing.
+    /// A value equal to the stored duration is ignored.
     #[serde(default)]
     pub prep_time: Option<TimeOut>,
     /// Time on the heat. Same `unit` vocabulary as `prep_time`.
     #[serde(default)]
     pub cook_time: Option<TimeOut>,
-    /// Replaces the stored total time. Send this whenever `prep_time` or
-    /// `cook_time` changes, or the recipe keeps advertising its old
-    /// duration. Unlike `prep_time` and `cook_time`, this `unit` carries
-    /// consequences — it is the only one parsed, and a unit outside
-    /// minutes / hours / days drops the recipe out of every time-filtered
-    /// `search_recipes` call.
+    /// Sets a new total time; omit it otherwise. Changing `prep_time` or
+    /// `cook_time` shifts the stored total by the same amount, so resting or
+    /// marinating time survives without this field. A phase the recipe had
+    /// no value for is assumed to fit inside the stored total and does not
+    /// move it. A total adjusted this way never drops below the longer of
+    /// the two phases.
+    /// A value equal to the stored total counts as unchanged and does not
+    /// stop that adjustment.
+    /// When a stored time has a unit outside minutes, hours, or days, the
+    /// total is left as stored instead, so send this field too.
+    /// This is the duration `search_recipes`' `max_total_time_minutes`
+    /// filter compares, and it takes the same `unit` vocabulary as
+    /// `prep_time`.
     #[serde(default)]
     pub total_time: Option<TimeOut>,
     /// Servings the recipe is authored for. Must be at least 1. Changing
@@ -522,11 +536,6 @@ pub fn update_recipe_input_to_dto(input: UpdateRecipeInput) -> Result<UpdateReci
         description: blank_to_none(input.description),
         prep_time: input.prep_time.map(time_in),
         cook_time: input.cook_time.map(time_in),
-        // An unrecognized `unit` makes total_time_to_minutes return None,
-        // which writes total_minutes = NULL, and search_recipes'
-        // max_total_time_minutes excludes NULL rows — so a bad-unit update
-        // drops the recipe out of every time-filtered search behind a
-        // success response. Tracked as fewd-2nr; not addressed here.
         total_time: input.total_time.map(time_in),
         servings: input.servings,
         portion_size: input.portion_size.map(portion_in),
@@ -583,20 +592,15 @@ pub fn favorite_recipe_input_to_dto(input: FavoriteRecipeInput) -> UpdateRecipeD
 /// The caller resolves the row from `slug` before calling, so nothing here
 /// writes it.
 //
-// Rounds first, then range-checks the rounded value — the same two steps
-// `RecipeService::update` performs, so nothing reaches it that would trip
-// its `DbErr::Custom`, which `db_error` flattens to an opaque "database
-// error" the LLM cannot act on. Mirroring the service rather than being
-// stricter also keeps this tool from rejecting a value the web UI accepts.
-// NaN and the infinities fail `contains` and are rejected here.
+// Calls the service's own `whole_star_rating`, so this tool accepts exactly
+// the ratings the web UI does. The service would reject the value too, but
+// only this `InputError` can point a caller who sent 0 at `unrate_recipe`.
 //
 // The field literal is explicit for the reason given in
 // `update_recipe_input_to_dto`.
 pub fn rate_recipe_input_to_dto(input: RateRecipeInput) -> Result<UpdateRecipeDto, InputError> {
-    let rounded = input.rating.round();
-    if !(1.0..=5.0).contains(&rounded) {
-        return Err(InputError::RatingOutOfRange(input.rating));
-    }
+    let rounded =
+        whole_star_rating(input.rating).map_err(|_| InputError::RatingOutOfRange(input.rating))?;
 
     Ok(UpdateRecipeDto {
         name: None,
