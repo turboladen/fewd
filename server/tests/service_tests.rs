@@ -11,6 +11,7 @@ use fewd_lib::services::recipe_enhancer;
 use fewd_lib::services::recipe_scaler;
 use fewd_lib::services::recipe_service::{RecipeService, SearchFilters};
 use fewd_lib::services::seed_data;
+use fewd_lib::services::service_error::{ServiceError, ValidationError};
 use fewd_lib::services::settings_service::SettingsService;
 use fewd_lib::services::shopping_service::ShoppingService;
 use fewd_lib::services::suggestion_service::SuggestionService;
@@ -657,9 +658,12 @@ async fn recipe_rating_rejects_invalid_values() {
         is_favorite: None,
         rating: Some(0.0),
     };
-    assert!(RecipeService::update(&db, recipe.id.clone(), update)
-        .await
-        .is_err());
+    assert!(matches!(
+        RecipeService::update(&db, recipe.id.clone(), update).await,
+        Err(ServiceError::Validation(ValidationError::RatingOutOfRange(
+            _
+        )))
+    ));
 
     // Too high
     let update = UpdateRecipeDto {
@@ -679,9 +683,12 @@ async fn recipe_rating_rejects_invalid_values() {
         is_favorite: None,
         rating: Some(5.5),
     };
-    assert!(RecipeService::update(&db, recipe.id.clone(), update)
-        .await
-        .is_err());
+    assert!(matches!(
+        RecipeService::update(&db, recipe.id.clone(), update).await,
+        Err(ServiceError::Validation(ValidationError::RatingOutOfRange(
+            _
+        )))
+    ));
 
     // Below minimum (0.4 rounds to 0, which is < 1)
     let update = UpdateRecipeDto {
@@ -701,7 +708,12 @@ async fn recipe_rating_rejects_invalid_values() {
         is_favorite: None,
         rating: Some(0.4),
     };
-    assert!(RecipeService::update(&db, recipe.id, update).await.is_err());
+    assert!(matches!(
+        RecipeService::update(&db, recipe.id, update).await,
+        Err(ServiceError::Validation(ValidationError::RatingOutOfRange(
+            _
+        )))
+    ));
 }
 
 // --- MealService Tests ---

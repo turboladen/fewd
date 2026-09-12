@@ -583,12 +583,12 @@ pub fn favorite_recipe_input_to_dto(input: FavoriteRecipeInput) -> UpdateRecipeD
 /// The caller resolves the row from `slug` before calling, so nothing here
 /// writes it.
 //
-// Rounds first, then range-checks the rounded value — the same two steps
-// `RecipeService::update` performs, so nothing reaches it that would trip
-// its `DbErr::Custom`, which `db_error` flattens to an opaque "database
-// error" the LLM cannot act on. Mirroring the service rather than being
-// stricter also keeps this tool from rejecting a value the web UI accepts.
-// NaN and the infinities fail `contains` and are rejected here.
+// Rounds first, then range-checks the rounded value, the same two steps
+// `RecipeService::update` performs. The service would reject the value
+// too, but only this check can point a caller who sent 0 at
+// `unrate_recipe`. Mirroring the service rather than being stricter also
+// keeps this tool from rejecting a value the web UI accepts. NaN and the
+// infinities fail `contains` and are rejected here.
 //
 // The field literal is explicit for the reason given in
 // `update_recipe_input_to_dto`.

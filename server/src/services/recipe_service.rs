@@ -5,6 +5,7 @@ use sea_orm::*;
 
 use crate::dto::{CreateRecipeDto, UpdateRecipeDto};
 use crate::entities::recipe::{self, Entity as Recipe};
+use crate::services::service_error::{whole_star_rating, ServiceError};
 use crate::services::to_json;
 
 pub struct RecipeService;
@@ -169,7 +170,7 @@ impl RecipeService {
         db: &DatabaseConnection,
         id: String,
         data: UpdateRecipeDto,
-    ) -> Result<recipe::Model, DbErr> {
+    ) -> Result<recipe::Model, ServiceError> {
         let existing = Recipe::find_by_id(id)
             .one(db)
             .await?
@@ -224,18 +225,12 @@ impl RecipeService {
             recipe.is_favorite = Set(is_favorite);
         }
         if let Some(rating) = data.rating {
-            let rounded = rating.round();
-            if !(1.0..=5.0).contains(&rounded) {
-                return Err(DbErr::Custom(
-                    "Rating must be a whole number from 1 to 5".to_string(),
-                ));
-            }
-            recipe.rating = Set(Some(rounded));
+            recipe.rating = Set(Some(whole_star_rating(rating)?));
         }
 
         recipe.updated_at = Set(chrono::Utc::now());
 
-        recipe.update(db).await
+        Ok(recipe.update(db).await?)
     }
 
     pub async fn delete(db: &DatabaseConnection, id: String) -> Result<(), DbErr> {

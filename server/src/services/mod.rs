@@ -21,6 +21,7 @@ pub mod recipe_parser;
 pub mod recipe_scaler;
 pub mod recipe_service;
 pub mod seed_data;
+pub mod service_error;
 pub mod settings_service;
 pub mod shopping_service;
 pub mod suggestion_service;
