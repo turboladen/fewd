@@ -23,6 +23,8 @@ use crate::services::person_service::PersonService;
 use crate::services::printable_service::{self, PersonNameMap};
 use crate::services::recipe_import_service::{ImportError, RecipeImportService};
 use crate::services::recipe_service::{RecipeService, SearchFilters};
+use crate::services::recipe_times::drop_unusable_import_times;
+use crate::services::service_error::ServiceError;
 use crate::services::settings_service::SettingsService;
 use crate::services::shopping_service::ShoppingService;
 
@@ -557,16 +559,17 @@ impl FewdMcp {
             Ok(dto) => dto,
             Err(e) => return Ok(tool_user_error(e.to_string())),
         };
-        let created = RecipeService::create(&self.db, dto)
-            .await
-            .map_err(db_error)?;
+        let created = match RecipeService::create(&self.db, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
         let full = recipe_to_full(&created, parent_slug_canonical).map_err(internal_error)?;
         tool_json_result(&full)
     }
 
     #[tool(
         name = "update_recipe",
-        description = "Revise an existing recipe when the user corrects or improves one already in the catalog — call `search_recipes` or `get_recipe` FIRST for the `slug` and the current values (use `create_recipe` instead when the dish isn't in the catalog at all). Returns the full updated recipe. The recipe is identified by `slug` (case-insensitive); every other field is optional, and only the fields you send are written — omitted or null fields are left unchanged, and an empty or whitespace-only string means 'no change', so no writable string field can be blanked (`name` is the one writable exception: a blank one is rejected outright rather than ignored, and a blank `slug` is rejected too since it identifies the row). `ingredients`, `tags`, `instructions`, `nutrition_per_serving`, `portion_size` and the time fields REPLACE the stored value whole and are never merged — a partial `ingredients` array silently drops every ingredient you left out, so read the current list with `get_recipe` and send it back complete. Passing `[]` clears `tags` or `ingredients`. Renaming with `name` does NOT change the slug: the slug is pinned at creation, so keep using the original slug afterwards. Two fields carry couplings the server will not infer for you: send `total_time` whenever you change `prep_time` or `cook_time`, or the recipe keeps advertising its old duration; and send a rescaled `ingredients` array whenever you resize a recipe with `servings`, because the shopping list divides the stored amounts by `servings` and will otherwise buy the wrong quantities (send `servings` on its own only to correct a count that was recorded wrong). Not writable here: `is_favorite` (call `favorite_recipe` instead), `rating` (call `rate_recipe`, or `unrate_recipe` to clear it), `source`, `source_url`, the parent recipe, and the slug. Example: {\"slug\":\"beef-taco-bowls\",\"notes\":\"double the chili powder\"}",
+        description = "Revise an existing recipe when the user corrects or improves one already in the catalog — call `search_recipes` or `get_recipe` FIRST for the `slug` and the current values (use `create_recipe` instead when the dish isn't in the catalog at all). Returns the full updated recipe. The recipe is identified by `slug` (case-insensitive); every other field is optional, and only the fields you send are written — omitted or null fields are left unchanged, and an empty or whitespace-only string means 'no change', so no writable string field can be blanked (`name` is the one writable exception: a blank one is rejected outright rather than ignored, and a blank `slug` is rejected too since it identifies the row). `ingredients`, `tags`, `instructions`, `nutrition_per_serving`, `portion_size` and the time fields REPLACE the stored value whole and are never merged — a partial `ingredients` array silently drops every ingredient you left out, so read the current list with `get_recipe` and send it back complete. Passing `[]` clears `tags` or `ingredients`. Renaming with `name` does NOT change the slug: the slug is pinned at creation, so keep using the original slug afterwards. Omit `total_time` unless you are changing it: changing `prep_time` or `cook_time` shifts the stored total by the same amount, so resting or marinating time it included survives. A phase the recipe had no value for is assumed to fit inside the stored total and does not move it; a total adjusted this way never drops below the longer phase, and a recipe with no stored total gets prep + cook. When a stored time's unit is outside minutes, hours, or days, the total is left as stored, so send `total_time` too. A `total_time` equal to the stored one counts as unchanged and does not hold the total still. Every time `unit` must be minutes, hours, or days (singular, plural, or min / hr / d); any other unit rejects the whole call and writes nothing. `servings` carries a coupling the server will not infer for you: send a rescaled `ingredients` array whenever you resize a recipe with `servings`, because the shopping list divides the stored amounts by `servings` and will otherwise buy the wrong quantities (send `servings` on its own only to correct a count that was recorded wrong). Not writable here: `is_favorite` (call `favorite_recipe` instead), `rating` (call `rate_recipe`, or `unrate_recipe` to clear it), `source`, `source_url`, the parent recipe, and the slug. Example: {\"slug\":\"beef-taco-bowls\",\"notes\":\"double the chili powder\"}",
         input_schema = rmcp::handler::server::common::schema_for_type::<UpdateRecipeInput>()
     )]
     async fn update_recipe(
@@ -586,9 +589,10 @@ impl FewdMcp {
             Ok(dto) => dto,
             Err(e) => return Ok(tool_user_error(e.to_string())),
         };
-        let updated = RecipeService::update(&self.db, existing.id, dto)
-            .await
-            .map_err(db_error)?;
+        let updated = match RecipeService::update(&self.db, existing.id, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
         let parent_slug = self.parent_slug_for(&updated).await?;
         let full = recipe_to_full(&updated, parent_slug).map_err(internal_error)?;
         tool_json_result(&full)
@@ -613,9 +617,10 @@ impl FewdMcp {
         };
 
         let dto = favorite_recipe_input_to_dto(input);
-        let updated = RecipeService::update(&self.db, existing.id, dto)
-            .await
-            .map_err(db_error)?;
+        let updated = match RecipeService::update(&self.db, existing.id, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
         // The brief shape carries both `is_favorite` and `rating`, so it
         // confirms the write without re-shipping ingredients and
         // instructions on every call.
@@ -645,9 +650,10 @@ impl FewdMcp {
             Ok(dto) => dto,
             Err(e) => return Ok(tool_user_error(e.to_string())),
         };
-        let updated = RecipeService::update(&self.db, existing.id, dto)
-            .await
-            .map_err(db_error)?;
+        let updated = match RecipeService::update(&self.db, existing.id, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
         let brief = recipe_to_brief(&updated).map_err(internal_error)?;
         tool_json_result(&brief)
     }
@@ -774,14 +780,16 @@ impl FewdMcp {
         // will harmonize both surfaces on the canonical form.
         let mut dto = result.recipe;
         dto.source_url = Some(url.to_string());
+        drop_unusable_import_times(&mut dto);
 
         // Match the HTTP-route token meter so MCP imports show up in usage stats.
         SettingsService::increment_token_usage(&self.db, result.input_tokens, result.output_tokens)
             .await;
 
-        let created = RecipeService::create(&self.db, dto)
-            .await
-            .map_err(db_error)?;
+        let created = match RecipeService::create(&self.db, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
         let full = recipe_to_full(&created, None).map_err(internal_error)?;
         tool_json_result(&full)
     }
@@ -986,22 +994,28 @@ fn tool_json_result<T: Serialize>(value: &T) -> Result<CallToolResult, McpError>
     Ok(CallToolResult::success(vec![Content::text(json)]))
 }
 
-// `db_error` and `internal_error` deliberately return a fixed wire message.
-// SeaORM's `DbErr` Display embeds SQLite/SQLx detail (column names,
-// constraint names, occasionally parameter values), and `internal_error`
-// callers pass formatted internal state. Logging the verbose detail via
-// `tracing` keeps it on the operator side; the JSON-RPC client sees only
-// the opaque label. Use `tool_user_error` for messages that *should*
-// reach the LLM (input validation, unknown references).
+// `db_error` and `internal_error` return a fixed wire message on purpose.
+// `DbErr`'s Display embeds SQLite detail (column and constraint names,
+// sometimes parameter values), and `internal_error` callers pass formatted
+// internal state, so that detail goes to `tracing` only. Messages that
+// should reach the LLM go through `tool_user_error` or `service_error`.
 //
-// Some call sites (e.g. `resolve_dislikes_for_persons`) also emit a
-// structured `tracing::error!(?err, …)` before formatting the
-// diagnostic into a String — that's a feature, not a duplicate-bug:
-// the call site captures full Debug fidelity and the helper logs the
-// flattened diagnostic as a uniform backstop.
+// A call site such as `resolve_dislikes_for_persons` that logs
+// `tracing::error!(?err, …)` before calling one of these is not a duplicate:
+// it keeps full Debug fidelity, and the helper logs a uniform backstop.
 fn db_error(err: sea_orm::DbErr) -> McpError {
     tracing::error!(?err, "MCP tool: database error");
     McpError::internal_error("database error", None)
+}
+
+/// Route a service failure to the channel its caller can act on: a broken
+/// domain rule becomes a tool-level error carrying the actionable message,
+/// and a database failure stays an opaque protocol error.
+fn service_error(err: ServiceError) -> Result<CallToolResult, McpError> {
+    match err {
+        ServiceError::Validation(e) => Ok(tool_user_error(e.to_string())),
+        ServiceError::Database(e) => Err(db_error(e)),
+    }
 }
 
 fn internal_error(detail: String) -> McpError {
@@ -2723,6 +2737,71 @@ mod tests {
         assert_eq!(reloaded.total_minutes, Some(120));
     }
 
+    #[tokio::test]
+    async fn update_recipe_with_unrecognized_time_unit_is_a_tool_error_and_writes_nothing() {
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let input: UpdateRecipeInput = serde_json::from_value(serde_json::json!({
+            "slug": seeded.slug,
+            "notes": "should not land",
+            "total_time": { "value": 3, "unit": "fortnights" },
+        }))
+        .expect("partial UpdateRecipeInput deserializes");
+        let result = mcp.update_recipe(LenientParameters::for_test(input)).await;
+
+        assert_tool_user_error(result, &["total_time", "'fortnights'", "minutes", "hours"]);
+        let reloaded = reload_recipe(&mcp, &seeded.slug).await;
+        assert_recipe_unchanged_except(&seeded, &reloaded, &[]);
+    }
+
+    #[tokio::test]
+    async fn create_recipe_with_unrecognized_time_unit_is_a_tool_error_and_creates_nothing() {
+        let mcp = setup_test_mcp().await;
+        let input: CreateRecipeInput = serde_json::from_value(serde_json::json!({
+            "name": "Moon Stew",
+            "source": "manual",
+            "servings": 4,
+            "instructions": "Simmer.",
+            "ingredients": [],
+            "cook_time": { "value": 2, "unit": "sols" },
+        }))
+        .expect("CreateRecipeInput deserializes");
+        let result = mcp.create_recipe(LenientParameters::for_test(input)).await;
+
+        assert_tool_user_error(result, &["cook_time", "'sols'", "days"]);
+        let all = RecipeService::get_all(&mcp.db).await.expect("list recipes");
+        assert!(all.is_empty(), "nothing may be created: {all:?}");
+    }
+
+    #[tokio::test]
+    async fn update_recipe_cook_time_alone_moves_the_total() {
+        // The seeded recipe is 10 + 20 = 30 minutes. A cook-time change sent
+        // without total_time must not leave it answering a 35-minute search.
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let input: UpdateRecipeInput = serde_json::from_value(serde_json::json!({
+            "slug": seeded.slug,
+            "cook_time": { "value": 90, "unit": "minutes" },
+        }))
+        .expect("partial UpdateRecipeInput deserializes");
+        let result = mcp
+            .update_recipe(LenientParameters::for_test(input))
+            .await
+            .expect("update_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+
+        assert_eq!(
+            tool_result_json(&result)["total_time"],
+            serde_json::json!({ "value": 100, "unit": "minutes" })
+        );
+        assert_eq!(
+            reload_recipe(&mcp, &seeded.slug).await.total_minutes,
+            Some(100)
+        );
+    }
+
     // Compare every column except the ones the tool under test may write,
     // plus `updated_at`, which every write stamps. Serializing the row
     // rather than listing fields means a column added to `recipe::Model`
@@ -3082,11 +3161,9 @@ mod tests {
 
     #[tokio::test]
     async fn rate_recipe_out_of_range_rejects_and_writes_nothing() {
-        // The whole reason the range check lives in the converter: an
-        // out-of-range value that reached `RecipeService::update` would
-        // come back as `db_error`'s opaque "database error", which tells
-        // the LLM nothing it can act on. The surviving 4.0 proves the
-        // rejection happened before the write.
+        // The converter's own range check is what adds the `unrate_recipe`
+        // hint for a caller who sent 0 to clear a rating. The surviving 4.0
+        // proves the rejection happened before the write.
         let mcp = setup_test_mcp().await;
         let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
         assert_ne!(rate(&mcp, &seeded.slug, 4.0).await.is_error, Some(true));
