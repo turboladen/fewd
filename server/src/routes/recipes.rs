@@ -360,19 +360,9 @@ pub async fn import_url(
                                 let value = serde_json::to_value(&recipe).unwrap_or_default();
                                 let _ = sse_tx.send(SsePayload::Complete(value)).await;
                             }
-                            Err(ServiceError::Validation(e)) => {
-                                tracing::warn!("Imported recipe failed validation: {}", e);
-                                let _ = sse_tx
-                                    .send(SsePayload::Error(format!("Failed to save recipe: {e}")))
-                                    .await;
-                            }
-                            // The DbErr text carries SQLite detail, so it
-                            // stays in the log and the client gets a label.
-                            Err(ServiceError::Database(e)) => {
-                                tracing::error!("Failed to save imported recipe: {}", e);
-                                let _ = sse_tx
-                                    .send(SsePayload::Error("Failed to save recipe".to_string()))
-                                    .await;
+                            Err(e) => {
+                                let message = import_save_error_message(e);
+                                let _ = sse_tx.send(SsePayload::Error(message)).await;
                             }
                         }
                     }
@@ -397,6 +387,22 @@ pub async fn import_url(
     });
 
     Ok(sse_from_channel(sse_rx))
+}
+
+/// Logs why an imported recipe failed to save and returns the message to
+/// show the client. A validation failure names the broken rule; a database
+/// failure returns only a label, so SQLite detail stays in the log.
+fn import_save_error_message(err: ServiceError) -> String {
+    match err {
+        ServiceError::Validation(e) => {
+            tracing::warn!("Imported recipe failed validation: {}", e);
+            format!("Failed to save recipe: {e}")
+        }
+        ServiceError::Database(e) => {
+            tracing::error!("Failed to save imported recipe: {}", e);
+            "Failed to save recipe".to_string()
+        }
+    }
 }
 
 pub async fn import_file(
@@ -453,4 +459,27 @@ async fn get_api_key(state: &AppState) -> Result<String, AppError> {
 /// Helper: get the selected Claude model (or default).
 async fn get_model(state: &AppState) -> String {
     SettingsService::get_claude_model(&state.db).await
+}
+
+#[cfg(test)]
+mod tests {
+    use sea_orm::DbErr;
+
+    use super::*;
+    use crate::services::service_error::ValidationError;
+
+    #[test]
+    fn import_save_error_message_keeps_database_detail_out_of_the_client_message() {
+        let err = ServiceError::Database(DbErr::Custom("disk I/O error at fewd.db".into()));
+        assert_eq!(import_save_error_message(err), "Failed to save recipe");
+    }
+
+    #[test]
+    fn import_save_error_message_names_the_broken_rule() {
+        let err = ServiceError::Validation(ValidationError::TimeTooLarge {
+            field: "total_time",
+        });
+        let message = import_save_error_message(err);
+        assert!(message.contains("total_time"), "{message}");
+    }
 }
