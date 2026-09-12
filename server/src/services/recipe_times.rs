@@ -84,14 +84,16 @@ pub struct TimeWrites {
 /// Decide which time columns a write sets, validating only changed fields.
 /// Pass [`StoredTimes::default`] for a create.
 ///
-/// A sent field equal to the stored one (same minutes, or the same raw
-/// value and unit when the stored value cannot be parsed) is not a change.
+/// A sent field equal to the stored one is not a change. Equal means the
+/// same minutes, or, when the stored value cannot be parsed, the same value
+/// and a unit that matches after trimming and ignoring case.
+///
 /// A changed total is written as sent. Otherwise, when prep or cook
-/// changes, the total keeps its old remainder, total − (prep + cook), but
-/// never drops below the longer phase; a phase first recorded by this write
-/// is assumed to be inside the stored total. With no stored total it
-/// becomes prep + cook, a missing phase counting as 0. An unparsable stored
-/// value the derivation needs leaves the total as stored.
+/// changes, a stored total T becomes max(T + Σ(new − old), longer phase),
+/// summing only over phases that already had a stored value; a phase first
+/// recorded by this write is assumed to fit inside T. With no stored total
+/// it becomes prep + cook, a missing phase counting as 0. An unparsable
+/// stored value the derivation needs leaves the total as stored.
 ///
 /// # Errors
 ///
@@ -164,9 +166,10 @@ fn changed_time(
     let Some(sent) = sent else {
         return Ok(None);
     };
-    if matches!(stored, Stored::Unparsable(Some(old)) if old.value == sent.value && old.unit == sent.unit)
-    {
-        return Ok(None);
+    if let Stored::Unparsable(Some(old)) = stored {
+        if old.value == sent.value && old.unit.trim().eq_ignore_ascii_case(sent.unit.trim()) {
+            return Ok(None);
+        }
     }
     let new = check_time(field, sent)?;
     if matches!(stored, Stored::Parsed(old) if old.minutes == new.minutes) {
@@ -738,5 +741,53 @@ mod tests {
             total_after(&stored, &sent(None, Some((50, "minutes")), None)),
             Some(checked(50, "minutes", 50))
         );
+    }
+
+    #[test]
+    fn both_phases_first_recorded_at_once_stay_inside_the_total() {
+        let stored = row(None, None, Some((30, "minutes")));
+        assert_eq!(
+            total_after(
+                &stored,
+                &sent(Some((10, "minutes")), Some((20, "minutes")), None)
+            ),
+            Some(checked(30, "minutes", 30))
+        );
+        assert_eq!(
+            total_after(
+                &stored,
+                &sent(Some((30, "minutes")), Some((30, "minutes")), None)
+            ),
+            Some(checked(30, "minutes", 30)),
+            "the floor, not the sum, is what could raise it"
+        );
+    }
+
+    #[test]
+    fn stored_zero_phase_moves_the_total_while_a_missing_phase_does_not() {
+        // The asymmetry is intended: a stored 0 is a recorded duration that
+        // grew, while a missing phase was never measured and is assumed to
+        // fit inside the stored total already.
+        let zero_cook = row(None, Some((0, "minutes")), Some((30, "minutes")));
+        assert_eq!(
+            total_after(&zero_cook, &sent(None, Some((20, "minutes")), None)),
+            Some(checked(50, "minutes", 50))
+        );
+        let no_cook = row(None, None, Some((30, "minutes")));
+        assert_eq!(
+            total_after(&no_cook, &sent(None, Some((20, "minutes")), None)),
+            Some(checked(30, "minutes", 30))
+        );
+    }
+
+    #[test]
+    fn legacy_unit_echoed_with_different_case_or_spacing_is_unchanged() {
+        let stored = row(None, None, Some((3, "fortnights")));
+        let writes = resolve_times(
+            stored.stored(),
+            &sent(None, None, Some((3, " Fortnights "))),
+        )
+        .unwrap();
+        assert_eq!(writes, TimeWrites::default());
     }
 }
