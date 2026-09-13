@@ -603,43 +603,6 @@ pub struct InstructionEditInput {
     pub replace: String,
 }
 
-const PARENT_SLUG_REDIRECT: &str =
-    "Name the recipe to adapt with parent_recipe_slug; the variant's slug is generated from name.";
-const INSTRUCTION_EDITS_REDIRECT: &str =
-    "Send find/replace pairs in instruction_edits, or the full text in instructions.";
-const INHERITED_FROM_PARENT: &str =
-    "The variant inherits it from the parent recipe; change it afterwards with update_recipe on the variant's slug.";
-const VARIANT_SOURCE_REDIRECT: &str =
-    "A variant's source is always ai_adapted, and parent_recipe_slug records where it came from; omit it.";
-
-impl McpToolInput for AdaptRecipeInput {
-    const FIELD_REDIRECTS: &'static [(&'static str, &'static str)] = &[
-        RATING_REDIRECT,
-        IS_FAVORITE_REDIRECT,
-        TIMES_PLANNED_REDIRECT,
-        LAST_PLANNED_REDIRECT,
-        ("slug", PARENT_SLUG_REDIRECT),
-        ("parent_slug", PARENT_SLUG_REDIRECT),
-        ("recipe_slug", PARENT_SLUG_REDIRECT),
-        (
-            "ingredients",
-            "Describe ingredient edits as add, replace, or remove ops in ingredient_changes. To supply a whole ingredient list, call create_recipe with parent_recipe_slug instead.",
-        ),
-        ("instruction_changes", INSTRUCTION_EDITS_REDIRECT),
-        ("edits", INSTRUCTION_EDITS_REDIRECT),
-        ("instruction_ops", INSTRUCTION_EDITS_REDIRECT),
-        ("servings", INHERITED_FROM_PARENT),
-        ("prep_time", INHERITED_FROM_PARENT),
-        ("cook_time", INHERITED_FROM_PARENT),
-        ("total_time", INHERITED_FROM_PARENT),
-        ("portion_size", INHERITED_FROM_PARENT),
-        ("icon", INHERITED_FROM_PARENT),
-        ("nutrition_per_serving", INHERITED_FROM_PARENT),
-        ("source", VARIANT_SOURCE_REDIRECT),
-        ("source_url", VARIANT_SOURCE_REDIRECT),
-    ];
-}
-
 /// Translate `AdaptRecipeInput` into the service-layer `VariantSpec`,
 /// rejecting input no variant can be built from. The caller resolves
 /// `parent_recipe_slug` itself, so nothing here reads it.
