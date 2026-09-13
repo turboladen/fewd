@@ -62,10 +62,12 @@ pub struct RecipeFull {
     pub rating: Option<f64>,
 }
 
-/// Input for `search_recipes`. Every filter is optional, but at least one
-/// must be provided — call [`SearchRecipesParams::validate_has_filter`]
-/// before building the service-layer query. Bare / wildcard calls are
-/// rejected with a pointer at `list_curated_recipes`.
+/// Filters for the `search_recipes` MCP tool. Every filter is optional, but
+/// at least one is required, and filters combine with AND.
+//
+// `validate_has_filter` enforces the at-least-one rule before the service
+// query is built, and points bare or wildcard calls at
+// `list_curated_recipes`.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchRecipesParams {
@@ -74,7 +76,7 @@ pub struct SearchRecipesParams {
     #[serde(default)]
     pub query: Option<String>,
     /// Tag membership (case-insensitive exact match). Multiple tags compose
-    /// as AND — recipe must have every listed tag.
+    /// as AND, so a recipe must have every listed tag.
     #[serde(default)]
     pub tags: Option<Vec<String>>,
     /// Maximum recipe total time in minutes. The recipe's `total_time` is
@@ -84,10 +86,12 @@ pub struct SearchRecipesParams {
     /// excluded.
     #[serde(default)]
     pub max_total_time_minutes: Option<i32>,
-    /// Minimum star rating. Recipes with no rating are excluded.
+    /// Minimum star rating. Recipes with no rating are excluded entirely;
+    /// `rate_recipe` sets a rating and `unrate_recipe` removes one.
     #[serde(default)]
     pub min_rating: Option<f64>,
-    /// If true, only is_favorite recipes; if false, only non-favorites.
+    /// If true, only favorites; if false, only non-favorites.
+    /// `favorite_recipe` sets the flag.
     #[serde(default)]
     pub is_favorite: Option<bool>,
     /// Recipes not planned in at least N days (or never planned).
@@ -332,10 +336,6 @@ pub struct ImportRecipeUrlInput {
 
 /// Input for the `favorite_recipe` MCP tool. `slug` identifies the row and
 /// is never written; `is_favorite` is the only column this tool touches.
-///
-/// `is_favorite` is set absolutely rather than toggled, so the caller never
-/// has to know the current state and repeating a call leaves the recipe in
-/// the same state.
 //
 // Every `///` on the input structs below ships to the LLM verbatim as
 // that tool's input-schema `description`, so keep rustdoc links and
@@ -344,7 +344,8 @@ pub struct ImportRecipeUrlInput {
 #[serde(deny_unknown_fields)]
 pub struct FavoriteRecipeInput {
     /// Slug of the recipe to favorite or unfavorite (case-insensitive).
-    /// Call `search_recipes` or `get_recipe` first to find it.
+    /// Call `search_recipes` or `get_recipe` first to find it. A blank
+    /// slug is rejected.
     pub slug: String,
     /// `true` favorites the recipe, `false` unfavorites it. This is an
     /// absolute set, not a toggle: you never need to read the current
@@ -365,11 +366,11 @@ pub struct FavoriteRecipeInput {
 #[serde(deny_unknown_fields)]
 pub struct RateRecipeInput {
     /// Slug of the recipe to rate (case-insensitive). Call
-    /// `search_recipes` or `get_recipe` first to find it.
+    /// `search_recipes` or `get_recipe` first to find it. A blank slug
+    /// is rejected.
     pub slug: String,
-    /// Star rating, a whole number from 1 to 5. A fractional value rounds
-    /// to the nearest whole star. There is no rating that means "no
-    /// rating" — call `unrate_recipe` to remove one.
+    /// Star rating, a whole number from 1 to 5. 0 is not accepted: call
+    /// `unrate_recipe` to remove a rating.
     #[schemars(range(min = 1, max = 5))]
     pub rating: f64,
 }
@@ -386,45 +387,26 @@ pub struct UnrateRecipeInput {
     pub slug: String,
 }
 
-/// Input for the `update_recipe` MCP tool. `slug` identifies the row to
-/// update and is never written — renaming leaves the slug alone, so the
-/// same slug keeps addressing the recipe afterwards.
-///
-/// Every other field is optional with PATCH semantics: an omitted field —
-/// or an explicit JSON `null` — leaves the column unchanged.
-///
-/// **Clear semantics differ by field shape**:
-///
-/// - The string fields (`name`, `description`, `instructions`, `notes`,
-///   `icon`) cannot be blanked. An empty or whitespace-only value means
-///   "leave unchanged"; a blank `name` is rejected outright.
-/// - The list fields (`ingredients`, `tags`) and the structured blocks
-///   (`nutrition_per_serving`, the three time fields, `portion_size`)
-///   REPLACE the stored value whole — they are never merged. A partial
-///   `ingredients` array therefore deletes every ingredient it omits, and
-///   a `nutrition_per_serving` carrying only `calories` nulls the other
-///   four fields. Passing `[]` clears a list.
-///
-/// `is_favorite`, `rating`, `source`, `source_url`, the parent recipe, and
-/// the slug are not writable here. Use `favorite_recipe` to set
-/// `is_favorite`, and `rate_recipe` to set `rating` or `unrate_recipe` to
-/// clear it.
+/// Input for the `update_recipe` MCP tool. `slug` identifies the row and is
+/// never written.
 //
-// The blank-string coercion runs through `blank_to_none`, which carries
-// the invariant it protects. A blank `name` instead mirrors
+// Blank optional strings pass through `blank_to_none`, so a blank value
+// means no change. A blank `name` instead mirrors
 // `create_recipe_input_to_dto`'s rejection, so create and update agree on
 // what a valid recipe name is.
-//
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateRecipeInput {
     /// Slug of the recipe to update (case-insensitive). Call
     /// `search_recipes` or `get_recipe` first to find it. This is a lookup
-    /// key, not a write — it is never changed, including by a rename.
+    /// key, not a write: it never changes, including on a rename. A blank
+    /// slug is rejected.
     pub slug: String,
-    /// New display name. Renaming does NOT change the slug.
+    /// New display name. A blank value is rejected. Renaming does NOT change
+    /// the slug, so keep using the original slug afterwards.
     #[serde(default)]
     pub name: Option<String>,
+    /// Replaces the description. A blank value is ignored.
     #[serde(default)]
     pub description: Option<String>,
     /// Hands-on time. The `unit` must be minutes, hours, or days (singular,
@@ -442,6 +424,7 @@ pub struct UpdateRecipeInput {
     /// no value for is assumed to fit inside the stored total and does not
     /// move it. A total adjusted this way never drops below the longer of
     /// the two phases.
+    /// A recipe with no stored total gets prep plus cook.
     /// A value equal to the stored total counts as unchanged and does not
     /// stop that adjustment.
     /// When a stored time has a unit outside minutes, hours, or days, the
@@ -454,7 +437,8 @@ pub struct UpdateRecipeInput {
     /// Servings the recipe is authored for. Must be at least 1. Changing
     /// this does NOT rescale `ingredients`: the shopping list divides the
     /// stored amounts by this number, so a genuine resize has to send a
-    /// rescaled `ingredients` array in the same call.
+    /// rescaled `ingredients` array in the same call. Send it alone only to
+    /// correct a count that was recorded wrong.
     #[serde(default)]
     pub servings: Option<i32>,
     /// How big one serving is, as a `{value, unit}` pair — e.g.
@@ -478,9 +462,11 @@ pub struct UpdateRecipeInput {
     /// Replaces the whole tag list. `[]` clears it.
     #[serde(default)]
     pub tags: Option<Vec<String>>,
+    /// Replaces the notes. A blank value is ignored.
     #[serde(default)]
     pub notes: Option<String>,
-    /// Emoji / icon character displayed next to the recipe.
+    /// Emoji / icon character displayed next to the recipe. A blank value is
+    /// ignored.
     #[serde(default)]
     pub icon: Option<String>,
 }
@@ -519,6 +505,14 @@ pub fn create_recipe_input_to_dto(
 /// Input for the `adapt_recipe` MCP tool, which saves a changed copy of an
 /// existing recipe as a new recipe linked to it. The parent recipe is never
 /// modified.
+///
+/// The variant inherits the parent's description, notes, tags, times,
+/// servings, portion size, and icon unless the call sends `description`,
+/// `notes`, or `tags`. A parent with no total time gives the variant a total
+/// of prep plus cook, and a parent time in a unit fewd cannot read is not
+/// copied. Changing ingredients clears the variant's nutrition. To link a
+/// copy without ingredient or instruction changes, call `create_recipe`
+/// with `parent_recipe_slug` instead.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AdaptRecipeInput {
@@ -532,21 +526,35 @@ pub struct AdaptRecipeInput {
     /// blank value, to keep the parent's.
     #[serde(default)]
     pub description: Option<String>,
-    /// Ingredient edits, applied in order. Each one sees the list as the
-    /// earlier edits left it.
+    /// Ingredient edits apply in order, and each one sees the list the
+    /// earlier edits left. A `name` matches the whole stored name, ignoring
+    /// case and surrounding spaces; amounts are per the parent's servings.
+    /// Ingredients identical in every field count as one, and the first is
+    /// changed. An `or_alternative` is never matched on its own, so replace
+    /// its whole line. Same-named ingredients with the same prep that differ
+    /// only in amount, unit, or notes cannot be targeted one at a time: call
+    /// `create_recipe` with `parent_recipe_slug` and the full list instead.
+    /// A change matching nothing, or more than one distinguishable
+    /// ingredient, rejects the whole call and saves nothing.
     #[serde(default)]
     pub ingredient_changes: Option<Vec<IngredientChangeInput>>,
     /// Find/replace edits to the parent's instructions, applied in order to
-    /// the text the earlier edits left. Cannot be combined with
-    /// `instructions`.
+    /// the text the earlier edits left. Include surrounding words so each
+    /// `find` occurs exactly once ("sage" also matches inside "sausage"); a
+    /// `find` that matches zero or several times rejects the whole call and
+    /// saves nothing. For a broad rewrite send `instructions` instead; the
+    /// two cannot be combined.
     #[serde(default)]
     pub instruction_edits: Option<Vec<InstructionEditInput>>,
     /// Full replacement for the parent's instructions. Markdown is fine.
-    /// Cannot be combined with `instruction_edits`.
+    /// Cannot be combined with `instruction_edits`. A blank value is
+    /// rejected.
     #[serde(default)]
     pub instructions: Option<String>,
     /// Replaces the parent's tag list on the variant. Omit it, or send only
-    /// blank tags, to keep the parent's tags; send `[]` to clear them.
+    /// blank tags, to keep the parent's tags; send `[]` to clear them. Send
+    /// it whenever a change breaks an inherited diet tag from
+    /// `list_diet_tags`, such as adding sausage to a vegetarian recipe.
     #[serde(default)]
     pub tags: Option<Vec<String>>,
     /// Why this variant exists, such as "Made spicier for Tuesday". Omit it,
@@ -717,7 +725,7 @@ fn ingredient_change_in(
 /// layer accepts. The caller resolves the row from `slug` before calling,
 /// so nothing here writes it.
 ///
-/// See [`UpdateRecipeInput`]'s docstring for the clear semantics this
+/// The field docs on [`UpdateRecipeInput`] state the clear semantics this
 /// enforces.
 pub fn update_recipe_input_to_dto(input: UpdateRecipeInput) -> Result<UpdateRecipeDto, InputError> {
     // `name` and `servings` get exactly the checks

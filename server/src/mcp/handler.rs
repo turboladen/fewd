@@ -120,7 +120,7 @@ impl FewdMcp {
 
     #[tool(
         name = "search_recipes",
-        description = "Find specific recipes when the user names an ingredient, tag, time constraint, rating, or person preference — call BEFORE `create_meal` (to find a slug to schedule) or `create_recipe` (to avoid creating a near-duplicate). Bare calls (no filters / `query='*'`) are rejected — call `list_curated_recipes` for an unfiltered shortlist. Filters: `query` (case-insensitive substring on name); `tags` (case-insensitive exact match, multiple tags = AND); `max_total_time_minutes` (recipe total_time is normalized to minutes, so recipes authored in hours/days match correctly; recipes with no total time are excluded); `min_rating` (a recipe with no rating is excluded entirely — `rate_recipe` sets one, `unrate_recipe` removes it); `is_favorite` (set with `favorite_recipe`); `unplanned_since_days`; `excludes_for_persons` (named family members whose dislikes exclude matching recipes — substring match on ingredient names, e.g. 'olive oil' is excluded when a person dislikes 'olive'); `includes_ingredient_substrings` (recipes must contain ALL listed substrings in some ingredient name — case-insensitive, multiple values AND together, possibly across different ingredients; use for 'what can I make with spam?' / 'recipes that use leftover rice' / combine with `tags=[\"dinner\"]` for 'dinner recipes with spam'). Returns brief rows — use `get_recipe` with the slug for full details. Unknown person names return an actionable error pointing at `list_people`. To plan around dietary goals, read each person's free-form `dietary_goals` (via `get_family_overview` / `list_people`), map them to diet tags with `list_diet_tags`, then filter via `tags` — search once per diet constraint, since multiple `tags` AND together (a single multi-tag call narrows hard).",
+        description = "Find specific recipes when the user names an ingredient, tag, time constraint, rating, or person preference — call BEFORE `create_meal` (to find a slug to schedule) or `create_recipe` (to avoid creating a near-duplicate). Returns brief rows; call `get_recipe` with a slug for full details. At least one filter is required and filters AND together; for an unfiltered shortlist call `list_curated_recipes`. Use `includes_ingredient_substrings` for 'what can I make with spam?' and `excludes_for_persons` to skip what family members dislike; an unknown person name returns an error pointing at `list_people`. To plan around dietary goals, read each person's `dietary_goals` (via `get_family_overview` or `list_people`), map them to tags with `list_diet_tags`, then search once per diet constraint, since multiple `tags` narrow hard. Example: {\"tags\":[\"dinner\"],\"includes_ingredient_substrings\":[\"spam\"]}",
         input_schema = rmcp::handler::server::common::schema_for_type::<SearchRecipesParams>()
     )]
     async fn search_recipes(
@@ -572,7 +572,7 @@ impl FewdMcp {
 
     #[tool(
         name = "adapt_recipe",
-        description = "Adapt a recipe into a saved variant when the user swaps, adds, or drops ingredients for one version of a dish but wants the original kept unchanged — call `get_recipe` on the parent FIRST for its exact ingredient names and instruction text. Returns the full new recipe, whose `parent_recipe_slug` links it to the original; the parent itself is never modified. `name` is required and the new slug is generated from it. `ingredient_changes` apply in order, each one seeing the list the earlier ones left: op \"add\" appends its \"ingredient\"; op \"replace\" swaps the ingredient whose `name` matches for its \"with\" ingredient, keeping its position; op \"remove\" drops it. A `name` matches the whole stored ingredient name, ignoring case and surrounding spaces. When several ingredients share a name and their preps differ, add `prep` to pick one: omit it to match any prep, or send \"prep\": \"\" for the one with no prep. Ingredients identical in every field count as one, and the first is changed. Same-named ingredients with the same prep that differ only in amount, unit, or notes cannot be targeted one at a time; for those, call `create_recipe` with `parent_recipe_slug` and the full ingredient list instead. An ingredient's `or_alternative` is never matched on its own, so replace the whole line that carries it. `instruction_edits` are find/replace pairs applied in sequence to the evolving text: each `find` must occur exactly once, character for character including whitespace, so include surrounding words (\"sage\" also matches inside \"sausage\"), and an empty `replace` deletes the text. Send the whole text in `instructions` instead for a broad rewrite, never both. At least one ingredient or instruction change is required: to change only the name, description, tags, or notes, use `update_recipe` on the parent, or `create_recipe` with `parent_recipe_slug` for a linked copy. The variant inherits the parent's description, notes, tags, times, servings, portion size, and icon unless you send `description`, `notes`, or `tags`; a parent with no total time gives the variant a total of prep + cook. A parent time fewd can't read, such as one in an unrecognized unit, is not copied to the variant. Ingredient amounts are per the parent's `servings`. Send `tags` whenever a change breaks an inherited diet tag from `list_diet_tags`, such as adding sausage to a `vegetarian` recipe. `nutrition_per_serving` is cleared whenever ingredients change; set it, or servings, times, or icon, with `update_recipe` on the new slug, and favorite or rate the variant with `favorite_recipe` or `rate_recipe`. A change that matches nothing or more than one distinguishable ingredient, or a `find` that does not occur exactly once, rejects the whole call and saves nothing. An unknown `parent_recipe_slug` returns an error pointing at `search_recipes`. Example: {\"parent_recipe_slug\":\"potato-gnocchi\",\"name\":\"Gnocchi with Hot Italian Sausage\",\"ingredient_changes\":[{\"op\":\"replace\",\"name\":\"italian sausage\",\"with\":{\"name\":\"hot italian sausage\",\"amount\":{\"kind\":\"single\",\"value\":1.0},\"unit\":\"pound\"}}],\"notes\":\"Spicier Tuesday version\"}",
+        description = "Adapt a recipe into a saved variant when the user swaps, adds, or drops ingredients for one version of a dish but wants the original kept unchanged — call `get_recipe` on the parent FIRST for its exact ingredient names and instruction text. Returns the full new recipe, linked to the original by `parent_recipe_slug`; the parent is never modified. Send at least one of `ingredient_changes`, `instruction_edits`, or `instructions`: to change only the name, description, tags, or notes, call `update_recipe` on the parent instead. Set `nutrition_per_serving` (cleared when ingredients change), servings, times, or icon afterwards with `update_recipe` on the new slug. A change that does not match exactly rejects the whole call and saves nothing. An unknown `parent_recipe_slug` returns an error pointing at `search_recipes`. Example: {\"parent_recipe_slug\":\"potato-gnocchi\",\"name\":\"Gnocchi with Hot Italian Sausage\",\"ingredient_changes\":[{\"op\":\"replace\",\"name\":\"italian sausage\",\"with\":{\"name\":\"hot italian sausage\",\"amount\":{\"kind\":\"single\",\"value\":1.0},\"unit\":\"pound\"}}],\"notes\":\"Spicier Tuesday version\"}",
         input_schema = rmcp::handler::server::common::schema_for_type::<AdaptRecipeInput>()
     )]
     async fn adapt_recipe(
@@ -620,7 +620,7 @@ impl FewdMcp {
 
     #[tool(
         name = "update_recipe",
-        description = "Revise an existing recipe when the user corrects or improves one already in the catalog — call `search_recipes` or `get_recipe` FIRST for the `slug` and the current values (use `create_recipe` instead when the dish isn't in the catalog at all). Returns the full updated recipe. The recipe is identified by `slug` (case-insensitive); every other field is optional, and only the fields you send are written — omitted or null fields are left unchanged, and an empty or whitespace-only string means 'no change', so no writable string field can be blanked (`name` is the one writable exception: a blank one is rejected outright rather than ignored, and a blank `slug` is rejected too since it identifies the row). `ingredients`, `tags`, `instructions`, `nutrition_per_serving`, `portion_size` and the time fields REPLACE the stored value whole and are never merged — a partial `ingredients` array silently drops every ingredient you left out, so read the current list with `get_recipe` and send it back complete. Passing `[]` clears `tags` or `ingredients`. Renaming with `name` does NOT change the slug: the slug is pinned at creation, so keep using the original slug afterwards. Omit `total_time` unless you are changing it: changing `prep_time` or `cook_time` shifts the stored total by the same amount, so resting or marinating time it included survives. A phase the recipe had no value for is assumed to fit inside the stored total and does not move it; a total adjusted this way never drops below the longer phase, and a recipe with no stored total gets prep + cook. When a stored time's unit is outside minutes, hours, or days, the total is left as stored, so send `total_time` too. A `total_time` equal to the stored one counts as unchanged and does not hold the total still. Every time `unit` must be minutes, hours, or days (singular, plural, or min / hr / d); any other unit rejects the whole call and writes nothing. `servings` carries a coupling the server will not infer for you: send a rescaled `ingredients` array whenever you resize a recipe with `servings`, because the shopping list divides the stored amounts by `servings` and will otherwise buy the wrong quantities (send `servings` on its own only to correct a count that was recorded wrong). Not writable here: `is_favorite` (call `favorite_recipe` instead), `rating` (call `rate_recipe`, or `unrate_recipe` to clear it), `source`, `source_url`, the parent recipe (call `adapt_recipe` to save a linked variant instead), and the slug. Example: {\"slug\":\"beef-taco-bowls\",\"notes\":\"double the chili powder\"}",
+        description = "Revise an existing recipe when the user corrects or improves one already in the catalog — call `search_recipes` or `get_recipe` FIRST for the `slug` and current values (use `create_recipe` when the dish isn't in the catalog, or `adapt_recipe` to save a changed copy and keep the original). Returns the full updated recipe. Only the fields you send are written: omitted or null fields are left unchanged, and a blank string is ignored except for `name`, which is rejected. List and structured fields REPLACE the stored value whole: a partial `ingredients` array deletes every ingredient you left out, so send the complete list back. Renaming does not change the slug. Changing `servings` does not rescale `ingredients`, so send both to resize. An invalid field, such as a time `unit` other than minutes, hours, or days, rejects the whole call and writes nothing. Not writable here: `is_favorite` (call `favorite_recipe`), `rating` (call `rate_recipe`, or `unrate_recipe` to clear it), `source`, `source_url`, the parent recipe, and the slug. Example: {\"slug\":\"beef-taco-bowls\",\"notes\":\"double the chili powder\"}",
         input_schema = rmcp::handler::server::common::schema_for_type::<UpdateRecipeInput>()
     )]
     async fn update_recipe(
@@ -651,7 +651,7 @@ impl FewdMcp {
 
     #[tool(
         name = "favorite_recipe",
-        description = "Mark a recipe as a family favorite — or unmark one — when the user says they loved it, want it in regular rotation, or want it off that list; call `search_recipes` or `get_recipe` first for the `slug`. Returns the same brief row `search_recipes` returns — slug, name, description, tags, icon, servings, total time, how many times it has been planned, when it was last planned, rating, and is_favorite — so you can confirm the new state; call `get_recipe` when you need ingredients or instructions. `is_favorite` is set absolutely, never toggled: `true` always favorites and `false` always unfavorites, so you never need to know the current state first, and calling twice with the same value leaves the recipe in the same state. Favorites drive `list_curated_recipes` (every favorite is listed first and is never truncated) and `search_recipes`'s `is_favorite` filter, so marking one changes what later planning sessions see. Use `rate_recipe` instead when the user gives a star rating — a favorite is a binary shortlist flag, not a score, and a recipe can have both. This writes only `is_favorite` — use `update_recipe` to change the recipe's content. An unknown `slug` returns an error pointing at `search_recipes`; a blank one is rejected as a missing value. Example: {\"slug\":\"beef-taco-bowls\",\"is_favorite\":true}",
+        description = "Mark a recipe as a family favorite — or unmark one — when the user says they loved it, want it in regular rotation, or want it off that list; call `search_recipes` or `get_recipe` first for the `slug`. Returns the brief row `search_recipes` returns, so you can confirm the new state. Favorites are listed first by `list_curated_recipes` and match `search_recipes`' `is_favorite` filter, so marking one changes what later planning sessions see. Use `rate_recipe` instead for a star rating: a favorite is a shortlist flag, not a score, and a recipe can have both. This writes only `is_favorite`; use `update_recipe` to change the recipe's content. An unknown `slug` returns an error pointing at `search_recipes`. Example: {\"slug\":\"beef-taco-bowls\",\"is_favorite\":true}",
         input_schema = rmcp::handler::server::common::schema_for_type::<FavoriteRecipeInput>()
     )]
     async fn favorite_recipe(
@@ -681,7 +681,7 @@ impl FewdMcp {
 
     #[tool(
         name = "rate_recipe",
-        description = "Rate a recipe from 1 to 5 stars when the user says how much they liked a dish they have eaten; call `search_recipes` or `get_recipe` first for the `slug`. Returns the same brief row `search_recipes` returns — slug, name, description, tags, icon, servings, total time, how many times it has been planned, when it was last planned, rating, and is_favorite — so you can confirm the stored value; call `get_recipe` when you need ingredients or instructions. Ratings are whole stars: a fractional value such as \"four and a half\" rounds to the nearest whole star, and a value that does not round into 1–5 is rejected rather than clamped. The returned row carries the whole-star value actually stored, so report that number to the user rather than the one they said. The rating is set absolutely, so re-rating overwrites and the last call wins. There is no way to clear a rating here and 0 is not accepted: call `unrate_recipe` when the user wants the rating removed rather than changed. Use `favorite_recipe` instead for the binary \"keep this in rotation\" flag — a recipe can have both. Ratings feed `search_recipes`'s `min_rating` filter and `list_curated_recipes`' top-rated tier, and a recipe with no rating is excluded from every `min_rating` search, so an unrated recipe and a 1-star recipe answer different queries. This writes only `rating` — use `update_recipe` to change the recipe's content. An unknown `slug` returns an error pointing at `search_recipes`; a blank one is rejected as a missing value. Example: {\"slug\":\"beef-taco-bowls\",\"rating\":5}",
+        description = "Rate a recipe from 1 to 5 stars when the user says how much they liked a dish they have eaten; call `search_recipes` or `get_recipe` first for the `slug`. Returns the brief row `search_recipes` returns, carrying the whole-star rating actually stored, so report that number rather than the one the user said. Re-rating overwrites. Call `unrate_recipe` when the user wants the rating removed, and use `favorite_recipe` for the binary keep-in-rotation flag; a recipe can have both. Ratings feed `search_recipes`' `min_rating` filter and `list_curated_recipes`' top-rated tier, and an unrated recipe is excluded from every `min_rating` search. This writes only `rating`; use `update_recipe` to change the recipe's content. An unknown `slug` returns an error pointing at `search_recipes`. Example: {\"slug\":\"beef-taco-bowls\",\"rating\":5}",
         input_schema = rmcp::handler::server::common::schema_for_type::<RateRecipeInput>()
     )]
     async fn rate_recipe(
@@ -3661,6 +3661,55 @@ mod tests {
         }
     }
 
+    // Prints each tool's description and input-schema size, then the whole
+    // serialized tool array. Run it with
+    // `cargo test -p fewd-server --lib tools_list_size_report -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "prints a size report and asserts nothing"]
+    fn tools_list_size_report() {
+        let mut tools = FewdMcp::tool_router().list_all();
+        tools.sort_by(|a, b| a.name.cmp(&b.name));
+        let (mut description_total, mut schema_total) = (0, 0);
+        println!("{:<28} {:>11} {:>7}", "tool", "description", "schema");
+        for tool in &tools {
+            let description = tool.description.as_deref().unwrap_or("").chars().count();
+            let schema = serde_json::to_string(&*tool.input_schema)
+                .expect("input schema serializes")
+                .chars()
+                .count();
+            description_total += description;
+            schema_total += schema;
+            println!("{:<28} {description:>11} {schema:>7}", tool.name);
+        }
+        println!("{:<28} {description_total:>11} {schema_total:>7}", "total");
+        let payload = serde_json::to_string(&tools).expect("tool list serializes");
+        println!(
+            "serialized tools array: {} chars (~{} tokens at 4 chars each)",
+            payload.chars().count(),
+            payload.chars().count() / 4
+        );
+    }
+
+    // Clients such as Claude Desktop load every tool definition into context
+    // on every turn. A description carries selection-time guidance; per-field
+    // rules belong in the input struct's `///` field docs, which ship as the
+    // schema.
+    const MAX_TOOL_DESCRIPTION_CHARS: usize = 1_200;
+
+    #[test]
+    fn every_tool_description_fits_the_length_budget() {
+        for tool in FewdMcp::tool_router().list_all() {
+            let chars = tool.description.as_deref().unwrap_or("").chars().count();
+            assert!(
+                chars <= MAX_TOOL_DESCRIPTION_CHARS,
+                "{}: description is {chars} chars against a budget of \
+                 {MAX_TOOL_DESCRIPTION_CHARS}. Move per-field rules into the input \
+                 struct's field docs.",
+                tool.name,
+            );
+        }
+    }
+
     // ─── Dangling tool references ───────────────────────────────────
     //
     // Descriptions cross-reference each other by name — that is how the
@@ -3777,6 +3826,8 @@ mod tests {
 
         serde_json::from_str::<CreateMealInput>(&example("create_meal"))
             .expect("create_meal embedded example must deserialize into CreateMealInput");
+        serde_json::from_str::<SearchRecipesParams>(&example("search_recipes"))
+            .expect("search_recipes embedded example must deserialize into SearchRecipesParams");
         serde_json::from_str::<CreateRecipeInput>(&example("create_recipe"))
             .expect("create_recipe embedded example must deserialize into CreateRecipeInput");
         serde_json::from_str::<UpdatePersonInput>(&example("update_person"))
