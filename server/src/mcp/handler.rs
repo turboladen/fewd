@@ -3696,21 +3696,15 @@ mod tests {
     // schema.
     const MAX_TOOL_DESCRIPTION_CHARS: usize = 1_200;
 
-    // Tools whose descriptions are still over budget. Each must actually be
-    // over it, so the list cannot go stale.
-    const OVER_BUDGET_PENDING: &[&str] = &[];
-
     #[test]
     fn every_tool_description_fits_the_length_budget() {
         for tool in FewdMcp::tool_router().list_all() {
             let chars = tool.description.as_deref().unwrap_or("").chars().count();
-            let pending = OVER_BUDGET_PENDING.contains(&tool.name.as_ref());
-            assert_eq!(
-                chars > MAX_TOOL_DESCRIPTION_CHARS,
-                pending,
+            assert!(
+                chars <= MAX_TOOL_DESCRIPTION_CHARS,
                 "{}: description is {chars} chars against a budget of \
                  {MAX_TOOL_DESCRIPTION_CHARS}. Move per-field rules into the input \
-                 struct's field docs, or update OVER_BUDGET_PENDING.",
+                 struct's field docs.",
                 tool.name,
             );
         }
