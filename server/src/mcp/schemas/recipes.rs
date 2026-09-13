@@ -519,6 +519,14 @@ pub fn create_recipe_input_to_dto(
 /// Input for the `adapt_recipe` MCP tool, which saves a changed copy of an
 /// existing recipe as a new recipe linked to it. The parent recipe is never
 /// modified.
+///
+/// The variant inherits the parent's description, notes, tags, times,
+/// servings, portion size, and icon unless the call sends `description`,
+/// `notes`, or `tags`. A parent with no total time gives the variant a total
+/// of prep plus cook, and a parent time in a unit fewd cannot read is not
+/// copied. Changing ingredients clears the variant's nutrition. To link a
+/// copy without ingredient or instruction changes, call `create_recipe`
+/// with `parent_recipe_slug` instead.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AdaptRecipeInput {
@@ -532,13 +540,23 @@ pub struct AdaptRecipeInput {
     /// blank value, to keep the parent's.
     #[serde(default)]
     pub description: Option<String>,
-    /// Ingredient edits, applied in order. Each one sees the list as the
-    /// earlier edits left it.
+    /// Ingredient edits, applied in order, each seeing the list the earlier
+    /// ones left. A `name` matches the whole stored name, ignoring case and
+    /// surrounding spaces; amounts are per the parent's servings. Ingredients
+    /// identical in every field count as one, and the first is changed. An
+    /// `or_alternative` is never matched on its own, so replace its whole
+    /// line. Same-named ingredients with the same prep that differ only in
+    /// amount, unit, or notes cannot be targeted one at a time: call
+    /// `create_recipe` with `parent_recipe_slug` and the full list instead.
+    /// A change matching nothing, or more than one distinguishable
+    /// ingredient, rejects the whole call and saves nothing.
     #[serde(default)]
     pub ingredient_changes: Option<Vec<IngredientChangeInput>>,
     /// Find/replace edits to the parent's instructions, applied in order to
-    /// the text the earlier edits left. Cannot be combined with
-    /// `instructions`.
+    /// the text the earlier edits left. Include surrounding words so each
+    /// `find` occurs exactly once ("sage" also matches inside "sausage"); a
+    /// `find` that does not rejects the whole call and saves nothing. For a
+    /// broad rewrite send `instructions` instead; the two cannot be combined.
     #[serde(default)]
     pub instruction_edits: Option<Vec<InstructionEditInput>>,
     /// Full replacement for the parent's instructions. Markdown is fine.
@@ -546,7 +564,9 @@ pub struct AdaptRecipeInput {
     #[serde(default)]
     pub instructions: Option<String>,
     /// Replaces the parent's tag list on the variant. Omit it, or send only
-    /// blank tags, to keep the parent's tags; send `[]` to clear them.
+    /// blank tags, to keep the parent's tags; send `[]` to clear them. Send
+    /// it whenever a change breaks an inherited diet tag, such as adding
+    /// sausage to a vegetarian recipe.
     #[serde(default)]
     pub tags: Option<Vec<String>>,
     /// Why this variant exists, such as "Made spicier for Tuesday". Omit it,
