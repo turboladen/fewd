@@ -3867,8 +3867,9 @@ mod tests {
         assert!(
             dangling.is_empty(),
             "these docs reference names that are not a registered tool, an input field, \
-             or a diet tag: {dangling:#?}. Correct each to one of {known:?}, or put a \
-             literal value in double quotes instead of backticks.",
+             or a diet tag: {dangling:#?}. Correct each to a registered tool ({known:?}) \
+             or an existing input field, or put a literal value in double quotes instead \
+             of backticks.",
         );
     }
 

@@ -51,13 +51,13 @@ pub fn person_to_prefs(person: &person::Model) -> Result<PersonWithPrefs, String
 
 /// Input for the `update_person` MCP tool.
 //
-// The tool description carries the caller-facing contract. Two write rules
-// live in `update_person_input_to_dto`. `notes` has no clear-to-NULL path
-// anywhere in fewd, and the web UI cannot clear it either, so a blank
-// `notes` becomes `None` rather than letting `Some("")` act as a back-door
-// clear; a real clear affordance has to land in `UpdatePersonDto`, the
-// service, and the UI together. An empty list is a real write that replaces
-// the stored list, which is how bad data gets cleaned up, so it is never
+// The tool description carries the caller-facing contract. `notes` has no
+// clear-to-NULL path anywhere in fewd, and the web UI cannot clear it
+// either, so `update_person_input_to_dto` turns a blank `notes` into `None`
+// rather than letting `Some("")` act as a back-door clear; a real clear
+// affordance has to land in `UpdatePersonDto`, the service, and the UI
+// together. An empty list passes through as a real write that replaces the
+// stored list, which is how bad data gets cleaned up, so it is never
 // coalesced to "no change".
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -83,8 +83,7 @@ pub struct UpdatePersonInput {
 ///
 /// `notes` gets one normalization step: empty / whitespace-only input is
 /// coerced to `None` so the codebase invariant "no clear-to-NULL path for
-/// notes" holds at the MCP boundary. The comment above `UpdatePersonInput`
-/// gives the rationale.
+/// notes" holds at the MCP boundary.
 pub fn update_person_input_to_dto(input: UpdatePersonInput) -> UpdatePersonDto {
     UpdatePersonDto {
         name: None,
