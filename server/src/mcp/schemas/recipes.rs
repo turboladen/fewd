@@ -62,8 +62,7 @@ pub struct RecipeFull {
     pub rating: Option<f64>,
 }
 
-/// Filters for the `search_recipes` MCP tool. Every filter is optional, but
-/// at least one is required, and filters combine with AND.
+/// Filters for the `search_recipes` MCP tool.
 //
 // `validate_has_filter` enforces the at-least-one rule before the service
 // query is built, and points bare or wildcard calls at
@@ -102,8 +101,7 @@ pub struct SearchRecipesParams {
     /// case-insensitive substrings against ingredient names — e.g. "olive
     /// oil" is excluded when a person dislikes "olive". Plan around this
     /// when the substring is genuinely shared between an avoided and
-    /// acceptable ingredient. Unknown names return an actionable error
-    /// pointing at `list_people`.
+    /// acceptable ingredient.
     #[serde(default)]
     pub excludes_for_persons: Option<Vec<String>>,
     /// Restrict results to recipes that contain ALL of these substrings in
@@ -389,8 +387,7 @@ pub struct UnrateRecipeInput {
     pub slug: String,
 }
 
-/// Input for the `update_recipe` MCP tool. `slug` identifies the row and is
-/// never written.
+/// Input for the `update_recipe` MCP tool.
 //
 // Blank optional strings pass through `blank_to_none`, so a blank value
 // means no change. A blank `name` instead mirrors
@@ -400,9 +397,8 @@ pub struct UnrateRecipeInput {
 #[serde(deny_unknown_fields)]
 pub struct UpdateRecipeInput {
     /// Slug of the recipe to update (case-insensitive). Call
-    /// `search_recipes` or `get_recipe` first to find it. This is a lookup
-    /// key, not a write: it never changes, including on a rename. A blank
-    /// slug is rejected.
+    /// `search_recipes` or `get_recipe` first to find it. A blank slug is
+    /// rejected.
     pub slug: String,
     /// New display name. A blank value is rejected. Renaming does NOT change
     /// the slug, so keep using the original slug afterwards.
