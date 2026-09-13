@@ -62,10 +62,12 @@ pub struct RecipeFull {
     pub rating: Option<f64>,
 }
 
-/// Input for `search_recipes`. Every filter is optional, but at least one
-/// must be provided — call [`SearchRecipesParams::validate_has_filter`]
-/// before building the service-layer query. Bare / wildcard calls are
-/// rejected with a pointer at `list_curated_recipes`.
+/// Filters for the `search_recipes` MCP tool. Every filter is optional, but
+/// at least one is required, and filters combine with AND.
+//
+// `validate_has_filter` enforces the at-least-one rule before the service
+// query is built, and points bare or wildcard calls at
+// `list_curated_recipes`.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchRecipesParams {
@@ -74,7 +76,9 @@ pub struct SearchRecipesParams {
     #[serde(default)]
     pub query: Option<String>,
     /// Tag membership (case-insensitive exact match). Multiple tags compose
-    /// as AND — recipe must have every listed tag.
+    /// as AND, so a recipe must have every listed tag. When planning around
+    /// several diets, search once per constraint rather than sending every
+    /// tag in one call.
     #[serde(default)]
     pub tags: Option<Vec<String>>,
     /// Maximum recipe total time in minutes. The recipe's `total_time` is
@@ -84,10 +88,12 @@ pub struct SearchRecipesParams {
     /// excluded.
     #[serde(default)]
     pub max_total_time_minutes: Option<i32>,
-    /// Minimum star rating. Recipes with no rating are excluded.
+    /// Minimum star rating. Recipes with no rating are excluded entirely;
+    /// `rate_recipe` sets a rating and `unrate_recipe` removes one.
     #[serde(default)]
     pub min_rating: Option<f64>,
-    /// If true, only is_favorite recipes; if false, only non-favorites.
+    /// If true, only favorites; if false, only non-favorites.
+    /// `favorite_recipe` sets the flag.
     #[serde(default)]
     pub is_favorite: Option<bool>,
     /// Recipes not planned in at least N days (or never planned).

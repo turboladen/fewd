@@ -120,7 +120,7 @@ impl FewdMcp {
 
     #[tool(
         name = "search_recipes",
-        description = "Find specific recipes when the user names an ingredient, tag, time constraint, rating, or person preference — call BEFORE `create_meal` (to find a slug to schedule) or `create_recipe` (to avoid creating a near-duplicate). Bare calls (no filters / `query='*'`) are rejected — call `list_curated_recipes` for an unfiltered shortlist. Filters: `query` (case-insensitive substring on name); `tags` (case-insensitive exact match, multiple tags = AND); `max_total_time_minutes` (recipe total_time is normalized to minutes, so recipes authored in hours/days match correctly; recipes with no total time are excluded); `min_rating` (a recipe with no rating is excluded entirely — `rate_recipe` sets one, `unrate_recipe` removes it); `is_favorite` (set with `favorite_recipe`); `unplanned_since_days`; `excludes_for_persons` (named family members whose dislikes exclude matching recipes — substring match on ingredient names, e.g. 'olive oil' is excluded when a person dislikes 'olive'); `includes_ingredient_substrings` (recipes must contain ALL listed substrings in some ingredient name — case-insensitive, multiple values AND together, possibly across different ingredients; use for 'what can I make with spam?' / 'recipes that use leftover rice' / combine with `tags=[\"dinner\"]` for 'dinner recipes with spam'). Returns brief rows — use `get_recipe` with the slug for full details. Unknown person names return an actionable error pointing at `list_people`. To plan around dietary goals, read each person's free-form `dietary_goals` (via `get_family_overview` / `list_people`), map them to diet tags with `list_diet_tags`, then filter via `tags` — search once per diet constraint, since multiple `tags` AND together (a single multi-tag call narrows hard).",
+        description = "Find specific recipes when the user names an ingredient, tag, time constraint, rating, or person preference — call BEFORE `create_meal` (to find a slug to schedule) or `create_recipe` (to avoid creating a near-duplicate). Returns brief rows; call `get_recipe` with a slug for full details. At least one filter is required and filters AND together; for an unfiltered shortlist call `list_curated_recipes`. Use `includes_ingredient_substrings` for 'what can I make with spam?' and `excludes_for_persons` to skip what family members dislike; an unknown person name returns an error pointing at `list_people`. To plan around dietary goals, read each person's `dietary_goals` (via `get_family_overview` or `list_people`), map them to tags with `list_diet_tags`, then search once per diet constraint, since multiple `tags` narrow hard. Example: {\"tags\":[\"dinner\"],\"includes_ingredient_substrings\":[\"spam\"]}",
         input_schema = rmcp::handler::server::common::schema_for_type::<SearchRecipesParams>()
     )]
     async fn search_recipes(
@@ -3698,7 +3698,7 @@ mod tests {
 
     // Tools whose descriptions are still over budget. Each must actually be
     // over it, so the list cannot go stale.
-    const OVER_BUDGET_PENDING: &[&str] = &["favorite_recipe", "rate_recipe", "search_recipes"];
+    const OVER_BUDGET_PENDING: &[&str] = &["favorite_recipe", "rate_recipe"];
 
     #[test]
     fn every_tool_description_fits_the_length_budget() {
@@ -3832,6 +3832,8 @@ mod tests {
 
         serde_json::from_str::<CreateMealInput>(&example("create_meal"))
             .expect("create_meal embedded example must deserialize into CreateMealInput");
+        serde_json::from_str::<SearchRecipesParams>(&example("search_recipes"))
+            .expect("search_recipes embedded example must deserialize into SearchRecipesParams");
         serde_json::from_str::<CreateRecipeInput>(&example("create_recipe"))
             .expect("create_recipe embedded example must deserialize into CreateRecipeInput");
         serde_json::from_str::<UpdatePersonInput>(&example("update_person"))
