@@ -386,45 +386,27 @@ pub struct UnrateRecipeInput {
     pub slug: String,
 }
 
-/// Input for the `update_recipe` MCP tool. `slug` identifies the row to
-/// update and is never written — renaming leaves the slug alone, so the
-/// same slug keeps addressing the recipe afterwards.
-///
-/// Every other field is optional with PATCH semantics: an omitted field —
-/// or an explicit JSON `null` — leaves the column unchanged.
-///
-/// **Clear semantics differ by field shape**:
-///
-/// - The string fields (`name`, `description`, `instructions`, `notes`,
-///   `icon`) cannot be blanked. An empty or whitespace-only value means
-///   "leave unchanged"; a blank `name` is rejected outright.
-/// - The list fields (`ingredients`, `tags`) and the structured blocks
-///   (`nutrition_per_serving`, the three time fields, `portion_size`)
-///   REPLACE the stored value whole — they are never merged. A partial
-///   `ingredients` array therefore deletes every ingredient it omits, and
-///   a `nutrition_per_serving` carrying only `calories` nulls the other
-///   four fields. Passing `[]` clears a list.
-///
-/// `is_favorite`, `rating`, `source`, `source_url`, the parent recipe, and
-/// the slug are not writable here. Use `favorite_recipe` to set
-/// `is_favorite`, and `rate_recipe` to set `rating` or `unrate_recipe` to
-/// clear it.
+/// Input for the `update_recipe` MCP tool. `slug` identifies the row and is
+/// never written. Only the fields sent are written: an omitted or `null`
+/// field leaves the stored value unchanged.
 //
 // The blank-string coercion runs through `blank_to_none`, which carries
 // the invariant it protects. A blank `name` instead mirrors
 // `create_recipe_input_to_dto`'s rejection, so create and update agree on
 // what a valid recipe name is.
-//
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateRecipeInput {
     /// Slug of the recipe to update (case-insensitive). Call
     /// `search_recipes` or `get_recipe` first to find it. This is a lookup
-    /// key, not a write — it is never changed, including by a rename.
+    /// key, not a write: it never changes, including on a rename. A blank
+    /// slug is rejected.
     pub slug: String,
-    /// New display name. Renaming does NOT change the slug.
+    /// New display name. A blank value is rejected. Renaming does NOT change
+    /// the slug, so keep using the original slug afterwards.
     #[serde(default)]
     pub name: Option<String>,
+    /// Replaces the description. A blank value is ignored.
     #[serde(default)]
     pub description: Option<String>,
     /// Hands-on time. The `unit` must be minutes, hours, or days (singular,
@@ -454,7 +436,8 @@ pub struct UpdateRecipeInput {
     /// Servings the recipe is authored for. Must be at least 1. Changing
     /// this does NOT rescale `ingredients`: the shopping list divides the
     /// stored amounts by this number, so a genuine resize has to send a
-    /// rescaled `ingredients` array in the same call.
+    /// rescaled `ingredients` array in the same call. Send it alone only to
+    /// correct a count that was recorded wrong.
     #[serde(default)]
     pub servings: Option<i32>,
     /// How big one serving is, as a `{value, unit}` pair — e.g.
@@ -478,6 +461,7 @@ pub struct UpdateRecipeInput {
     /// Replaces the whole tag list. `[]` clears it.
     #[serde(default)]
     pub tags: Option<Vec<String>>,
+    /// Replaces the notes. A blank value is ignored.
     #[serde(default)]
     pub notes: Option<String>,
     /// Emoji / icon character displayed next to the recipe.
