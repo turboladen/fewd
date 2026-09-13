@@ -39,26 +39,21 @@ impl std::error::Error for ServiceError {}
 
 impl std::error::Error for ValidationError {}
 
-/// Names the domain rule a write broke. The `Display` text is shown to
-/// callers verbatim, so it names the field and says how to fix the value.
+/// Names the domain rule a write broke. Every variant's `Display` message is
+/// shown to callers verbatim: it opens with the name of the input field at
+/// fault (`rating`, `prep_time`, ...) and says how to fix the value.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValidationError {
-    /// Carries the rating exactly as the caller sent it.
+    /// `rating` does not round to a whole star from 1 to 5. Carries the
+    /// rating exactly as the caller sent it.
     RatingOutOfRange(f64),
     /// A recipe time field (`prep_time`, `cook_time`, `total_time`) carries
     /// a unit that is not minutes, hours, or days.
-    UnrecognizedTimeUnit {
-        field: &'static str,
-        unit: String,
-    },
-    NegativeTime {
-        field: &'static str,
-        value: i32,
-    },
+    UnrecognizedTimeUnit { field: &'static str, unit: String },
+    /// A recipe time field carries a negative value.
+    NegativeTime { field: &'static str, value: i32 },
     /// The duration does not fit in whole minutes.
-    TimeTooLarge {
-        field: &'static str,
-    },
+    TimeTooLarge { field: &'static str },
 }
 
 impl std::fmt::Display for ValidationError {
@@ -76,7 +71,10 @@ impl std::fmt::Display for ValidationError {
                 write!(f, "{field} must not be negative (got {value}).")
             }
             Self::TimeTooLarge { field } => {
-                write!(f, "{field} is too long to store as whole minutes.")
+                write!(
+                    f,
+                    "{field} is too long to store as whole minutes. Use a shorter duration."
+                )
             }
         }
     }
@@ -123,6 +121,39 @@ mod tests {
         let message = whole_star_rating(5.6).unwrap_err().to_string();
         assert!(message.contains("1 to 5"), "{message}");
         assert!(message.contains("got 5.6"), "{message}");
+    }
+
+    #[test]
+    fn every_validation_message_opens_with_its_field() {
+        // The match in `field_of` is exhaustive, so a new variant fails to
+        // compile here until it names the field it concerns. Add a sample of
+        // it to `samples` at the same time.
+        fn field_of(err: &ValidationError) -> &'static str {
+            match err {
+                ValidationError::RatingOutOfRange(_) => "rating",
+                ValidationError::UnrecognizedTimeUnit { field, .. }
+                | ValidationError::NegativeTime { field, .. }
+                | ValidationError::TimeTooLarge { field } => field,
+            }
+        }
+        let samples = [
+            ValidationError::RatingOutOfRange(9.0),
+            ValidationError::UnrecognizedTimeUnit {
+                field: "cook_time",
+                unit: "sols".into(),
+            },
+            ValidationError::NegativeTime {
+                field: "prep_time",
+                value: -1,
+            },
+            ValidationError::TimeTooLarge {
+                field: "total_time",
+            },
+        ];
+        for err in samples {
+            let message = err.to_string();
+            assert!(message.starts_with(field_of(&err)), "{message}");
+        }
     }
 
     #[test]
