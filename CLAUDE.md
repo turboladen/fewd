@@ -407,7 +407,22 @@ Branches: `fewd-<id>/<short-slug>` (e.g. `fewd-abc/mcp-host-allowlist`). The bra
 
 Commit messages, PR titles, and PR descriptions never contain bead IDs, because a reader of `main` or GitHub cannot look them up. This repo squash-merges with every commit's message in the merge body, so the rule covers each commit on a branch, not just the PR title. Use a conventional-commits prefix with a domain scope — `fix(mcp): ...`, `feat(recipes): ...`, `ci: ...`, `docs: ...` — and describe follow-up work in words ("tracked separately"). PR numbers and commit SHAs are fine to cite. Older commits on `main` carry bead scopes; don't copy that style.
 
-This section sits outside the beads integration markers below, because `bd` may regenerate everything between them.
+## Bead Closure: post-merge, not inside the fix PR
+
+Close a bead AFTER its fix PR merges, on `main`, with `bd close <id>` followed by `bd dolt push`.
+Because `.beads/issues.jsonl` is untracked here (see below), that produces no commit — there is nothing
+to stage and nothing to restore. Do NOT flip `status: closed` while the PR is in review; it makes
+`bd ready` / `bd list` report the fix as shipped when it is still under review.
+
+`.beads/issues.jsonl` is **not tracked by git** in this repo. The Dolt DB under `.beads/` is the source
+of truth: `bd dolt push` syncs it to `refs/dolt/data`, and a fresh `bd init` bootstraps from there. The
+JSONL is a local export mirror that `export.auto` rewrites on every bead mutation. Tracking it would
+leave a permanently dirty working tree, which makes `git pull --rebase` refuse, and would put
+full-snapshot diff noise that reviewers misread into unrelated PRs. The ignore rule lives in the
+**top-level** `.gitignore`, not `.beads/.gitignore`, because the latter is bd-managed and is overwritten
+on upgrade. A `.beads/issues.jsonl` diff in a PR means something re-added the file to the index.
+
+The naming and closure sections sit outside the beads integration markers below, because `bd` may regenerate everything between them.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
 ## Beads Issue Tracker
@@ -428,21 +443,6 @@ bd close <id>         # Complete work
 - Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
-
-### Bead closure: post-merge, not inside the fix PR
-
-Close a bead AFTER its fix PR merges, on `main`, with `bd close <id>` followed by `bd dolt push`.
-Because `.beads/issues.jsonl` is untracked here (see below), that produces no commit — there is nothing
-to stage and nothing to restore. Do NOT flip `status: closed` while the PR is in review; it makes
-`bd ready` / `bd list` report the fix as shipped when it is still under review.
-
-`.beads/issues.jsonl` is **not tracked by git** in this repo. The Dolt DB under `.beads/` is the source
-of truth: `bd dolt push` syncs it to `refs/dolt/data`, and a fresh `bd init` bootstraps from there. The
-JSONL is a local export mirror that `export.auto` rewrites on every bead mutation. Tracking it would
-leave a permanently dirty working tree, which makes `git pull --rebase` refuse, and would put
-full-snapshot diff noise that reviewers misread into unrelated PRs. The ignore rule lives in the
-**top-level** `.gitignore`, not `.beads/.gitignore`, because the latter is bd-managed and is overwritten
-on upgrade. A `.beads/issues.jsonl` diff in a PR means something re-added the file to the index.
 
 ## Session Completion
 
