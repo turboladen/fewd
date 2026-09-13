@@ -7,7 +7,7 @@
 //!   bidirectional value types (`IngredientOut`, `TimeOut`, …), and the
 //!   low-level conversion helpers both directions use.
 //! - [`recipes`] — recipe list/full payloads plus `create_recipe`,
-//!   `update_recipe`, `favorite_recipe`, `rate_recipe`, and
+//!   `update_recipe`, `adapt_recipe`, `favorite_recipe`, `rate_recipe`, and
 //!   `unrate_recipe` input.
 //! - [`diet_tags`] — canonical diet-tag vocabulary backing the
 //!   `list_diet_tags` tool and the `fewd://diet-tags` resource.
@@ -16,15 +16,26 @@
 //! - [`people`] — family-member payload + the `fewd://family/overview`
 //!   Markdown renderer.
 //! - [`shopping`] — shopping-list output.
-//! - [`errors`] — `InputError`, `ResolveError`, `CreateMealError`. Only
-//!   `CreateMealError` is re-exported below (handler.rs's exhaustive
-//!   match on it needs the type at runtime). `InputError` and
-//!   `ResolveError` are reached through the explicit `schemas::errors::`
-//!   path instead, which keeps clippy quiet about unused re-exports.
+//! - [`errors`] — `InputError`, `ResolveError`, `CreateMealError`, and the
+//!   `adapt_recipe` recovery hints. Only `CreateMealError` is re-exported
+//!   below (handler.rs's exhaustive match on it needs the type at runtime).
+//!   `InputError`, `ResolveError`, and the hints are reached through the
+//!   explicit `schemas::errors::` path instead, which keeps clippy quiet
+//!   about unused re-exports.
 //!
 //! All public items used by `handler.rs`'s production code are re-exported
 //! at this level so the runtime path can keep a single
 //! `use super::schemas::{…}` import.
+
+// Every tool input type, and every type nested inside one, carries
+// `#[serde(deny_unknown_fields)]` so a misspelled or unsupported field fails
+// the call instead of being dropped. The handler test
+// `every_tool_input_schema_denies_unknown_fields` enforces this.
+//
+// Keep `#[serde(flatten)]` out of tool inputs. serde ignores
+// `deny_unknown_fields` on the flattened type. On the outer struct the
+// attribute catches a flattened struct's unknown fields, but it reports every
+// field of a flattened enum as unknown, so valid input fails too.
 
 mod common;
 pub(crate) mod diet_tags;
@@ -50,9 +61,9 @@ pub(super) use people::{
 pub(super) use printable::PrintableInput;
 pub(super) use prompts::WeeklyDinnerPlanArgs;
 pub(super) use recipes::{
-    create_recipe_input_to_dto, favorite_recipe_input_to_dto, rate_recipe_input_to_dto,
-    recipe_to_brief, recipe_to_full, update_recipe_input_to_dto, CreateRecipeInput,
-    FavoriteRecipeInput, ImportRecipeUrlInput, RateRecipeInput, SearchRecipesParams,
-    UnrateRecipeInput, UpdateRecipeInput,
+    adapt_recipe_input_to_spec, create_recipe_input_to_dto, favorite_recipe_input_to_dto,
+    rate_recipe_input_to_dto, recipe_to_brief, recipe_to_full, update_recipe_input_to_dto,
+    AdaptRecipeInput, CreateRecipeInput, FavoriteRecipeInput, ImportRecipeUrlInput,
+    RateRecipeInput, SearchRecipesParams, UnrateRecipeInput, UpdateRecipeInput,
 };
 pub(super) use shopping::shopping_item_from_dto;

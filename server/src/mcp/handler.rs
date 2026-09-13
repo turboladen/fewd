@@ -24,19 +24,23 @@ use crate::services::person_service::PersonService;
 use crate::services::printable_service::{self, PersonNameMap};
 use crate::services::recipe_import_service::{ImportError, RecipeImportService};
 use crate::services::recipe_service::{RecipeService, SearchFilters};
+use crate::services::recipe_times::drop_unusable_import_times;
+use crate::services::recipe_variant::{build_variant_dto, VariantError};
+use crate::services::service_error::ServiceError;
 use crate::services::settings_service::SettingsService;
 use crate::services::shopping_service::ShoppingService;
 
 use super::lookups::MealLookups;
-use super::schemas::errors::{InputError, ResolveError};
+use super::schemas::errors::{variant_error_message, InputError, ResolveError};
 use super::schemas::{
-    create_meal_input_to_dto, create_recipe_input_to_dto, diet_tags_payload,
-    favorite_recipe_input_to_dto, meal_to_brief, person_to_prefs, rate_recipe_input_to_dto,
-    recipe_to_brief, recipe_to_full, render_diet_tags_markdown, render_family_overview,
-    shopping_item_from_dto, update_person_input_to_dto, update_recipe_input_to_dto,
-    CreateMealError, CreateMealInput, CreateRecipeInput, DateRangeParams, EmptyParams,
-    FavoriteRecipeInput, GetRecipeParams, ImportRecipeUrlInput, PrintableInput, RateRecipeInput,
-    SearchRecipesParams, UnrateRecipeInput, UpdatePersonInput, UpdateRecipeInput,
+    adapt_recipe_input_to_spec, create_meal_input_to_dto, create_recipe_input_to_dto,
+    diet_tags_payload, favorite_recipe_input_to_dto, meal_to_brief, person_to_prefs,
+    rate_recipe_input_to_dto, recipe_to_brief, recipe_to_full, render_diet_tags_markdown,
+    render_family_overview, shopping_item_from_dto, update_person_input_to_dto,
+    update_recipe_input_to_dto, AdaptRecipeInput, CreateMealError, CreateMealInput,
+    CreateRecipeInput, DateRangeParams, EmptyParams, FavoriteRecipeInput, GetRecipeParams,
+    ImportRecipeUrlInput, PrintableInput, RateRecipeInput, SearchRecipesParams, UnrateRecipeInput,
+    UpdatePersonInput, UpdateRecipeInput,
 };
 use super::AuthenticatedPerson;
 
@@ -509,7 +513,7 @@ impl FewdMcp {
 
     #[tool(
         name = "create_recipe",
-        description = "Add a new recipe when the user describes one not already in the catalog — call `search_recipes` FIRST to check for duplicates (the LLM should resolve 'this is the same as carbonara, edit that one' by calling `update_recipe` on the existing slug rather than creating a near-twin). The slug is auto-generated from the name (with a numeric suffix on collisions). Apply any applicable diet tags from `list_diet_tags` (e.g. `vegetarian`, `gluten-free`, `low-carb`) to `tags` so the recipe is later discoverable by dietary goal via `search_recipes`. Returns the full created recipe. Example: {\"name\":\"Beef Taco Bowls\",\"source\":\"manual\",\"servings\":4,\"instructions\":\"Brown beef; assemble bowls.\",\"ingredients\":[{\"name\":\"ground beef\",\"amount\":{\"kind\":\"single\",\"value\":1.0},\"unit\":\"pound\"}]}",
+        description = "Add a new recipe when the user describes one not already in the catalog — call `search_recipes` FIRST to check for duplicates (the LLM should resolve 'this is the same as carbonara, edit that one' by calling `update_recipe` on the existing slug rather than creating a near-twin). When the user wants a changed version of an existing dish while keeping the original, call `adapt_recipe` instead. The slug is auto-generated from the name (with a numeric suffix on collisions). Apply any applicable diet tags from `list_diet_tags` (e.g. `vegetarian`, `gluten-free`, `low-carb`) to `tags` so the recipe is later discoverable by dietary goal via `search_recipes`. Returns the full created recipe. Example: {\"name\":\"Beef Taco Bowls\",\"source\":\"manual\",\"servings\":4,\"instructions\":\"Brown beef; assemble bowls.\",\"ingredients\":[{\"name\":\"ground beef\",\"amount\":{\"kind\":\"single\",\"value\":1.0},\"unit\":\"pound\"}]}",
         input_schema = rmcp::handler::server::common::schema_for_type::<CreateRecipeInput>()
     )]
     async fn create_recipe(
@@ -558,16 +562,65 @@ impl FewdMcp {
             Ok(dto) => dto,
             Err(e) => return Ok(tool_user_error(e.to_string())),
         };
-        let created = RecipeService::create(&self.db, dto)
-            .await
-            .map_err(db_error)?;
+        let created = match RecipeService::create(&self.db, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
         let full = recipe_to_full(&created, parent_slug_canonical).map_err(internal_error)?;
         tool_json_result(&full)
     }
 
     #[tool(
+        name = "adapt_recipe",
+        description = "Adapt a recipe into a saved variant when the user swaps, adds, or drops ingredients for one version of a dish but wants the original kept unchanged — call `get_recipe` on the parent FIRST for its exact ingredient names and instruction text. Returns the full new recipe, whose `parent_recipe_slug` links it to the original; the parent itself is never modified. `name` is required and the new slug is generated from it. `ingredient_changes` apply in order, each one seeing the list the earlier ones left: op \"add\" appends its \"ingredient\"; op \"replace\" swaps the ingredient whose `name` matches for its \"with\" ingredient, keeping its position; op \"remove\" drops it. A `name` matches the whole stored ingredient name, ignoring case and surrounding spaces. When several ingredients share a name and their preps differ, add `prep` to pick one: omit it to match any prep, or send \"prep\": \"\" for the one with no prep. Ingredients identical in every field count as one, and the first is changed. Same-named ingredients with the same prep that differ only in amount, unit, or notes cannot be targeted one at a time; for those, call `create_recipe` with `parent_recipe_slug` and the full ingredient list instead. An ingredient's `or_alternative` is never matched on its own, so replace the whole line that carries it. `instruction_edits` are find/replace pairs applied in sequence to the evolving text: each `find` must occur exactly once, character for character including whitespace, so include surrounding words (\"sage\" also matches inside \"sausage\"), and an empty `replace` deletes the text. Send the whole text in `instructions` instead for a broad rewrite, never both. At least one ingredient or instruction change is required: to change only the name, description, tags, or notes, use `update_recipe` on the parent, or `create_recipe` with `parent_recipe_slug` for a linked copy. The variant inherits the parent's description, notes, tags, times, servings, portion size, and icon unless you send `description`, `notes`, or `tags`; a parent with no total time gives the variant a total of prep + cook. A parent time fewd can't read, such as one in an unrecognized unit, is not copied to the variant. Ingredient amounts are per the parent's `servings`. Send `tags` whenever a change breaks an inherited diet tag from `list_diet_tags`, such as adding sausage to a `vegetarian` recipe. `nutrition_per_serving` is cleared whenever ingredients change; set it, or servings, times, or icon, with `update_recipe` on the new slug, and favorite or rate the variant with `favorite_recipe` or `rate_recipe`. A change that matches nothing or more than one distinguishable ingredient, or a `find` that does not occur exactly once, rejects the whole call and saves nothing. An unknown `parent_recipe_slug` returns an error pointing at `search_recipes`. Example: {\"parent_recipe_slug\":\"potato-gnocchi\",\"name\":\"Gnocchi with Hot Italian Sausage\",\"ingredient_changes\":[{\"op\":\"replace\",\"name\":\"italian sausage\",\"with\":{\"name\":\"hot italian sausage\",\"amount\":{\"kind\":\"single\",\"value\":1.0},\"unit\":\"pound\"}}],\"notes\":\"Spicier Tuesday version\"}",
+        input_schema = rmcp::handler::server::common::schema_for_type::<AdaptRecipeInput>()
+    )]
+    async fn adapt_recipe(
+        &self,
+        input: LenientParameters<AdaptRecipeInput>,
+    ) -> Result<CallToolResult, McpError> {
+        let input = match input.into_tool_input("adapt_recipe") {
+            Ok(v) => v,
+            Err(e) => return Ok(e),
+        };
+        // `resolve_recipe_by_slug` reports a blank slug as `slug`, which is not
+        // the field this tool takes, so the blank case is caught here first.
+        if normalize_slug(&input.parent_recipe_slug).is_none() {
+            return Ok(tool_user_error(
+                InputError::EmptyName("parent_recipe_slug").to_string(),
+            ));
+        }
+        let parent_slug = input.parent_recipe_slug.clone();
+        let spec = match adapt_recipe_input_to_spec(input) {
+            Ok(spec) => spec,
+            Err(e) => return Ok(tool_user_error(e.to_string())),
+        };
+        let parent = match self.resolve_recipe_by_slug(&parent_slug).await? {
+            Ok(recipe) => recipe,
+            Err(e) => return Ok(e),
+        };
+
+        let dto = match build_variant_dto(&parent, spec) {
+            Ok(dto) => dto,
+            Err(VariantError::MalformedParent(detail)) => {
+                return Err(internal_error(format!(
+                    "adapt_recipe parent '{}': {detail}",
+                    parent.slug
+                )));
+            }
+            Err(e) => return Ok(tool_user_error(variant_error_message(&e, &parent.slug))),
+        };
+        let created = match RecipeService::create(&self.db, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
+        let full = recipe_to_full(&created, Some(parent.slug)).map_err(internal_error)?;
+        tool_json_result(&full)
+    }
+
+    #[tool(
         name = "update_recipe",
-        description = "Revise an existing recipe when the user corrects or improves one already in the catalog — call `search_recipes` or `get_recipe` FIRST for the `slug` and the current values (use `create_recipe` instead when the dish isn't in the catalog at all). Returns the full updated recipe. The recipe is identified by `slug` (case-insensitive); every other field is optional, and only the fields you send are written — omitted or null fields are left unchanged, and an empty or whitespace-only string means 'no change', so no writable string field can be blanked (`name` is the one writable exception: a blank one is rejected outright rather than ignored, and a blank `slug` is rejected too since it identifies the row). `ingredients`, `tags`, `instructions`, `nutrition_per_serving`, `portion_size` and the time fields REPLACE the stored value whole and are never merged — a partial `ingredients` array silently drops every ingredient you left out, so read the current list with `get_recipe` and send it back complete. Passing `[]` clears `tags` or `ingredients`. Renaming with `name` does NOT change the slug: the slug is pinned at creation, so keep using the original slug afterwards. Two fields carry couplings the server will not infer for you: send `total_time` whenever you change `prep_time` or `cook_time`, or the recipe keeps advertising its old duration; and send a rescaled `ingredients` array whenever you resize a recipe with `servings`, because the shopping list divides the stored amounts by `servings` and will otherwise buy the wrong quantities (send `servings` on its own only to correct a count that was recorded wrong). Not writable here: `is_favorite` (call `favorite_recipe` instead), `rating` (call `rate_recipe`, or `unrate_recipe` to clear it), `source`, `source_url`, the parent recipe, and the slug. Example: {\"slug\":\"beef-taco-bowls\",\"notes\":\"double the chili powder\"}",
+        description = "Revise an existing recipe when the user corrects or improves one already in the catalog — call `search_recipes` or `get_recipe` FIRST for the `slug` and the current values (use `create_recipe` instead when the dish isn't in the catalog at all). Returns the full updated recipe. The recipe is identified by `slug` (case-insensitive); every other field is optional, and only the fields you send are written — omitted or null fields are left unchanged, and an empty or whitespace-only string means 'no change', so no writable string field can be blanked (`name` is the one writable exception: a blank one is rejected outright rather than ignored, and a blank `slug` is rejected too since it identifies the row). `ingredients`, `tags`, `instructions`, `nutrition_per_serving`, `portion_size` and the time fields REPLACE the stored value whole and are never merged — a partial `ingredients` array silently drops every ingredient you left out, so read the current list with `get_recipe` and send it back complete. Passing `[]` clears `tags` or `ingredients`. Renaming with `name` does NOT change the slug: the slug is pinned at creation, so keep using the original slug afterwards. Omit `total_time` unless you are changing it: changing `prep_time` or `cook_time` shifts the stored total by the same amount, so resting or marinating time it included survives. A phase the recipe had no value for is assumed to fit inside the stored total and does not move it; a total adjusted this way never drops below the longer phase, and a recipe with no stored total gets prep + cook. When a stored time's unit is outside minutes, hours, or days, the total is left as stored, so send `total_time` too. A `total_time` equal to the stored one counts as unchanged and does not hold the total still. Every time `unit` must be minutes, hours, or days (singular, plural, or min / hr / d); any other unit rejects the whole call and writes nothing. `servings` carries a coupling the server will not infer for you: send a rescaled `ingredients` array whenever you resize a recipe with `servings`, because the shopping list divides the stored amounts by `servings` and will otherwise buy the wrong quantities (send `servings` on its own only to correct a count that was recorded wrong). Not writable here: `is_favorite` (call `favorite_recipe` instead), `rating` (call `rate_recipe`, or `unrate_recipe` to clear it), `source`, `source_url`, the parent recipe (call `adapt_recipe` to save a linked variant instead), and the slug. Example: {\"slug\":\"beef-taco-bowls\",\"notes\":\"double the chili powder\"}",
         input_schema = rmcp::handler::server::common::schema_for_type::<UpdateRecipeInput>()
     )]
     async fn update_recipe(
@@ -587,9 +640,10 @@ impl FewdMcp {
             Ok(dto) => dto,
             Err(e) => return Ok(tool_user_error(e.to_string())),
         };
-        let updated = RecipeService::update(&self.db, existing.id, dto)
-            .await
-            .map_err(db_error)?;
+        let updated = match RecipeService::update(&self.db, existing.id, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
         let parent_slug = self.parent_slug_for(&updated).await?;
         let full = recipe_to_full(&updated, parent_slug).map_err(internal_error)?;
         tool_json_result(&full)
@@ -614,9 +668,10 @@ impl FewdMcp {
         };
 
         let dto = favorite_recipe_input_to_dto(input);
-        let updated = RecipeService::update(&self.db, existing.id, dto)
-            .await
-            .map_err(db_error)?;
+        let updated = match RecipeService::update(&self.db, existing.id, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
         // The brief shape carries both `is_favorite` and `rating`, so it
         // confirms the write without re-shipping ingredients and
         // instructions on every call.
@@ -646,9 +701,10 @@ impl FewdMcp {
             Ok(dto) => dto,
             Err(e) => return Ok(tool_user_error(e.to_string())),
         };
-        let updated = RecipeService::update(&self.db, existing.id, dto)
-            .await
-            .map_err(db_error)?;
+        let updated = match RecipeService::update(&self.db, existing.id, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
         let brief = recipe_to_brief(&updated).map_err(internal_error)?;
         tool_json_result(&brief)
     }
@@ -775,14 +831,16 @@ impl FewdMcp {
         // will harmonize both surfaces on the canonical form.
         let mut dto = result.recipe;
         dto.source_url = Some(url.to_string());
+        drop_unusable_import_times(&mut dto);
 
         // Match the HTTP-route token meter so MCP imports show up in usage stats.
         SettingsService::increment_token_usage(&self.db, result.input_tokens, result.output_tokens)
             .await;
 
-        let created = RecipeService::create(&self.db, dto)
-            .await
-            .map_err(db_error)?;
+        let created = match RecipeService::create(&self.db, dto).await {
+            Ok(recipe) => recipe,
+            Err(e) => return service_error(e),
+        };
         let full = recipe_to_full(&created, None).map_err(internal_error)?;
         tool_json_result(&full)
     }
@@ -987,22 +1045,28 @@ fn tool_json_result<T: Serialize>(value: &T) -> Result<CallToolResult, McpError>
     Ok(CallToolResult::success(vec![Content::text(json)]))
 }
 
-// `db_error` and `internal_error` deliberately return a fixed wire message.
-// SeaORM's `DbErr` Display embeds SQLite/SQLx detail (column names,
-// constraint names, occasionally parameter values), and `internal_error`
-// callers pass formatted internal state. Logging the verbose detail via
-// `tracing` keeps it on the operator side; the JSON-RPC client sees only
-// the opaque label. Use `tool_user_error` for messages that *should*
-// reach the LLM (input validation, unknown references).
+// `db_error` and `internal_error` return a fixed wire message on purpose.
+// `DbErr`'s Display embeds SQLite detail (column and constraint names,
+// sometimes parameter values), and `internal_error` callers pass formatted
+// internal state, so that detail goes to `tracing` only. Messages that
+// should reach the LLM go through `tool_user_error` or `service_error`.
 //
-// Some call sites (e.g. `resolve_dislikes_for_persons`) also emit a
-// structured `tracing::error!(?err, …)` before formatting the
-// diagnostic into a String — that's a feature, not a duplicate-bug:
-// the call site captures full Debug fidelity and the helper logs the
-// flattened diagnostic as a uniform backstop.
+// A call site such as `resolve_dislikes_for_persons` that logs
+// `tracing::error!(?err, …)` before calling one of these is not a duplicate:
+// it keeps full Debug fidelity, and the helper logs a uniform backstop.
 fn db_error(err: sea_orm::DbErr) -> McpError {
     tracing::error!(?err, "MCP tool: database error");
     McpError::internal_error("database error", None)
+}
+
+/// Route a service failure to the channel its caller can act on: a broken
+/// domain rule becomes a tool-level error carrying the actionable message,
+/// and a database failure stays an opaque protocol error.
+fn service_error(err: ServiceError) -> Result<CallToolResult, McpError> {
+    match err {
+        ServiceError::Validation(e) => Ok(tool_user_error(e.to_string())),
+        ServiceError::Database(e) => Err(db_error(e)),
+    }
 }
 
 fn internal_error(detail: String) -> McpError {
@@ -2679,6 +2743,71 @@ mod tests {
         assert_eq!(reloaded.total_minutes, Some(120));
     }
 
+    #[tokio::test]
+    async fn update_recipe_with_unrecognized_time_unit_is_a_tool_error_and_writes_nothing() {
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let input: UpdateRecipeInput = serde_json::from_value(serde_json::json!({
+            "slug": seeded.slug,
+            "notes": "should not land",
+            "total_time": { "value": 3, "unit": "fortnights" },
+        }))
+        .expect("partial UpdateRecipeInput deserializes");
+        let result = mcp.update_recipe(LenientParameters::for_test(input)).await;
+
+        assert_tool_user_error(result, &["total_time", "'fortnights'", "minutes", "hours"]);
+        let reloaded = reload_recipe(&mcp, &seeded.slug).await;
+        assert_recipe_unchanged_except(&seeded, &reloaded, &[]);
+    }
+
+    #[tokio::test]
+    async fn create_recipe_with_unrecognized_time_unit_is_a_tool_error_and_creates_nothing() {
+        let mcp = setup_test_mcp().await;
+        let input: CreateRecipeInput = serde_json::from_value(serde_json::json!({
+            "name": "Moon Stew",
+            "source": "manual",
+            "servings": 4,
+            "instructions": "Simmer.",
+            "ingredients": [],
+            "cook_time": { "value": 2, "unit": "sols" },
+        }))
+        .expect("CreateRecipeInput deserializes");
+        let result = mcp.create_recipe(LenientParameters::for_test(input)).await;
+
+        assert_tool_user_error(result, &["cook_time", "'sols'", "days"]);
+        let all = RecipeService::get_all(&mcp.db).await.expect("list recipes");
+        assert!(all.is_empty(), "nothing may be created: {all:?}");
+    }
+
+    #[tokio::test]
+    async fn update_recipe_cook_time_alone_moves_the_total() {
+        // The seeded recipe is 10 + 20 = 30 minutes. A cook-time change sent
+        // without total_time must not leave it answering a 35-minute search.
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let input: UpdateRecipeInput = serde_json::from_value(serde_json::json!({
+            "slug": seeded.slug,
+            "cook_time": { "value": 90, "unit": "minutes" },
+        }))
+        .expect("partial UpdateRecipeInput deserializes");
+        let result = mcp
+            .update_recipe(LenientParameters::for_test(input))
+            .await
+            .expect("update_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+
+        assert_eq!(
+            tool_result_json(&result)["total_time"],
+            serde_json::json!({ "value": 100, "unit": "minutes" })
+        );
+        assert_eq!(
+            reload_recipe(&mcp, &seeded.slug).await.total_minutes,
+            Some(100)
+        );
+    }
+
     // Compare every column except the ones the tool under test may write,
     // plus `updated_at`, which every write stamps. Serializing the row
     // rather than listing fields means a column added to `recipe::Model`
@@ -3036,11 +3165,9 @@ mod tests {
 
     #[tokio::test]
     async fn rate_recipe_out_of_range_rejects_and_writes_nothing() {
-        // The whole reason the range check lives in the converter: an
-        // out-of-range value that reached `RecipeService::update` would
-        // come back as `db_error`'s opaque "database error", which tells
-        // the LLM nothing it can act on. The surviving 4.0 proves the
-        // rejection happened before the write.
+        // The converter's own range check is what adds the `unrate_recipe`
+        // hint for a caller who sent 0 to clear a rating. The surviving 4.0
+        // proves the rejection happened before the write.
         let mcp = setup_test_mcp().await;
         let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
         assert_ne!(rate(&mcp, &seeded.slug, 4.0).await.is_error, Some(true));
@@ -3511,6 +3638,7 @@ mod tests {
             "Clear",     // unrate_recipe
             "Import",    // import_recipe_url
             "Schedule",  // create_meal
+            "Adapt",     // adapt_recipe
         ];
 
         let router = FewdMcp::tool_router();
@@ -3659,6 +3787,8 @@ mod tests {
             .expect("favorite_recipe embedded example must deserialize into FavoriteRecipeInput");
         serde_json::from_str::<RateRecipeInput>(&example("rate_recipe"))
             .expect("rate_recipe embedded example must deserialize into RateRecipeInput");
+        serde_json::from_str::<AdaptRecipeInput>(&example("adapt_recipe"))
+            .expect("adapt_recipe embedded example must deserialize into AdaptRecipeInput");
         serde_json::from_str::<UnrateRecipeInput>(&example("unrate_recipe"))
             .expect("unrate_recipe embedded example must deserialize into UnrateRecipeInput");
     }
@@ -3702,6 +3832,972 @@ mod tests {
                     tool.name
                 );
             }
+        }
+    }
+
+    // ─── Unknown-field rejection ────────────────────────────────────
+    //
+    // A field a tool does not declare must fail the call instead of being
+    // dropped, or a typo like `instruction` reports success after writing
+    // nothing. schemars emits `"additionalProperties": false` only for a type
+    // that denies unknown fields, so the published schema witnesses the
+    // serde behavior at every depth.
+    mod unknown_fields {
+        use super::*;
+        use schemars::JsonSchema;
+        use serde_json::{json, Value};
+
+        fn rejection<T: DeserializeOwned + std::fmt::Debug>(args: Value) -> String {
+            let Value::Object(object) = args else {
+                panic!("tool arguments must be a JSON object");
+            };
+            let LenientParameters(parsed) = LenientParameters::<T>::extract(Some(object));
+            parsed.expect_err("the input must be rejected")
+        }
+
+        fn valid_create_recipe_args() -> serde_json::Map<String, Value> {
+            let Value::Object(object) = json!({
+                "name": "Beef Taco Bowls",
+                "source": "manual",
+                "servings": 4,
+                "instructions": "Brown beef; assemble bowls.",
+                "ingredients": [],
+            }) else {
+                unreachable!("the literal is an object");
+            };
+            object
+        }
+
+        #[tokio::test]
+        async fn update_recipe_misspelled_field_returns_tool_level_error() {
+            let mcp = setup_test_mcp().await;
+            let args = args_with(&[
+                ("slug", json!("beef-taco-bowls")),
+                ("instruction", json!("New steps")),
+            ]);
+            let result = mcp
+                .update_recipe(LenientParameters::<UpdateRecipeInput>::extract(args))
+                .await;
+            assert_tool_user_error(
+                result,
+                &[
+                    "update_recipe: unknown field `instruction`",
+                    "`instructions`",
+                    "Check the tool's input schema.",
+                ],
+            );
+        }
+
+        // `rating` is a real recipe attribute that update_recipe does not
+        // write, so it must fail the call like any other unknown field.
+        #[tokio::test]
+        async fn update_recipe_rating_returns_tool_level_error() {
+            let mcp = setup_test_mcp().await;
+            let args = args_with(&[("slug", json!("beef-taco-bowls")), ("rating", json!(5))]);
+            let result = mcp
+                .update_recipe(LenientParameters::<UpdateRecipeInput>::extract(args))
+                .await;
+            assert_tool_user_error(result, &["update_recipe: unknown field `rating`"]);
+        }
+
+        #[test]
+        fn create_recipe_rating_is_rejected() {
+            let mut args = valid_create_recipe_args();
+            args.insert("rating".into(), json!(4));
+            let err = rejection::<CreateRecipeInput>(Value::Object(args));
+            assert!(err.contains("unknown field `rating`"), "{err}");
+        }
+
+        #[test]
+        fn nested_ingredient_unknown_field_is_rejected() {
+            let mut args = valid_create_recipe_args();
+            args.insert(
+                "ingredients".into(),
+                json!([{"name": "flour", "qty": 2, "amount": {"kind": "single", "value": 1.0}}]),
+            );
+            let err = rejection::<CreateRecipeInput>(Value::Object(args));
+            assert!(err.contains("unknown field `qty`"), "{err}");
+        }
+
+        #[test]
+        fn nested_tagged_amount_unknown_field_is_rejected() {
+            let mut args = valid_create_recipe_args();
+            args.insert(
+                "ingredients".into(),
+                json!([{"name": "flour", "amount": {"kind": "single", "value": 1.0, "unit": "cup"}}]),
+            );
+            let err = rejection::<CreateRecipeInput>(Value::Object(args));
+            assert!(err.contains("unknown field `unit`"), "{err}");
+        }
+
+        #[test]
+        fn nested_tagged_serving_unknown_field_is_rejected() {
+            let err = rejection::<CreateMealInput>(json!({
+                "date": "2026-05-25",
+                "meal_type": "dinner",
+                "servings": [{
+                    "kind": "recipe",
+                    "person_name": "Alice",
+                    "recipe_slug": "beef-taco-bowls",
+                    "recipe": "beef-taco-bowls",
+                }],
+            }));
+            assert!(err.contains("unknown field `recipe`"), "{err}");
+        }
+
+        // `list_meals` returns each serving with a `recipe_name`, which
+        // `create_meal` does not accept. A serving copied from that output
+        // must be rejected with a message that also names the valid fields.
+        #[test]
+        fn create_meal_serving_copied_from_list_meals_names_valid_fields() {
+            let err = rejection::<CreateMealInput>(json!({
+                "date": "2026-05-25",
+                "meal_type": "dinner",
+                "servings": [{
+                    "kind": "recipe",
+                    "person_name": "Alice",
+                    "recipe_slug": "beef-taco-bowls",
+                    "recipe_name": "Beef Taco Bowls",
+                }],
+            }));
+            assert!(err.contains("unknown field `recipe_name`"), "{err}");
+            assert!(err.contains("`recipe_slug`"), "{err}");
+        }
+
+        #[test]
+        fn no_argument_tool_rejects_any_argument() {
+            let err = rejection::<EmptyParams>(json!({"foo": 1}));
+            assert!(err.contains("unknown field `foo`"), "{err}");
+        }
+
+        // These keywords describe a schema without constraining what it
+        // accepts, so a schema made only of them accepts any value.
+        const ANNOTATION_KEYWORDS: &[&str] = &[
+            "$comment",
+            "$schema",
+            "default",
+            "deprecated",
+            "description",
+            "examples",
+            "readOnly",
+            "title",
+            "writeOnly",
+        ];
+
+        // Walk one schema node. A node counts as an object when its `type` is
+        // or includes "object", or when it declares `properties`. Only a
+        // properties map's values are schemas, never the map itself, so a
+        // field named `type` or `properties` cannot mislead the walk. A schema
+        // that accepts any value counts as open. schemars emits `true` for a
+        // bare `serde_json::Value` field, and only annotations, such as
+        // `{"description": ...}`, once that field is documented or defaulted.
+        // `$ref` is not followed, because the caller walks `$defs` once.
+        fn walk_schema(node: &Value, pointer: &str, visited: &mut usize, open: &mut Vec<String>) {
+            let accepts_anything = match node {
+                Value::Bool(accepts) => *accepts,
+                Value::Object(object) => object
+                    .keys()
+                    .all(|keyword| ANNOTATION_KEYWORDS.contains(&keyword.as_str())),
+                _ => false,
+            };
+            if accepts_anything {
+                open.push(pointer.to_string());
+                return;
+            }
+            let Some(object) = node.as_object() else {
+                return;
+            };
+            let typed_object = match object.get("type") {
+                Some(Value::String(kind)) => kind == "object",
+                Some(Value::Array(kinds)) => kinds.iter().any(|kind| kind == "object"),
+                _ => false,
+            };
+            if typed_object || object.contains_key("properties") {
+                *visited += 1;
+                if object.get("additionalProperties") != Some(&Value::Bool(false)) {
+                    open.push(pointer.to_string());
+                }
+            }
+            if let Some(properties) = object.get("properties").and_then(Value::as_object) {
+                for (name, child) in properties {
+                    walk_schema(
+                        child,
+                        &format!("{pointer}/properties/{name}"),
+                        visited,
+                        open,
+                    );
+                }
+            }
+            match object.get("items") {
+                Some(Value::Array(children)) => {
+                    for (index, child) in children.iter().enumerate() {
+                        walk_schema(child, &format!("{pointer}/items/{index}"), visited, open);
+                    }
+                }
+                Some(child) => walk_schema(child, &format!("{pointer}/items"), visited, open),
+                None => {}
+            }
+            for keyword in ["additionalProperties", "not", "if", "then", "else"] {
+                if let Some(child) = object.get(keyword) {
+                    walk_schema(child, &format!("{pointer}/{keyword}"), visited, open);
+                }
+            }
+            if let Some(patterns) = object.get("patternProperties").and_then(Value::as_object) {
+                for (pattern, child) in patterns {
+                    let child_pointer = format!("{pointer}/patternProperties/{pattern}");
+                    walk_schema(child, &child_pointer, visited, open);
+                }
+            }
+            for keyword in ["oneOf", "anyOf", "allOf", "prefixItems"] {
+                if let Some(Value::Array(branches)) = object.get(keyword) {
+                    for (index, branch) in branches.iter().enumerate() {
+                        walk_schema(
+                            branch,
+                            &format!("{pointer}/{keyword}/{index}"),
+                            visited,
+                            open,
+                        );
+                    }
+                }
+            }
+        }
+
+        // Returns how many object nodes the schema has and the JSON pointers
+        // of those that accept unknown fields. The root pointer is "".
+        fn objects_accepting_unknown_fields(schema: &Value) -> (usize, Vec<String>) {
+            let mut visited = 0;
+            let mut open = Vec::new();
+            walk_schema(schema, "", &mut visited, &mut open);
+            if let Some(defs) = schema.get("$defs").and_then(Value::as_object) {
+                for (name, def) in defs {
+                    walk_schema(def, &format!("/$defs/{name}"), &mut visited, &mut open);
+                }
+            }
+            (visited, open)
+        }
+
+        fn schema_of<T: JsonSchema + 'static>() -> Value {
+            Value::Object((*rmcp::handler::server::common::schema_for_type::<T>()).clone())
+        }
+
+        #[test]
+        fn every_tool_input_schema_denies_unknown_fields() {
+            for tool in FewdMcp::tool_router().list_all() {
+                let schema = Value::Object((*tool.input_schema).clone());
+                let (visited, open) = objects_accepting_unknown_fields(&schema);
+                assert!(
+                    visited > 0,
+                    "{}: the walker found no object in the input schema",
+                    tool.name
+                );
+                assert!(
+                    open.is_empty(),
+                    "{}: the input schema accepts unknown fields at {open:?} (\"\" is the \
+                     root). Add #[serde(deny_unknown_fields)] to the type at each pointer, \
+                     or replace an untyped serde_json::Value field with a struct.",
+                    tool.name
+                );
+            }
+        }
+
+        #[test]
+        fn schema_walker_reports_types_that_accept_unknown_fields() {
+            #[derive(JsonSchema)]
+            #[allow(dead_code)]
+            struct Loose {
+                inner: LooseInner,
+            }
+            #[derive(JsonSchema)]
+            #[allow(dead_code)]
+            struct LooseInner {
+                value: String,
+            }
+
+            let (visited, open) = objects_accepting_unknown_fields(&schema_of::<Loose>());
+            assert_eq!(visited, 2, "both structs are objects");
+            assert_eq!(open, vec!["".to_string(), "/$defs/LooseInner".to_string()]);
+        }
+
+        #[test]
+        fn schema_walker_is_not_misled_by_fields_named_like_keywords() {
+            #[derive(serde::Deserialize, JsonSchema)]
+            #[serde(deny_unknown_fields)]
+            #[allow(dead_code)]
+            struct KeywordFields {
+                r#type: String,
+                properties: Vec<String>,
+            }
+
+            let (visited, open) = objects_accepting_unknown_fields(&schema_of::<KeywordFields>());
+            assert_eq!(visited, 1, "only the struct itself is an object");
+            assert!(open.is_empty(), "{open:?}");
+        }
+
+        #[test]
+        fn schema_walker_reports_untyped_value_fields() {
+            // schemars writes these three fields as `true`,
+            // `{"description": ...}`, and `{"default": null}`.
+            #[derive(serde::Deserialize, JsonSchema)]
+            #[serde(deny_unknown_fields)]
+            #[allow(dead_code)]
+            struct Untyped {
+                bare: Value,
+                #[schemars(description = "Free-form data.")]
+                documented: Value,
+                #[serde(default)]
+                defaulted: Option<Value>,
+            }
+
+            let (_, mut open) = objects_accepting_unknown_fields(&schema_of::<Untyped>());
+            open.sort();
+            assert_eq!(
+                open,
+                vec![
+                    "/properties/bare".to_string(),
+                    "/properties/defaulted".to_string(),
+                    "/properties/documented".to_string(),
+                ]
+            );
+        }
+    }
+
+    // ─── adapt_recipe ───────────────────────────────────────────────
+
+    mod adapt_recipe {
+        use super::*;
+        use crate::dto::{CreateRecipeDto, NutritionDto, TimeValueDto, UpdateRecipeDto};
+        use chrono::Utc;
+        use sea_orm::{ActiveModelTrait, Set};
+        use serde_json::{json, Value};
+
+        fn params(args: Value) -> LenientParameters<AdaptRecipeInput> {
+            let Value::Object(object) = args else {
+                panic!("tool arguments must be a JSON object");
+            };
+            LenientParameters::<AdaptRecipeInput>::extract(Some(object))
+        }
+
+        fn rejection(args: Value) -> String {
+            let LenientParameters(parsed) = params(args);
+            parsed.expect_err("the input must be rejected")
+        }
+
+        async fn adapt(mcp: &FewdMcp, args: Value) -> Result<CallToolResult, McpError> {
+            mcp.adapt_recipe(params(args)).await
+        }
+
+        async fn recipe_count(mcp: &FewdMcp) -> usize {
+            RecipeService::get_all(&mcp.db)
+                .await
+                .expect("recipes load")
+                .len()
+        }
+
+        async fn stored(mcp: &FewdMcp, id: &str) -> recipe::Model {
+            RecipeService::get_by_id(&mcp.db, id.to_string())
+                .await
+                .expect("recipe loads")
+                .expect("recipe exists")
+        }
+
+        async fn view(mcp: &FewdMcp, slug: &str) -> Value {
+            let result = mcp
+                .get_recipe(LenientParameters::for_test(GetRecipeParams {
+                    slug: slug.into(),
+                }))
+                .await
+                .expect("get_recipe returns Ok");
+            assert_ne!(result.is_error, Some(true), "{result:?}");
+            tool_result_json(&result)
+        }
+
+        // A favorited, rated, planned parent whose ingredients carry a range
+        // amount, a fractional amount, notes, prep, an or_alternative, and two
+        // entries named "salt". Its instructions contain "sage" inside
+        // "sausage" as well as on its own.
+        async fn seed_gnocchi(mcp: &FewdMcp) -> recipe::Model {
+            let ingredients = serde_json::from_value(json!([
+                {"name": "potatoes", "amount": {"type": "single", "value": 2.0}, "unit": "pound", "notes": null},
+                {"name": "italian sausage", "prep": "casings removed", "amount": {"type": "single", "value": 1.0}, "unit": "pound", "notes": null},
+                {"name": "sage", "prep": "fresh", "amount": {"type": "range", "min": 6.0, "max": 8.0}, "unit": "leaf", "notes": "torn at the end"},
+                {"name": "parmesan", "amount": {"type": "single", "value": 0.33}, "unit": "cup", "notes": null,
+                 "or_alternative": {"name": "pecorino romano", "amount": {"type": "single", "value": 0.25}, "unit": "cup", "notes": null}},
+                {"name": "salt", "prep": "for the water", "amount": {"type": "single", "value": 1.0}, "unit": "tablespoon", "notes": null},
+                {"name": "salt", "prep": "to taste", "amount": {"type": "single", "value": 0.0}, "unit": "", "notes": null}
+            ]))
+            .expect("fixture ingredients parse");
+            let created =
+                RecipeService::create(
+                    &mcp.db,
+                    CreateRecipeDto {
+                        description: Some("Pillowy potato gnocchi".into()),
+                        source_url: Some("https://example.com/gnocchi".into()),
+                        prep_time: Some(TimeValueDto {
+                            value: 20,
+                            unit: "minutes".into(),
+                        }),
+                        cook_time: Some(TimeValueDto {
+                            value: 1,
+                            unit: "hours".into(),
+                        }),
+                        instructions:
+                            "Boil the potatoes.\n\nBrown the italian sausage.\n\nToss with sage."
+                                .into(),
+                        ingredients,
+                        nutrition_per_serving: Some(NutritionDto {
+                            calories: Some(600),
+                            protein_grams: Some(25),
+                            carbs_grams: Some(70),
+                            fat_grams: Some(20),
+                            notes: None,
+                        }),
+                        tags: vec!["dinner".into(), "italian".into()],
+                        notes: Some("Family favorite".into()),
+                        icon: Some("🥔".into()),
+                        ..bare_recipe_dto("Potato Gnocchi")
+                    },
+                )
+                .await
+                .expect("seed gnocchi");
+            let rated = RecipeService::update(
+                &mcp.db,
+                created.id.clone(),
+                UpdateRecipeDto {
+                    is_favorite: Some(true),
+                    rating: Some(5.0),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("favorite and rate the parent");
+            let mut planned: recipe::ActiveModel = rated.into();
+            planned.times_planned = Set(7);
+            planned.last_planned = Set(Some(Utc::now()));
+            planned
+                .update(&*mcp.db)
+                .await
+                .expect("record planning history")
+        }
+
+        fn spicy_args() -> Value {
+            json!({
+                "parent_recipe_slug": " Potato-Gnocchi ",
+                "name": "Gnocchi with Hot Italian Sausage",
+                "ingredient_changes": [
+                    {"op": "replace", "name": "Italian Sausage", "with":
+                        {"name": "hot italian sausage", "amount": {"kind": "single", "value": 1.0}, "unit": "pound"}},
+                    {"op": "add", "ingredient":
+                        {"name": "red pepper flakes", "amount": {"kind": "single", "value": 0.5}, "unit": "teaspoon"}}
+                ],
+                "instruction_edits": [{"find": "italian sausage", "replace": "hot italian sausage"}],
+                "notes": "Spicier Tuesday version"
+            })
+        }
+
+        // `spicy_args` with `overrides` merged over it; a `null` override
+        // removes that key.
+        fn spicy_with(overrides: Value) -> Value {
+            let mut args = spicy_args();
+            let object = args.as_object_mut().expect("the base is an object");
+            for (key, value) in overrides.as_object().expect("overrides are an object") {
+                if value.is_null() {
+                    object.remove(key);
+                } else {
+                    object.insert(key.clone(), value.clone());
+                }
+            }
+            args
+        }
+
+        async fn adapt_ok(mcp: &FewdMcp, args: Value) -> Value {
+            let result = adapt(mcp, args).await.expect("adapt_recipe returns Ok");
+            assert_ne!(result.is_error, Some(true), "{result:?}");
+            tool_result_json(&result)
+        }
+
+        #[tokio::test]
+        async fn adapting_saves_a_linked_variant_and_leaves_the_parent_untouched() {
+            let mcp = setup_test_mcp().await;
+            let parent = seed_gnocchi(&mcp).await;
+            let parent_before = stored(&mcp, &parent.id).await;
+            let parent_view = view(&mcp, &parent.slug).await;
+
+            let body = adapt_ok(&mcp, spicy_args()).await;
+
+            assert_eq!(body["slug"], "gnocchi-with-hot-italian-sausage");
+            assert_eq!(body["name"], "Gnocchi with Hot Italian Sausage");
+            assert_eq!(body["parent_recipe_slug"], "potato-gnocchi");
+            assert_eq!(body["source"], "ai_adapted");
+            assert_eq!(body["source_url"], Value::Null);
+            assert_eq!(
+                body["instructions"],
+                "Boil the potatoes.\n\nBrown the hot italian sausage.\n\nToss with sage."
+            );
+            assert_eq!(body["notes"], "Spicier Tuesday version");
+            assert_eq!(
+                body["nutrition_per_serving"],
+                Value::Null,
+                "changed ingredients clear nutrition"
+            );
+            for inherited in [
+                "description",
+                "tags",
+                "servings",
+                "portion_size",
+                "icon",
+                "prep_time",
+                "cook_time",
+                "total_time",
+            ] {
+                assert_eq!(body[inherited], parent_view[inherited], "{inherited}");
+            }
+            assert_eq!(body["is_favorite"], false);
+            assert_eq!(body["rating"], Value::Null);
+            assert_eq!(body["times_planned"], 0);
+            assert_eq!(body["last_planned"], Value::Null);
+
+            let ingredients = body["ingredients"].as_array().expect("an array");
+            let original = parent_view["ingredients"].as_array().expect("an array");
+            assert_eq!(ingredients.len(), original.len() + 1);
+            assert_eq!(ingredients[1]["name"], "hot italian sausage");
+            assert_eq!(
+                ingredients[1]["amount"],
+                json!({"kind": "single", "value": 1.0})
+            );
+            for (index, (variant, parent)) in ingredients.iter().zip(original).enumerate() {
+                if index != 1 {
+                    assert_eq!(
+                        variant, parent,
+                        "ingredient {index} must round-trip unchanged"
+                    );
+                }
+            }
+            assert_eq!(ingredients[original.len()]["name"], "red pepper flakes");
+
+            assert_eq!(
+                stored(&mcp, &parent.id).await,
+                parent_before,
+                "the parent row must be unchanged, updated_at included"
+            );
+            assert_eq!(
+                view(&mcp, "gnocchi-with-hot-italian-sausage").await["parent_recipe_slug"],
+                "potato-gnocchi"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_parent_without_a_stored_total_gives_the_variant_prep_plus_cook() {
+            let mcp = setup_test_mcp().await;
+            let parent = seed_gnocchi(&mcp).await;
+            let mut legacy: recipe::ActiveModel = parent.into();
+            legacy.total_time = Set(None);
+            legacy.total_minutes = Set(None);
+            let parent = legacy
+                .update(&*mcp.db)
+                .await
+                .expect("clear the stored total");
+
+            let body = adapt_ok(&mcp, spicy_args()).await;
+
+            assert_eq!(view(&mcp, &parent.slug).await["total_time"], Value::Null);
+            assert_eq!(body["total_time"], json!({"value": 80, "unit": "minutes"}));
+        }
+
+        #[tokio::test]
+        async fn a_variant_of_a_variant_links_to_its_immediate_parent() {
+            let mcp = setup_test_mcp().await;
+            seed_gnocchi(&mcp).await;
+            let first = adapt_ok(&mcp, spicy_args()).await;
+            let first_slug = first["slug"].as_str().expect("a slug");
+
+            let second = adapt_ok(
+                &mcp,
+                json!({
+                    "parent_recipe_slug": first_slug,
+                    "name": "Gnocchi with Hot Sausage and Kale",
+                    "ingredient_changes": [{"op": "add", "ingredient":
+                        {"name": "kale", "amount": {"kind": "single", "value": 2.0}, "unit": "cup"}}],
+                }),
+            )
+            .await;
+
+            assert_eq!(second["parent_recipe_slug"], first_slug);
+            let second_slug = second["slug"].as_str().expect("a slug");
+            assert_eq!(
+                view(&mcp, second_slug).await["parent_recipe_slug"],
+                first_slug
+            );
+        }
+
+        #[tokio::test]
+        async fn repeating_a_name_gets_a_suffixed_slug() {
+            let mcp = setup_test_mcp().await;
+            seed_gnocchi(&mcp).await;
+            let first = adapt_ok(&mcp, spicy_args()).await;
+            let second = adapt_ok(&mcp, spicy_args()).await;
+            assert_eq!(first["slug"], "gnocchi-with-hot-italian-sausage");
+            assert_eq!(second["slug"], "gnocchi-with-hot-italian-sausage-2");
+        }
+
+        #[tokio::test]
+        async fn overriding_tags_replaces_them_with_trimmed_values() {
+            let mcp = setup_test_mcp().await;
+            seed_gnocchi(&mcp).await;
+            let body = adapt_ok(
+                &mcp,
+                spicy_with(json!({"tags": [" spicy ", "dinner", "  "]})),
+            )
+            .await;
+            assert_eq!(body["tags"], json!(["spicy", "dinner"]));
+        }
+
+        #[tokio::test]
+        async fn blank_description_and_notes_keep_the_parents() {
+            let mcp = setup_test_mcp().await;
+            seed_gnocchi(&mcp).await;
+            let body = adapt_ok(&mcp, spicy_with(json!({"description": "   ", "notes": ""}))).await;
+            assert_eq!(body["description"], "Pillowy potato gnocchi");
+            assert_eq!(body["notes"], "Family favorite");
+        }
+
+        #[tokio::test]
+        async fn comma_names_in_added_and_replacement_ingredients_are_split() {
+            let mcp = setup_test_mcp().await;
+            seed_gnocchi(&mcp).await;
+            let body = adapt_ok(
+                &mcp,
+                spicy_with(json!({"ingredient_changes": [
+                    {"op": "replace", "name": "sage", "with":
+                        {"name": "basil, torn", "amount": {"kind": "single", "value": 6.0}, "unit": "leaf"}},
+                    {"op": "add", "ingredient":
+                        {"name": "garlic, minced", "amount": {"kind": "single", "value": 2.0}, "unit": "clove"}},
+                ]})),
+            )
+            .await;
+            let ingredients = body["ingredients"].as_array().expect("an array");
+            assert_eq!(ingredients[2]["name"], "basil");
+            assert_eq!(ingredients[2]["prep"], "torn");
+            let added = ingredients.last().expect("an added ingredient");
+            assert_eq!(added["name"], "garlic");
+            assert_eq!(added["prep"], "minced");
+        }
+
+        #[tokio::test]
+        async fn a_blank_parent_slug_names_parent_recipe_slug() {
+            let mcp = setup_test_mcp().await;
+            for raw in ["", "   "] {
+                assert_tool_user_error(
+                    adapt(&mcp, spicy_with(json!({"parent_recipe_slug": raw}))).await,
+                    &["parent_recipe_slug", "empty"],
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn an_unknown_parent_points_at_search() {
+            let mcp = setup_test_mcp().await;
+            assert_tool_user_error(
+                adapt(
+                    &mcp,
+                    spicy_with(json!({"parent_recipe_slug": "ghost-gnocchi"})),
+                )
+                .await,
+                &["ghost-gnocchi", "search_recipes"],
+            );
+        }
+
+        #[tokio::test]
+        async fn change_errors_carry_the_recovery_call_on_the_parent() {
+            let mcp = setup_test_mcp().await;
+            seed_gnocchi(&mcp).await;
+            let cases = [
+                (
+                    json!({"ingredient_changes": [{"op": "remove", "name": "ghost pepper"}]}),
+                    vec![
+                        "ghost pepper",
+                        "or_alternative",
+                        "get_recipe on 'potato-gnocchi'",
+                    ],
+                ),
+                (
+                    json!({"ingredient_changes": [{"op": "remove", "name": "pecorino romano"}]}),
+                    vec!["pecorino romano", "or_alternative", "get_recipe"],
+                ),
+                (
+                    json!({"ingredient_changes": [{"op": "remove", "name": "salt"}]}),
+                    vec![
+                        "salt (for the water)",
+                        "salt (to taste)",
+                        "prep",
+                        "get_recipe",
+                    ],
+                ),
+                (
+                    json!({"instruction_edits": [{"find": "sage", "replace": "basil"}]}),
+                    vec!["occurs 2 times", "full instructions", "get_recipe"],
+                ),
+                (
+                    json!({"instruction_edits": [{"find": "", "replace": "basil"}]}),
+                    vec![
+                        "instruction edit #1",
+                        "empty",
+                        "get_recipe on 'potato-gnocchi'",
+                    ],
+                ),
+                (
+                    json!({"instructions": "Just cook it."}),
+                    vec!["instruction_edits", "instructions", "not both"],
+                ),
+                (
+                    json!({"instruction_edits": [
+                        {"find": "Boil the", "replace": "Simmer the"},
+                        {"find": "Boil the", "replace": "Steam the"},
+                    ]}),
+                    vec![
+                        "instruction edit #2",
+                        "get_recipe on 'potato-gnocchi'",
+                        "earlier changes in this call apply first",
+                    ],
+                ),
+            ];
+            for (overrides, fragments) in cases {
+                assert_tool_user_error(adapt(&mcp, spicy_with(overrides)).await, &fragments);
+            }
+        }
+
+        #[tokio::test]
+        async fn a_parent_time_fewd_cannot_read_is_left_off_the_variant() {
+            let mcp = setup_test_mcp().await;
+            let parent = seed_gnocchi(&mcp).await;
+            let mut legacy: recipe::ActiveModel = parent.into();
+            legacy.cook_time = Set(Some(r#"{"value":3,"unit":"fortnights"}"#.into()));
+            let legacy = legacy.update(&*mcp.db).await.expect("store a legacy unit");
+            let parent_before = stored(&mcp, &legacy.id).await;
+
+            let body = adapt_ok(&mcp, spicy_args()).await;
+
+            assert_eq!(
+                body["cook_time"],
+                Value::Null,
+                "the unreadable time is dropped"
+            );
+            assert_eq!(
+                body["prep_time"],
+                json!({"value": 20, "unit": "minutes"}),
+                "a readable time is still inherited"
+            );
+            assert_eq!(
+                stored(&mcp, &legacy.id).await,
+                parent_before,
+                "the parent row must be unchanged"
+            );
+        }
+
+        #[tokio::test]
+        async fn same_prep_duplicates_point_at_a_whole_list_fallback_not_prep() {
+            let mcp = setup_test_mcp().await;
+            let ingredients = serde_json::from_value(json!([
+                {"name": "olive oil", "amount": {"type": "single", "value": 2.0}, "unit": "tablespoon", "notes": null},
+                {"name": "lemon", "amount": {"type": "single", "value": 1.0}, "unit": "", "notes": null},
+                {"name": "olive oil", "amount": {"type": "single", "value": 0.25}, "unit": "cup", "notes": "for greasing"}
+            ]))
+            .expect("fixture ingredients parse");
+            RecipeService::create(
+                &mcp.db,
+                CreateRecipeDto {
+                    ingredients,
+                    ..bare_recipe_dto("Vinaigrette")
+                },
+            )
+            .await
+            .expect("seed vinaigrette");
+            let before = recipe_count(&mcp).await;
+
+            let result = adapt(
+                &mcp,
+                json!({
+                    "parent_recipe_slug": "vinaigrette",
+                    "name": "Lemon Vinaigrette",
+                    "ingredient_changes": [{"op": "remove", "name": "olive oil"}],
+                }),
+            )
+            .await
+            .expect("adapt_recipe returns Ok");
+            assert_eq!(result.is_error, Some(true), "{result:?}");
+            let text = &result.content[0]
+                .as_text()
+                .expect("a tool-level error carries text")
+                .text;
+            for fragment in [
+                "olive oil: 2 tablespoon",
+                "olive oil: 0.25 cup (notes: for greasing)",
+                "create_recipe with parent_recipe_slug 'vinaigrette'",
+                "update_recipe",
+            ] {
+                assert!(text.contains(fragment), "{fragment} in {text}");
+            }
+            assert!(
+                !text.contains("prep"),
+                "no prep filter can help here: {text}"
+            );
+            assert_eq!(recipe_count(&mcp).await, before, "nothing is saved");
+        }
+
+        #[tokio::test]
+        async fn a_malformed_parent_is_a_protocol_error() {
+            let mcp = setup_test_mcp().await;
+            let parent = seed_gnocchi(&mcp).await;
+            let mut broken: recipe::ActiveModel = parent.into();
+            broken.ingredients = Set("not json".into());
+            broken.update(&*mcp.db).await.expect("store malformed JSON");
+            let before = recipe_count(&mcp).await;
+
+            let result = adapt(&mcp, spicy_args()).await;
+            assert!(
+                result.is_err(),
+                "a malformed parent is a server fault, not a tool error: {result:?}"
+            );
+            assert_eq!(recipe_count(&mcp).await, before, "nothing is saved");
+        }
+
+        #[tokio::test]
+        async fn every_rejected_call_saves_nothing() {
+            let mcp = setup_test_mcp().await;
+            seed_gnocchi(&mcp).await;
+            let before = recipe_count(&mcp).await;
+            let cases = [
+                json!({"parent_recipe_slug": "  "}),
+                json!({"parent_recipe_slug": "ghost-gnocchi"}),
+                json!({"name": " "}),
+                json!({"instructions": "Just cook it."}),
+                json!({"instruction_edits": null, "instructions": "  "}),
+                json!({"ingredient_changes": null, "instruction_edits": null, "tags": ["spicy"]}),
+                json!({"ingredient_changes": [{"op": "remove", "name": " "}]}),
+                json!({"ingredient_changes": [{"op": "remove", "name": "ghost pepper"}]}),
+                json!({"ingredient_changes": [{"op": "remove", "name": "salt"}]}),
+                json!({"ingredient_changes": [
+                    {"op": "remove", "name": "sage"},
+                    {"op": "remove", "name": "sage"},
+                ]}),
+                json!({"instruction_edits": [{"find": " ", "replace": "x"}]}),
+                json!({"instruction_edits": [{"find": "chorizo", "replace": "x"}]}),
+                json!({"instruction_edits": [{"find": "sage", "replace": "basil"}]}),
+                json!({"servings": 6}),
+            ];
+            for overrides in cases {
+                let result = adapt(&mcp, spicy_with(overrides.clone())).await;
+                let call = result.unwrap_or_else(|e| panic!("{overrides}: protocol error {e:?}"));
+                assert_eq!(call.is_error, Some(true), "{overrides} must be rejected");
+                assert_eq!(
+                    recipe_count(&mcp).await,
+                    before,
+                    "{overrides} must save nothing"
+                );
+            }
+        }
+
+        // ─── Wire shape ─────────────────────────────────────────────
+
+        #[test]
+        fn all_three_ops_deserialize() {
+            let LenientParameters(parsed) = params(spicy_with(json!({"ingredient_changes": [
+                {"op": "add", "ingredient":
+                    {"name": "kale", "amount": {"kind": "single", "value": 2.0}, "unit": "cup"}},
+                {"op": "replace", "name": "sage", "prep": "fresh", "with":
+                    {"name": "basil", "amount": {"kind": "range", "min": 6.0, "max": 8.0}, "unit": "leaf"}},
+                {"op": "remove", "name": "salt", "prep": "to taste"},
+            ]})));
+            let input = parsed.expect("every op parses");
+            let debug = format!("{:?}", input.ingredient_changes);
+            for fragment in [
+                "Add",
+                "Replace",
+                "Remove",
+                "Some(\"fresh\")",
+                "Some(\"to taste\")",
+            ] {
+                assert!(debug.contains(fragment), "{fragment} in {debug}");
+            }
+        }
+
+        #[test]
+        fn malformed_changes_are_rejected() {
+            let cases = [
+                (
+                    json!([{"op": "swap", "name": "sage"}]),
+                    "unknown variant `swap`",
+                ),
+                (
+                    json!([{"op": "remove", "name": "sage", "old": "sage"}]),
+                    "unknown field `old`",
+                ),
+                (
+                    json!([{"op": "replace", "name": "sage", "with":
+                        {"name": "basil", "qty": 2, "amount": {"kind": "single", "value": 1.0}}}]),
+                    "unknown field `qty`",
+                ),
+                (
+                    json!([{"op": "replace", "name": "sage", "with":
+                        {"name": "basil", "amount": {"kind": "single", "value": 1.0, "unit": "leaf"}}}]),
+                    "unknown field `unit`",
+                ),
+                (
+                    json!([{"op": "add", "name": "basil", "amount": {"kind": "single", "value": 1.0}}]),
+                    "`ingredient`",
+                ),
+            ];
+            for (changes, fragment) in cases {
+                let err = rejection(spicy_with(json!({"ingredient_changes": changes})));
+                assert!(err.contains(fragment), "{fragment} in {err}");
+            }
+
+            let err = rejection(spicy_with(json!({"instruction_edits":
+                [{"find": "sage", "replace": "basil", "all": true}]})));
+            assert!(err.contains("unknown field `all`"), "{err}");
+        }
+
+        #[test]
+        fn inherited_field_is_rejected_as_unknown() {
+            let err = rejection(spicy_with(json!({"servings": 2})));
+            assert!(err.contains("unknown field `servings`"), "{err}");
+        }
+
+        #[test]
+        fn ingredient_change_branches_deny_unknown_fields_and_list_every_op() {
+            let tools = FewdMcp::tool_router().list_all();
+            let tool = tools
+                .iter()
+                .find(|t| t.name == "adapt_recipe")
+                .expect("adapt_recipe is registered");
+            let schema = Value::Object((*tool.input_schema).clone());
+            let items = &schema["properties"]["ingredient_changes"]["items"];
+            let change = match items.get("$ref").and_then(Value::as_str) {
+                Some(reference) => {
+                    let name = reference.rsplit('/').next().expect("a ref names a def");
+                    &schema["$defs"][name]
+                }
+                None => items,
+            };
+            let branches = change["oneOf"]
+                .as_array()
+                .unwrap_or_else(|| panic!("an internally tagged enum is a oneOf: {change}"));
+            let mut ops: Vec<&str> = Vec::new();
+            for branch in branches {
+                assert_eq!(
+                    branch["additionalProperties"],
+                    Value::Bool(false),
+                    "every op must deny unknown fields: {branch}"
+                );
+                let op = &branch["properties"]["op"];
+                let value = op
+                    .get("const")
+                    .or_else(|| op["enum"].get(0))
+                    .and_then(Value::as_str)
+                    .unwrap_or_else(|| panic!("op names its value: {op}"));
+                ops.push(value);
+            }
+            ops.sort_unstable();
+            assert_eq!(ops, ["add", "remove", "replace"]);
         }
     }
 }
