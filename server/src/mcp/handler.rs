@@ -3712,10 +3712,10 @@ mod tests {
 
     // ─── Dangling tool references ───────────────────────────────────
     //
-    // Descriptions and input-schema docs cross-reference tools by name,
-    // which is how the LLM learns which tool to call first and which one
-    // undoes another. An unresolved name sends the model at a tool that
-    // is not there, and it recovers only by spending a failed call.
+    // Descriptions and input-type docs name tools; every `///` on an input
+    // type ships as a schema `description`, so both reach the model. A name
+    // that does not resolve sends the model at a tool that is not there,
+    // and it recovers only by spending a failed call.
     //
     // Nothing else catches that: the intent-verb guard reads the first
     // word and the embedded-example guard reads the trailing payload,
