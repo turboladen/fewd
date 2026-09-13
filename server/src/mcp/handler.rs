@@ -651,7 +651,7 @@ impl FewdMcp {
 
     #[tool(
         name = "favorite_recipe",
-        description = "Mark a recipe as a family favorite — or unmark one — when the user says they loved it, want it in regular rotation, or want it off that list; call `search_recipes` or `get_recipe` first for the `slug`. Returns the same brief row `search_recipes` returns — slug, name, description, tags, icon, servings, total time, how many times it has been planned, when it was last planned, rating, and is_favorite — so you can confirm the new state; call `get_recipe` when you need ingredients or instructions. `is_favorite` is set absolutely, never toggled: `true` always favorites and `false` always unfavorites, so you never need to know the current state first, and calling twice with the same value leaves the recipe in the same state. Favorites drive `list_curated_recipes` (every favorite is listed first and is never truncated) and `search_recipes`'s `is_favorite` filter, so marking one changes what later planning sessions see. Use `rate_recipe` instead when the user gives a star rating — a favorite is a binary shortlist flag, not a score, and a recipe can have both. This writes only `is_favorite` — use `update_recipe` to change the recipe's content. An unknown `slug` returns an error pointing at `search_recipes`; a blank one is rejected as a missing value. Example: {\"slug\":\"beef-taco-bowls\",\"is_favorite\":true}",
+        description = "Mark a recipe as a family favorite — or unmark one — when the user says they loved it, want it in regular rotation, or want it off that list; call `search_recipes` or `get_recipe` first for the `slug`. Returns the brief row `search_recipes` returns, so you can confirm the new state. Favorites are listed first by `list_curated_recipes` and match `search_recipes`' `is_favorite` filter, so marking one changes what later planning sessions see. Use `rate_recipe` instead for a star rating: a favorite is a shortlist flag, not a score, and a recipe can have both. This writes only `is_favorite`; use `update_recipe` to change the recipe's content. An unknown `slug` returns an error pointing at `search_recipes`. Example: {\"slug\":\"beef-taco-bowls\",\"is_favorite\":true}",
         input_schema = rmcp::handler::server::common::schema_for_type::<FavoriteRecipeInput>()
     )]
     async fn favorite_recipe(
@@ -681,7 +681,7 @@ impl FewdMcp {
 
     #[tool(
         name = "rate_recipe",
-        description = "Rate a recipe from 1 to 5 stars when the user says how much they liked a dish they have eaten; call `search_recipes` or `get_recipe` first for the `slug`. Returns the same brief row `search_recipes` returns — slug, name, description, tags, icon, servings, total time, how many times it has been planned, when it was last planned, rating, and is_favorite — so you can confirm the stored value; call `get_recipe` when you need ingredients or instructions. Ratings are whole stars: a fractional value such as \"four and a half\" rounds to the nearest whole star, and a value that does not round into 1–5 is rejected rather than clamped. The returned row carries the whole-star value actually stored, so report that number to the user rather than the one they said. The rating is set absolutely, so re-rating overwrites and the last call wins. There is no way to clear a rating here and 0 is not accepted: call `unrate_recipe` when the user wants the rating removed rather than changed. Use `favorite_recipe` instead for the binary \"keep this in rotation\" flag — a recipe can have both. Ratings feed `search_recipes`'s `min_rating` filter and `list_curated_recipes`' top-rated tier, and a recipe with no rating is excluded from every `min_rating` search, so an unrated recipe and a 1-star recipe answer different queries. This writes only `rating` — use `update_recipe` to change the recipe's content. An unknown `slug` returns an error pointing at `search_recipes`; a blank one is rejected as a missing value. Example: {\"slug\":\"beef-taco-bowls\",\"rating\":5}",
+        description = "Rate a recipe from 1 to 5 stars when the user says how much they liked a dish they have eaten; call `search_recipes` or `get_recipe` first for the `slug`. Returns the brief row `search_recipes` returns, carrying the whole-star rating actually stored, so report that number rather than the one the user said. Re-rating overwrites. Call `unrate_recipe` when the user wants the rating removed, and use `favorite_recipe` for the binary keep-in-rotation flag; a recipe can have both. Ratings feed `search_recipes`' `min_rating` filter and `list_curated_recipes`' top-rated tier, and an unrated recipe is excluded from every `min_rating` search. This writes only `rating`; use `update_recipe` to change the recipe's content. An unknown `slug` returns an error pointing at `search_recipes`. Example: {\"slug\":\"beef-taco-bowls\",\"rating\":5}",
         input_schema = rmcp::handler::server::common::schema_for_type::<RateRecipeInput>()
     )]
     async fn rate_recipe(
@@ -3698,7 +3698,7 @@ mod tests {
 
     // Tools whose descriptions are still over budget. Each must actually be
     // over it, so the list cannot go stale.
-    const OVER_BUDGET_PENDING: &[&str] = &["favorite_recipe", "rate_recipe"];
+    const OVER_BUDGET_PENDING: &[&str] = &[];
 
     #[test]
     fn every_tool_description_fits_the_length_budget() {

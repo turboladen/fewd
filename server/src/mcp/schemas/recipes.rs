@@ -350,7 +350,8 @@ pub struct ImportRecipeUrlInput {
 #[serde(deny_unknown_fields)]
 pub struct FavoriteRecipeInput {
     /// Slug of the recipe to favorite or unfavorite (case-insensitive).
-    /// Call `search_recipes` or `get_recipe` first to find it.
+    /// Call `search_recipes` or `get_recipe` first to find it. A blank
+    /// slug is rejected.
     pub slug: String,
     /// `true` favorites the recipe, `false` unfavorites it. This is an
     /// absolute set, not a toggle: you never need to read the current
@@ -371,11 +372,13 @@ pub struct FavoriteRecipeInput {
 #[serde(deny_unknown_fields)]
 pub struct RateRecipeInput {
     /// Slug of the recipe to rate (case-insensitive). Call
-    /// `search_recipes` or `get_recipe` first to find it.
+    /// `search_recipes` or `get_recipe` first to find it. A blank slug
+    /// is rejected.
     pub slug: String,
-    /// Star rating, a whole number from 1 to 5. A fractional value rounds
-    /// to the nearest whole star. There is no rating that means "no
-    /// rating" — call `unrate_recipe` to remove one.
+    /// Star rating, a whole number from 1 to 5. A fractional value rounds to
+    /// the nearest whole star, and one that does not round into 1–5 is
+    /// rejected rather than clamped; the returned row carries the value
+    /// stored. 0 is not accepted: call `unrate_recipe` to remove a rating.
     #[schemars(range(min = 1, max = 5))]
     pub rating: f64,
 }
