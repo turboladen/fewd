@@ -310,7 +310,7 @@ fewd/
 
 - **REQUIREMENTS.md** — Full specifications and data models
 - **IMPLEMENTATION_PLAN.md** — Build guide for upcoming features
-- **CLAUDE.md** — Development guide for AI assistants
+- **CLAUDE.md** and **.claude/rules/** — Development guide for AI assistants (always-loaded essentials plus path-scoped topic rules)
 - **docs/mcp-testing.md** — Copy-pasteable tool+params combos for exploratory MCP testing via Inspector
 
 ## License

@@ -596,7 +596,7 @@ State-changing. Schedules a meal on a date with per-person serving assignments.
 }
 ```
 
-Expect: the created meal with the recipe and person resolved to their canonical forms. The MCP boundary normalizes `meal_type` casing — `"dinner"`, `"Dinner"`, and `"DINNER"` all work; the server stores the canonical Title Case form so the planner UI renders correctly (see the cross-boundary conventions note in `CLAUDE.md`).
+Expect: the created meal with the recipe and person resolved to their canonical forms. The MCP boundary normalizes `meal_type` casing — `"dinner"`, `"Dinner"`, and `"DINNER"` all work; the server stores the canonical Title Case form so the planner UI renders correctly (see `.claude/rules/cross-boundary.md`).
 
 **Happy path — ad-hoc serving:**
 

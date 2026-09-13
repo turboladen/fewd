@@ -56,9 +56,10 @@ fn first_top_level_comma(s: &str) -> Option<usize> {
 ///
 /// Lives next to `first_top_level_comma` so the runtime parser
 /// (`fewd_lib::services::recipe_parser`) and any future backfill that walks
-/// existing rows (fewd-6ai) consume the same canonical helper, the same way
-/// `peel_size_paren` is shared with `m20260429_000015_*`. See CLAUDE.md
-/// "Shared helpers between runtime ingest paths and backfill migrations".
+/// existing rows consume the same canonical helper, the same way
+/// `peel_size_paren` is shared with `m20260429_000015_*`. Helpers shared by
+/// runtime ingest and backfill migrations live in this crate so the two
+/// cannot drift apart.
 pub fn first_top_level_or(s: &str) -> Option<usize> {
     let mut depth: i32 = 0;
     let bytes = s.as_bytes();

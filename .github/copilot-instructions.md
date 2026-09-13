@@ -13,7 +13,7 @@ Findings framed against a public-SaaS threat model — "rate limiting needed," "
 Several decisions in this repo look unusual on a cold read but have explicit rationale. Before flagging an "X seems wrong" finding:
 
 1. **The commit message of the change you're reviewing.** Non-default choices typically have a paragraph explaining why. The MCP session keep-alive (`server/src/mcp/mod.rs`, set to 7 days) is the canonical example — looks long, is deliberate, full history is in the commit body.
-2. **`CLAUDE.md`** — the Cross-Boundary Conventions section lists invariants the type system doesn't enforce (Title-Case `meal_type`, slot-encoded `order_index`, DB path resolution), and the MCP Server section summarizes the tool-design principles.
+2. **`.claude/rules/`** — `cross-boundary.md` lists invariants the type system doesn't enforce (Title-Case `meal_type`, slot-encoded `order_index`, DB path resolution), and `mcp.md` summarizes the tool-design principles. `CLAUDE.md` holds the always-relevant essentials.
 3. **The PR conversation** — design questions sometimes resolve in chat before the code lands.
 
 ## Categories of finding that are usually already tracked
@@ -29,7 +29,7 @@ Flag a finding in one of these categories only if the change in this PR _makes t
 
 ## MCP module specifics
 
-`server/src/mcp/` follows seven design principles summarized in `CLAUDE.md`'s "MCP Server" section. Two come up in review most often:
+`server/src/mcp/` follows seven design principles summarized in `.claude/rules/mcp.md`. Two come up in review most often:
 
 - **Errors on unknown references should be actionable.** When a tool input names a slug / person / tag that doesn't exist, the error should point the LLM at the discovery tool ("Call `list_people` to see valid names"), not just state the failure. If a new write path lacks this, it's a real finding worth flagging.
 - **Respect the domain model's expressiveness at the MCP boundary.** Fractional `servings_count: f64` (a kid eats 0.5 portions), tagged `IngredientAmountDto::Range`, structured ingredient amounts — these all carry real information. Don't suggest flattening them to "simpler" shapes (integer servings, free-text amounts) for LLM-friendliness; the shopping-list math depends on the structure surviving end-to-end.
