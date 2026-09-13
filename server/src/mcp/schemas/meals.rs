@@ -12,7 +12,6 @@ use super::common::{
     ingredient_in, ingredient_out, parse_json, validate_date_yyyy_mm_dd, IngredientOut,
 };
 use super::errors::{CreateMealError, InputError, ResolveError};
-use super::McpToolInput;
 
 /// One serving within a meal. The `kind` discriminator distinguishes a recipe
 /// assignment from an ad-hoc item list.
@@ -60,8 +59,6 @@ pub struct CreateMealInput {
     pub order_index: Option<i32>,
     pub servings: Vec<ServingInput>,
 }
-
-impl McpToolInput for CreateMealInput {}
 
 /// One serving assignment within a meal. `kind = "recipe"` references an
 /// existing recipe; `kind = "adhoc"` carries a loose ingredient list for

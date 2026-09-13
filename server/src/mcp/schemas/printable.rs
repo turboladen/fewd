@@ -16,7 +16,6 @@ use serde::{Deserialize, Deserializer};
 
 use super::common::validate_date_yyyy_mm_dd;
 use super::errors::InputError;
-use super::McpToolInput;
 use crate::dto::MealType;
 
 /// Hard cap on the date span for a single printable. The template is sized
@@ -95,8 +94,6 @@ pub struct PrintableInput {
     #[serde(default)]
     pub foot_note: Option<String>,
 }
-
-impl McpToolInput for PrintableInput {}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

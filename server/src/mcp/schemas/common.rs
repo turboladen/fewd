@@ -12,7 +12,6 @@ use crate::dto::{
 };
 
 use super::errors::InputError;
-use super::McpToolInput;
 
 // ─── Input schemas shared across tools ───────────────────────────
 
@@ -31,8 +30,6 @@ pub const MAX_DATE_RANGE_DAYS: i64 = 366;
 #[serde(deny_unknown_fields)]
 pub struct EmptyParams {}
 
-impl McpToolInput for EmptyParams {}
-
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GetRecipeParams {
@@ -42,8 +39,6 @@ pub struct GetRecipeParams {
     pub slug: String,
 }
 
-impl McpToolInput for GetRecipeParams {}
-
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DateRangeParams {
@@ -52,8 +47,6 @@ pub struct DateRangeParams {
     /// Inclusive end date in YYYY-MM-DD format.
     pub end_date: String,
 }
-
-impl McpToolInput for DateRangeParams {}
 
 impl DateRangeParams {
     /// Validate both dates parse as YYYY-MM-DD AND that `start_date` is
