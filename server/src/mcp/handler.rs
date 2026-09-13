@@ -467,7 +467,7 @@ impl FewdMcp {
 
     #[tool(
         name = "get_meal_planner_printable",
-        description = "Produce the family's canonical fridge-card HTML printable for an upcoming window — the finishing step after the week's `create_meal`s (and optionally `get_shopping_list`). Output is sized to fit a single US Letter portrait sheet at 100% browser print scale. Date range is capped at 14 inclusive days; `use_up_notes` ≤6, `dont_forget` ≤8 items, `prep_notes` ≤6 per day are hard-enforced. Required: start_date, end_date. Optional LLM-supplied overlay: include (meal slots, default ['Dinner']), week_theme (top-right badge), use_up_notes (top-right bullets), dont_forget (dark footer block of cross-day reminders), day_overlays (per-date tag + blurb-override + prep_notes), foot_note (left-footer subtitle).",
+        description = "Produce the family's canonical fridge-card HTML printable for an upcoming window — the finishing step after the week's `create_meal`s (and optionally `get_shopping_list`). Output is sized to fit a single US Letter portrait sheet at 100% browser print scale. Date range is capped at 14 inclusive days; `use_up_notes` ≤6, `dont_forget` ≤8 items, `prep_notes` ≤6 per day are hard-enforced. Required: start_date, end_date. Optional LLM-supplied overlay: include (meal slots, default ['Dinner']), week_theme (top-right badge), use_up_notes (top-right bullets), dont_forget (dark footer block of cross-day reminders), day_overlays (per-date tag, blurb overriding the recipe description, prep_notes), foot_note (left-footer subtitle).",
         input_schema = rmcp::handler::server::common::schema_for_type::<PrintableInput>()
     )]
     async fn get_meal_planner_printable(
