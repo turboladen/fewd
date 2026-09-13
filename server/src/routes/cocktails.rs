@@ -247,13 +247,12 @@ pub async fn import_drink_recipe_url(
                                 let value = serde_json::to_value(&recipe).unwrap_or_default();
                                 let _ = sse_tx.send(SsePayload::Complete(value)).await;
                             }
+                            // The DbErr text carries SQLite detail, so it
+                            // stays in the log and the client gets a label.
                             Err(e) => {
                                 tracing::error!("Failed to save imported drink recipe: {}", e);
                                 let _ = sse_tx
-                                    .send(SsePayload::Error(format!(
-                                        "Failed to save recipe: {}",
-                                        e
-                                    )))
+                                    .send(SsePayload::Error("Failed to save recipe".to_string()))
                                     .await;
                             }
                         }

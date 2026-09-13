@@ -2,6 +2,7 @@ use sea_orm::*;
 
 use crate::dto::{CreateDrinkRecipeDto, UpdateDrinkRecipeDto};
 use crate::entities::drink_recipe::{self, Entity as DrinkRecipe};
+use crate::services::service_error::{whole_star_rating, ServiceError};
 use crate::services::to_json;
 
 pub struct DrinkRecipeService;
@@ -83,7 +84,7 @@ impl DrinkRecipeService {
         db: &DatabaseConnection,
         id: String,
         data: UpdateDrinkRecipeDto,
-    ) -> Result<drink_recipe::Model, DbErr> {
+    ) -> Result<drink_recipe::Model, ServiceError> {
         let existing = DrinkRecipe::find_by_id(id)
             .one(db)
             .await?
@@ -131,18 +132,12 @@ impl DrinkRecipeService {
             recipe.is_non_alcoholic = Set(is_non_alcoholic);
         }
         if let Some(rating) = data.rating {
-            let rounded = rating.round();
-            if !(1.0..=5.0).contains(&rounded) {
-                return Err(DbErr::Custom(
-                    "Rating must be a whole number from 1 to 5".to_string(),
-                ));
-            }
-            recipe.rating = Set(Some(rounded));
+            recipe.rating = Set(Some(whole_star_rating(rating)?));
         }
 
         recipe.updated_at = Set(chrono::Utc::now());
 
-        recipe.update(db).await
+        Ok(recipe.update(db).await?)
     }
 
     pub async fn delete(db: &DatabaseConnection, id: String) -> Result<(), DbErr> {

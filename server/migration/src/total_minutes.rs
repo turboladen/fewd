@@ -20,10 +20,22 @@ pub fn total_time_to_minutes(value: i32, unit: &str) -> Option<i32> {
     if value < 0 {
         return None;
     }
+    let (_, minutes_per_unit) = canonical_time_unit(unit)?;
+    value.checked_mul(minutes_per_unit)
+}
+
+/// Lists the units [`canonical_time_unit`] recognizes, phrased for an error message.
+pub const ACCEPTED_TIME_UNITS: &str =
+    "minutes, hours, or days (singular or plural; min, mins, m, hr, hrs, h, and d also work)";
+
+/// Resolve a free-form duration unit to its canonical plural name and the
+/// number of minutes one unit spans. Matching is case-insensitive and trims
+/// surrounding whitespace. Returns `None` for an unrecognized unit.
+pub fn canonical_time_unit(unit: &str) -> Option<(&'static str, i32)> {
     match unit.trim().to_ascii_lowercase().as_str() {
-        "minute" | "minutes" | "min" | "mins" | "m" => Some(value),
-        "hour" | "hours" | "hr" | "hrs" | "h" => value.checked_mul(60),
-        "day" | "days" | "d" => value.checked_mul(60 * 24),
+        "minute" | "minutes" | "min" | "mins" | "m" => Some(("minutes", 1)),
+        "hour" | "hours" | "hr" | "hrs" | "h" => Some(("hours", 60)),
+        "day" | "days" | "d" => Some(("days", 60 * 24)),
         _ => None,
     }
 }
@@ -31,6 +43,14 @@ pub fn total_time_to_minutes(value: i32, unit: &str) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_time_unit_names_the_plural_form_and_its_minutes() {
+        assert_eq!(canonical_time_unit(" Mins "), Some(("minutes", 1)));
+        assert_eq!(canonical_time_unit("HR"), Some(("hours", 60)));
+        assert_eq!(canonical_time_unit("d"), Some(("days", 1440)));
+        assert_eq!(canonical_time_unit("fortnights"), None);
+    }
 
     #[test]
     fn minute_units_pass_value_through() {
