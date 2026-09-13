@@ -212,8 +212,10 @@ impl SearchRecipesParams {
     }
 }
 
-/// Input for `create_recipe`. Mirrors [`CreateRecipeDto`] but replaces
-/// `parent_recipe_id` with a slug reference the LLM can actually produce.
+/// Input for the `create_recipe` MCP tool.
+//
+// It mirrors `CreateRecipeDto`, but names the parent by slug, which the LLM
+// can produce, instead of by `parent_recipe_id`.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateRecipeInput {
@@ -228,7 +230,7 @@ pub struct CreateRecipeInput {
     #[serde(default)]
     pub parent_recipe_slug: Option<String>,
     /// Hands-on time. The `unit` must be minutes, hours, or days (singular,
-    /// plural, or the `min` / `hr` / `d` abbreviations); any other unit
+    /// plural, or the "min" / "hr" / "d" abbreviations); any other unit
     /// rejects the call.
     #[serde(default)]
     pub prep_time: Option<TimeOut>,
@@ -410,7 +412,7 @@ pub struct UpdateRecipeInput {
     #[serde(default)]
     pub description: Option<String>,
     /// Hands-on time. The `unit` must be minutes, hours, or days (singular,
-    /// plural, or the `min` / `hr` / `d` abbreviations) and is stored in its
+    /// plural, or the "min" / "hr" / "d" abbreviations) and is stored in its
     /// plural form. Any other unit rejects the whole call, writing nothing.
     /// A value equal to the stored duration is ignored.
     #[serde(default)]

@@ -3712,10 +3712,13 @@ mod tests {
 
     // ─── Dangling tool references ───────────────────────────────────
     //
-    // Descriptions cross-reference each other by name — that is how the
-    // LLM learns which tool to call first and which one undoes another.
-    // A name that does not resolve sends the model at a tool that is not
-    // there, and it recovers only by spending a failed call.
+    // Descriptions and input-schema docs cross-reference tools by name —
+    // that is how the LLM learns which tool to call first and which one
+    // undoes another. Every `///` on an input type ships as a schema
+    // `description`, so a name there reaches the model as surely as one in
+    // the tool description. A name that does not resolve sends the model at
+    // a tool that is not there, and it recovers only by spending a failed
+    // call.
     //
     // Nothing else catches that: the intent-verb guard reads the first
     // word and the embedded-example guard reads the trailing payload,
@@ -3799,14 +3802,14 @@ mod tests {
     }
 
     #[test]
-    fn tool_descriptions_only_reference_tools_that_exist() {
+    fn tool_docs_only_reference_names_that_exist() {
         use super::super::schemas::diet_tags::DIET_TAGS;
 
-        // Everything a description names in backticks has to resolve to
-        // something the server exposes: a registered tool, an input field
-        // on some tool's schema, or a diet tag. These are the only words
-        // that are none of those — JSON literals, and a person field no
-        // tool accepts as input.
+        // Everything a description or schema doc names in backticks has to
+        // resolve to something the server exposes: a registered tool, an
+        // input field on some tool's schema, or a diet tag. These are the
+        // only words that are none of those — JSON literals, and a person
+        // field no tool accepts as input.
         const NON_TOOL_WORDS: &[&str] = &["true", "false", "null", "dietary_goals"];
 
         let router = FewdMcp::tool_router();
@@ -3815,43 +3818,61 @@ mod tests {
         let mut known: Vec<&str> = registered.iter().copied().collect();
         known.sort_unstable();
 
-        // Schemas nest — an ingredient's fields live under `$defs` — so
-        // collect property names at every depth rather than only the top.
+        // Schemas nest — an ingredient's fields live under `$defs`, and an
+        // enum's variants under `oneOf` — so collect property names at every
+        // depth, arrays included, rather than only the top.
         fn field_names(schema: &serde_json::Value, out: &mut HashSet<String>) {
-            let Some(object) = schema.as_object() else {
-                return;
-            };
-            if let Some(properties) = object.get("properties").and_then(|p| p.as_object()) {
-                out.extend(properties.keys().cloned());
-            }
-            for value in object.values() {
-                field_names(value, out);
+            match schema {
+                serde_json::Value::Object(object) => {
+                    if let Some(properties) = object.get("properties").and_then(|p| p.as_object()) {
+                        out.extend(properties.keys().cloned());
+                    }
+                    for value in object.values() {
+                        field_names(value, out);
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    for item in items {
+                        field_names(item, out);
+                    }
+                }
+                _ => {}
             }
         }
+        let schemas: Vec<serde_json::Value> = tools
+            .iter()
+            .map(|tool| serde_json::Value::Object((*tool.input_schema).clone()))
+            .collect();
         let mut fields: HashSet<String> = HashSet::new();
-        for tool in &tools {
-            field_names(
-                &serde_json::Value::Object((*tool.input_schema).clone()),
-                &mut fields,
-            );
+        for schema in &schemas {
+            field_names(schema, &mut fields);
         }
 
-        for tool in &tools {
-            let description = tool.description.as_deref().unwrap_or("");
-            for referenced in backticked_identifiers(description) {
-                let resolves = registered.contains(referenced)
-                    || fields.contains(referenced)
-                    || DIET_TAGS.iter().any(|(tag, _)| *tag == referenced)
-                    || NON_TOOL_WORDS.contains(&referenced);
-                assert!(
-                    resolves,
-                    "{}: description references `{referenced}`, which is not a registered \
-                     tool, an input field, or a diet tag. Correct it to one of {known:?} — \
-                     or, if it is a literal rather than a name, add it to NON_TOOL_WORDS.",
-                    tool.name,
-                );
+        let mut dangling: Vec<String> = Vec::new();
+        for (tool, schema) in tools.iter().zip(&schemas) {
+            let mut docs = vec![(
+                "description".to_string(),
+                tool.description.as_deref().unwrap_or(""),
+            )];
+            schema_doc_strings(schema, "inputSchema", &mut docs);
+            for (location, text) in docs {
+                for referenced in backticked_identifiers(text) {
+                    let resolves = registered.contains(referenced)
+                        || fields.contains(referenced)
+                        || DIET_TAGS.iter().any(|(tag, _)| *tag == referenced)
+                        || NON_TOOL_WORDS.contains(&referenced);
+                    if !resolves {
+                        dangling.push(format!("{} {location}: `{referenced}`", tool.name));
+                    }
+                }
             }
         }
+        assert!(
+            dangling.is_empty(),
+            "these docs reference names that are not a registered tool, an input field, \
+             or a diet tag: {dangling:#?}. Correct each to one of {known:?}, or put a \
+             literal value in double quotes instead of backticks.",
+        );
     }
 
     // ─── Embedded example payloads (fewd-9d8) ───────────────────────
