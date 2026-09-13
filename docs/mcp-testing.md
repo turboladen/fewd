@@ -15,7 +15,7 @@ If you find yourself running the same scenario manually more than twice, promote
 - `just dev` is running (server at `http://localhost:3000`).
 - A token has been provisioned for an active family member (Settings → _Provision token_).
 - Inspector is connected: Streamable HTTP, `http://localhost:3000/mcp`, Bearer = the token.
-- Some recipes / people / meals exist in the DB so list-shaped tools return data. The seed sample family in `bun run dev:full` gives you a working baseline.
+- Some recipes / people / meals exist in the DB so list-shaped tools return data. The sample family the server seeds into an empty `data/fewd.db` under `just dev` gives you a working baseline. Don't seed through `bun run dev:full`: it runs the server from `server/` and writes a separate `server/data/fewd.db` that the `just dev` server never reads.
 
 ## Tool catalog
 
@@ -596,7 +596,7 @@ State-changing. Schedules a meal on a date with per-person serving assignments.
 }
 ```
 
-Expect: the created meal with the recipe and person resolved to their canonical forms. The MCP boundary normalizes `meal_type` casing — `"dinner"`, `"Dinner"`, and `"DINNER"` all work; the server stores the canonical Title Case form so the planner UI renders correctly (see the cross-boundary conventions note in `CLAUDE.md`).
+Expect: the created meal with the recipe and person resolved to their canonical forms. The MCP boundary normalizes `meal_type` casing — `"dinner"`, `"Dinner"`, and `"DINNER"` all work; the server stores the canonical Title Case form so the planner UI renders correctly (see `.claude/rules/cross-boundary.md`).
 
 **Happy path — ad-hoc serving:**
 

@@ -76,9 +76,9 @@ impl MigrationTrait for Migration {
     }
 }
 
-/// Frozen-in-time copy of the ingredient shape (per CLAUDE.md, migrations
-/// own their structs; do not share with m13/m14 even though the shapes are
-/// currently identical).
+/// Frozen-in-time copy of the ingredient shape. Migrations own their structs,
+/// so do not share this with m13/m14 even though the shapes are currently
+/// identical.
 #[derive(Debug, Deserialize, Serialize)]
 struct Ingredient {
     name: String,
