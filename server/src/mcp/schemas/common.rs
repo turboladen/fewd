@@ -24,10 +24,14 @@ use super::errors::InputError;
 /// "{N} rows exceed cap" message.
 pub const MAX_DATE_RANGE_DAYS: i64 = 366;
 
+// If a client that sends placeholder arguments to no-argument tools ever
+// matters, this is the place to add an exception for it.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct EmptyParams {}
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct GetRecipeParams {
     /// URL-safe slug that uniquely identifies the recipe (e.g. "carbonara" or
     /// "roasted-chicken-2"). Use `list_curated_recipes` for the shortlist or
@@ -36,6 +40,7 @@ pub struct GetRecipeParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DateRangeParams {
     /// Inclusive start date in YYYY-MM-DD format.
     pub start_date: String,
@@ -116,6 +121,7 @@ pub(super) fn validate_date_yyyy_mm_dd(
 /// [`IngredientDto`] but adds [`JsonSchema`] so MCP clients can introspect
 /// the structure, and accepts both directions.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct IngredientOut {
     /// Purchasable identity (e.g. "garlic"). Distinct varietals like
     /// "boneless skinless chicken breast" vs "whole chicken" stay as separate
@@ -156,13 +162,14 @@ pub struct IngredientOut {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum IngredientAmountOut {
     Single { value: f64 },
     Range { min: f64, max: f64 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct NutritionOut {
     pub calories: Option<i32>,
     pub protein_grams: Option<i32>,
@@ -172,12 +179,14 @@ pub struct NutritionOut {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TimeOut {
     pub value: i32,
     pub unit: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PortionSizeOut {
     pub value: f64,
     pub unit: String,

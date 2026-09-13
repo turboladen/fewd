@@ -63,6 +63,7 @@ pub struct RecipeFull {
 /// before building the service-layer query. Bare / wildcard calls are
 /// rejected with a pointer at `list_curated_recipes`.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SearchRecipesParams {
     /// Case-insensitive substring on the recipe name. Empty string and `*`
     /// are treated as no-query (and don't count as a filter on their own).
@@ -206,6 +207,7 @@ impl SearchRecipesParams {
 /// Input for `create_recipe`. Mirrors [`CreateRecipeDto`] but replaces
 /// `parent_recipe_id` with a slug reference the LLM can actually produce.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CreateRecipeInput {
     pub name: String,
     #[serde(default)]
@@ -310,6 +312,7 @@ pub fn recipe_to_full(
 /// tool_user_error). The handler additionally rejects non-http(s) schemes for a
 /// clearer error than the downstream SSRF guard would produce.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ImportRecipeUrlInput {
     /// Public http(s) URL of the recipe page. The server fetches it, extracts
     /// schema.org/Recipe data (JSON-LD first, html2text fallback), parses the
@@ -328,6 +331,7 @@ pub struct ImportRecipeUrlInput {
 // that tool's input-schema `description`, so keep rustdoc links and
 // internal identifiers out of them.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FavoriteRecipeInput {
     /// Slug of the recipe to favorite or unfavorite (case-insensitive).
     /// Call `search_recipes` or `get_recipe` first to find it.
@@ -348,6 +352,7 @@ pub struct FavoriteRecipeInput {
 /// 1–5 is rejected rather than clamped.
 //
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RateRecipeInput {
     /// Slug of the recipe to rate (case-insensitive). Call
     /// `search_recipes` or `get_recipe` first to find it.
@@ -364,6 +369,7 @@ pub struct RateRecipeInput {
 /// unrated recipes entirely, so a cleared recipe drops out of every
 /// rating-filtered search rather than ranking at the bottom.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UnrateRecipeInput {
     /// Slug of the recipe whose rating to remove (case-insensitive). Call
     /// `search_recipes` or `get_recipe` first to find it.
@@ -391,7 +397,8 @@ pub struct UnrateRecipeInput {
 ///
 /// `is_favorite`, `rating`, `source`, `source_url`, the parent recipe, and
 /// the slug are not writable here. Use `favorite_recipe` to set
-/// `is_favorite`.
+/// `is_favorite`, and `rate_recipe` to set `rating` or `unrate_recipe` to
+/// clear it.
 //
 // The blank-string coercion runs through `blank_to_none`, which carries
 // the invariant it protects. A blank `name` instead mirrors
@@ -399,6 +406,7 @@ pub struct UnrateRecipeInput {
 // what a valid recipe name is.
 //
 #[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateRecipeInput {
     /// Slug of the recipe to update (case-insensitive). Call
     /// `search_recipes` or `get_recipe` first to find it. This is a lookup
