@@ -10,7 +10,7 @@ Family meal planner & cocktail manager web app. Rust/Axum backend with SQLite, R
 
 - Backend: Rust + Axum + SeaORM + SQLite (in `server/`)
 - Frontend: React 18 + TypeScript + Vite + TanStack Query + Tailwind (in `src/`)
-- Standalone web app (previously Tauri desktop app)
+- Standalone web app
 
 **Navigation Structure:**
 
@@ -119,7 +119,7 @@ bun run test:watch
 
 ## Linting & Formatting
 
-Rust lint/format commands moved to `server/CLAUDE.md`; TypeScript/React lint/format commands moved to `src/CLAUDE.md`.
+Rust lint/format commands live in `server/CLAUDE.md`; TypeScript/React lint/format commands live in `src/CLAUDE.md`.
 
 ### Typos
 
@@ -197,17 +197,16 @@ re-run CI and cancel in-progress runs through the `concurrency` group.
 
 **`.github/workflows/auto-format.yml`** - Auto-formats code on push (every branch except `main`).
 
-**Runner & toolchain notes (fewd-5pz, 2026-06-30):** all jobs run on
-`ubuntu-latest` (migrated off `macos-latest` for cost/speed — CI has no
-host-arch dependency since the dietpi deploy cross-compiles aarch64). Several
+**Runner & toolchain notes:** all jobs run on `ubuntu-latest`; CI has no
+host-arch dependency because the dietpi deploy cross-compiles aarch64. Several
 things follow from that runner choice and are easy to break:
 
 - **Rust caching is `Swatinem/rust-cache@v2`**, not hand-rolled `actions/cache`.
   Its `workspaces: ". -> target"` is pinned deliberately: the cargo workspace
   manifest, `Cargo.lock`, and `target/` all live at the **repo root** (members
   `server`, `server/migration`), even though later steps `cd server`. Do NOT
-  "correct" it to `server -> server/target` — that caches an empty dir (the
-  silent no-op the old `path: server/target` cache hit).
+  "correct" it to `server -> server/target` — that caches an empty dir, a
+  silent no-op.
 - **`bun-version` is pinned** (`oven-sh/setup-bun@v2`, currently `1.3.14`), not
   `latest` — bumping the bun toolchain means editing that pin in `ci.yml`.
 - **`bun install --frozen-lockfile`** means a stale `bun.lock` fails CI — after
@@ -253,8 +252,9 @@ separate `dist/` sync; if `dist/` is stale the binary is stale.
 The recipe copies `deploy/fewd.service` to **both** `/opt/fewd/` and
 `/etc/systemd/system/`, then `daemon-reload` + start — so unit-file edits
 (`RUST_LOG`, `Restart=always` with its start-limit cap, `MCP_ALLOWED_HOSTS`)
-propagate. Don't hand-roll a partial deploy; omitting the `/etc` copy caused the
-`fewd-82e` 403 regression. The recipe runs `systemctl reset-failed` before it
+propagate. Don't hand-roll a partial deploy; omitting the `/etc` copy leaves
+systemd running the stale unit, and a stale `MCP_ALLOWED_HOSTS` answers every
+LAN MCP request with 403. The recipe runs `systemctl reset-failed` before it
 starts the unit, so a deploy recovers a unit that tripped the cap. Outside the
 recipe, a tripped unit refuses manual starts and restarts until
 `sudo systemctl reset-failed fewd` runs; `deploy/fewd.service` explains the cap.
@@ -371,7 +371,7 @@ Invariants the type system does not enforce but production code assumes. Violate
 
 `Meal.order_index` is a slot number, not a sort key. `DEFAULT_MEALS` in `src/components/MealPlanner.tsx` pins the mapping: Breakfast=0, Lunch=1, Dinner=2, Snack=3. A Dinner at `order_index=0` sits at "the Breakfast slot" expectation and gets rejected on type mismatch.
 
-Both invariants are enforced at the MCP boundary by `canonical_meal_type` and `default_order_index` in `server/src/mcp/schemas/meals.rs`. Any new write path (HTTP routes, future tools, direct SQL migrations) must do the same normalization or the meal will not render in the planner. See `fewd-2pf` for the follow-up work to make this compile-enforced via a `MealType` enum.
+Both invariants are enforced at the MCP boundary by `canonical_meal_type` and `default_order_index` in `server/src/mcp/schemas/meals.rs`. Any new write path (HTTP routes, future tools, direct SQL migrations) must do the same normalization or the meal will not render in the planner. Making this compile-enforced with a `MealType` enum is open work in beads.
 
 ### CSRF protection on state-changing POST routes
 
@@ -401,6 +401,31 @@ Check:
 1. This file - How to maintain it
 1. GitHub Issues - Known problems/features
 
+## Branch and Commit Naming
+
+Branches: `fewd-<id>/<short-slug>` (e.g. `fewd-abc/mcp-host-allowlist`). The branch name is the only place a bead ID goes.
+
+Commit messages, PR titles, and PR descriptions never contain bead IDs, because a reader of `main` or GitHub cannot look them up. This repo squash-merges with every commit's message in the merge body, so the rule covers each commit on a branch, not just the PR title. Use a conventional-commits prefix with a domain scope — `fix(mcp): ...`, `feat(recipes): ...`, `ci: ...`, `docs: ...` — and describe follow-up work in words ("tracked separately"). PR numbers and commit SHAs are fine to cite. Older commits on `main` carry bead scopes; don't copy that style.
+
+When one PR builds on another, make them a real GitHub stack with the `gh stack` extension (`gh stack init`, `add`, `submit`, `sync`, and `merge`), so each PR shows only its own layer. Don't merge sibling branches into each other or note the dependency in a PR description.
+
+## Bead Closure: post-merge, not inside the fix PR
+
+Close a bead AFTER its fix PR merges, on `main`, with `bd close <id>` followed by `bd dolt push`.
+Because `.beads/issues.jsonl` is untracked here (see below), that produces no commit — there is nothing
+to stage and nothing to restore. Do NOT flip `status: closed` while the PR is in review; it makes
+`bd ready` / `bd list` report the fix as shipped when it is still under review.
+
+`.beads/issues.jsonl` is **not tracked by git** in this repo. The Dolt DB under `.beads/` is the source
+of truth: `bd dolt push` syncs it to `refs/dolt/data`, and a fresh `bd init` bootstraps from there. The
+JSONL is a local export mirror that `export.auto` rewrites on every bead mutation. Tracking it would
+leave a permanently dirty working tree, which makes `git pull --rebase` refuse, and would put
+full-snapshot diff noise that reviewers misread into unrelated PRs. The ignore rule lives in the
+**top-level** `.gitignore`, not `.beads/.gitignore`, because the latter is bd-managed and is overwritten
+on upgrade. A `.beads/issues.jsonl` diff in a PR means something re-added the file to the index.
+
+The naming and closure sections sit outside the beads integration markers below, because `bd` may regenerate everything between them.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
 ## Beads Issue Tracker
 
@@ -420,26 +445,6 @@ bd close <id>         # Complete work
 - Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
-
-### Branch + commit naming
-
-Branches: `fewd-<id>/<short-slug>` (e.g. `fewd-82e/mcp-host-allowlist`). Commits: conventional-commits prefix scoped to the bead — `fix(fewd-82e): ...`, `docs(fewd-2y6.3): ...`, `chore(beads): close fewd-82e after PR #34 merge`. Match the style of recent `git log` if uncertain.
-
-### Bead closure: post-merge, not inside the fix PR
-
-Close a bead AFTER its fix PR merges, on `main`, with `bd close <id>` followed by `bd dolt push`.
-Because `.beads/issues.jsonl` is untracked here (see below), that produces no commit — there is nothing
-to stage and nothing to restore. Do NOT flip `status: closed` while the PR is in review; it makes
-`bd ready` / `bd list` report the fix as shipped when it is still under review.
-
-`.beads/issues.jsonl` is **not tracked by git** in this repo (untracked 2026-09-05). The Dolt DB under
-`.beads/` is the source of truth: `bd dolt push` syncs it to `refs/dolt/data`, and a fresh `bd init`
-bootstraps from there. The JSONL is a local export mirror that `export.auto` rewrites on every bead
-mutation, so tracking it meant a permanently dirty working tree — which makes `git pull --rebase`
-refuse — plus recurring full-snapshot diff noise that PR reviewers kept misreading as changes belonging
-to the PR (PRs #35, #37, #39, #43, #44). The ignore rule lives in the **top-level** `.gitignore`, not
-`.beads/.gitignore`, because the latter is bd-managed and is overwritten on upgrade. A
-`.beads/issues.jsonl` diff should never appear in a PR again; if one does, something re-added it.
 
 ## Session Completion
 
