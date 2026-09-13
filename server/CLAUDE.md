@@ -66,7 +66,7 @@ impl PersonService {
 
 **Migrations are frozen-in-time.** Never share structs across migrations even when shapes match — m13 and m14 each define their own `Ingredient` struct despite being identical today. A future migration that mutates the shape would silently break the older one if they shared a type.
 
-**Shared helpers between runtime ingest paths and backfill migrations live in the migration crate**, with server-side modules re-exporting. Established by `migration::ingredient_splitter` (fewd-xez) and `migration::ingredient_amount` (fewd-4i3). Server depends on migration in this workspace, so canonical helpers go down (migration), not up. Avoids drift between the runtime parser and the backfill that re-parses existing rows.
+**Shared helpers between runtime ingest paths and backfill migrations live in the migration crate**, with server-side modules re-exporting, as `migration::ingredient_splitter` and `migration::ingredient_amount` do. Server depends on migration in this workspace, so canonical helpers go down (migration), not up. Avoids drift between the runtime parser and the backfill that re-parses existing rows.
 
 **Queries:**
 
