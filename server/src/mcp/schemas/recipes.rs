@@ -7,6 +7,9 @@ use crate::dto::{
     CreateRecipeDto, IngredientDto, NutritionDto, PortionSizeDto, TimeValueDto, UpdateRecipeDto,
 };
 use crate::entities::recipe;
+use crate::services::recipe_variant::{
+    IngredientChange, IngredientMatch, InstructionChange, InstructionEdit, PrepFilter, VariantSpec,
+};
 use crate::services::service_error::whole_star_rating;
 
 use super::common::{
@@ -558,6 +561,237 @@ pub fn create_recipe_input_to_dto(
     })
 }
 
+/// Input for the `adapt_recipe` MCP tool, which saves a changed copy of an
+/// existing recipe as a new recipe linked to it. The parent recipe is never
+/// modified.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AdaptRecipeInput {
+    /// Slug of the recipe to adapt (case-insensitive). Call `search_recipes`
+    /// or `get_recipe` first to find it.
+    pub parent_recipe_slug: String,
+    /// Display name for the new variant, such as "Gnocchi with Hot Italian
+    /// Sausage". The variant's slug is generated from it.
+    pub name: String,
+    /// Replaces the parent's description on the variant. Omit it, or send a
+    /// blank value, to keep the parent's.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Ingredient edits, applied in order. Each one sees the list as the
+    /// earlier edits left it.
+    #[serde(default)]
+    pub ingredient_changes: Option<Vec<IngredientChangeInput>>,
+    /// Find/replace edits to the parent's instructions, applied in order to
+    /// the text the earlier edits left. Cannot be combined with
+    /// `instructions`.
+    #[serde(default)]
+    pub instruction_edits: Option<Vec<InstructionEditInput>>,
+    /// Full replacement for the parent's instructions. Markdown is fine.
+    /// Cannot be combined with `instruction_edits`.
+    #[serde(default)]
+    pub instructions: Option<String>,
+    /// Replaces the parent's tag list on the variant. Omit it, or send only
+    /// blank tags, to keep the parent's tags; send `[]` to clear them.
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    /// Why this variant exists, such as "Made spicier for Tuesday". Omit it,
+    /// or send a blank value, to keep the parent's notes.
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+/// One edit to the parent's ingredient list, chosen by `op`.
+//
+// Every variant is a struct variant: schemars gives a newtype variant of an
+// internally tagged enum no `additionalProperties: false`, so its unknown
+// fields would go unreported in the published schema.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+pub enum IngredientChangeInput {
+    /// Appends `ingredient` to the end of the list.
+    Add { ingredient: IngredientOut },
+    /// Swaps the ingredient matching `name` for `with`, keeping its position.
+    Replace {
+        /// Whole name of the ingredient to replace, as `get_recipe` shows it
+        /// (case-insensitive).
+        name: String,
+        /// Prep of the ingredient to replace, needed only when several
+        /// ingredients share `name`. Omit it to match any prep, or send ""
+        /// to match only the one with no prep.
+        #[serde(default)]
+        prep: Option<String>,
+        /// The ingredient that takes its place.
+        #[serde(rename = "with")]
+        replacement: IngredientOut,
+    },
+    /// Removes the ingredient matching `name`.
+    Remove {
+        /// Whole name of the ingredient to remove, as `get_recipe` shows it
+        /// (case-insensitive).
+        name: String,
+        /// Prep of the ingredient to remove, needed only when several
+        /// ingredients share `name`. Omit it to match any prep, or send ""
+        /// to match only the one with no prep.
+        #[serde(default)]
+        prep: Option<String>,
+    },
+}
+
+/// One find/replace edit to the parent's instructions.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InstructionEditInput {
+    /// Exact text to replace. It must occur exactly once in the instructions,
+    /// matching whitespace and punctuation.
+    pub find: String,
+    /// Text to put in its place. An empty string deletes the found text.
+    pub replace: String,
+}
+
+const PARENT_SLUG_REDIRECT: &str =
+    "Name the recipe to adapt with parent_recipe_slug; the variant's slug is generated from name.";
+const INSTRUCTION_EDITS_REDIRECT: &str =
+    "Send find/replace pairs in instruction_edits, or the full text in instructions.";
+const INHERITED_FROM_PARENT: &str =
+    "The variant inherits it from the parent recipe; change it afterwards with update_recipe on the variant's slug.";
+const VARIANT_SOURCE_REDIRECT: &str =
+    "A variant's source is always ai_adapted, and parent_recipe_slug records where it came from; omit it.";
+
+impl McpToolInput for AdaptRecipeInput {
+    const FIELD_REDIRECTS: &'static [(&'static str, &'static str)] = &[
+        RATING_REDIRECT,
+        IS_FAVORITE_REDIRECT,
+        TIMES_PLANNED_REDIRECT,
+        LAST_PLANNED_REDIRECT,
+        ("slug", PARENT_SLUG_REDIRECT),
+        ("parent_slug", PARENT_SLUG_REDIRECT),
+        ("recipe_slug", PARENT_SLUG_REDIRECT),
+        (
+            "ingredients",
+            "Describe ingredient edits as add, replace, or remove ops in ingredient_changes. To supply a whole ingredient list, call create_recipe with parent_recipe_slug instead.",
+        ),
+        ("instruction_changes", INSTRUCTION_EDITS_REDIRECT),
+        ("edits", INSTRUCTION_EDITS_REDIRECT),
+        ("instruction_ops", INSTRUCTION_EDITS_REDIRECT),
+        ("servings", INHERITED_FROM_PARENT),
+        ("prep_time", INHERITED_FROM_PARENT),
+        ("cook_time", INHERITED_FROM_PARENT),
+        ("total_time", INHERITED_FROM_PARENT),
+        ("portion_size", INHERITED_FROM_PARENT),
+        ("icon", INHERITED_FROM_PARENT),
+        ("nutrition_per_serving", INHERITED_FROM_PARENT),
+        ("source", VARIANT_SOURCE_REDIRECT),
+        ("source_url", VARIANT_SOURCE_REDIRECT),
+    ];
+}
+
+/// Translate `AdaptRecipeInput` into the service-layer `VariantSpec`,
+/// rejecting input no variant can be built from. The caller resolves
+/// `parent_recipe_slug` itself, so nothing here reads it.
+///
+/// A blank `description` or `notes`, or a `tags` list of only blank entries,
+/// means "keep the parent's", while `tags: []` clears them. The call must
+/// carry at least one ingredient or instruction change, and cannot send both
+/// `instructions` and `instruction_edits`.
+pub fn adapt_recipe_input_to_spec(input: AdaptRecipeInput) -> Result<VariantSpec, InputError> {
+    // An explicit `null` list means the same as an omitted one.
+    let ingredient_changes = input.ingredient_changes.unwrap_or_default();
+    let instruction_edits = input.instruction_edits.unwrap_or_default();
+    if input.name.trim().is_empty() {
+        return Err(InputError::EmptyName("name"));
+    }
+    if input.instructions.is_some() && !instruction_edits.is_empty() {
+        return Err(InputError::ConflictingInstructionChanges);
+    }
+    if input
+        .instructions
+        .as_deref()
+        .is_some_and(|text| text.trim().is_empty())
+    {
+        return Err(InputError::EmptyName("instructions"));
+    }
+    if ingredient_changes.is_empty() && input.instructions.is_none() && instruction_edits.is_empty()
+    {
+        return Err(InputError::NoAdaptationChanges);
+    }
+
+    let ingredient_changes = ingredient_changes
+        .into_iter()
+        .enumerate()
+        .map(|(position, change)| ingredient_change_in(position + 1, change))
+        .collect::<Result<Vec<_>, _>>()?;
+    // Create drops blank tags, so a list of only blanks would silently clear
+    // the parent's tags. Only an explicit `[]` clears them.
+    let tags = input
+        .tags
+        .filter(|tags| tags.is_empty() || tags.iter().any(|tag| !tag.trim().is_empty()));
+    // A `find` is matched character for character, so a whitespace-only one is
+    // a real edit. An empty one is left to `build_variant_dto`, which rejects
+    // it by edit number.
+    let instruction_change = match input.instructions {
+        Some(text) => Some(InstructionChange::Replace(text)),
+        None if instruction_edits.is_empty() => None,
+        None => Some(InstructionChange::Edits(
+            instruction_edits
+                .into_iter()
+                .map(|edit| InstructionEdit {
+                    find: edit.find,
+                    replace: edit.replace,
+                })
+                .collect(),
+        )),
+    };
+
+    Ok(VariantSpec {
+        name: input.name,
+        description: blank_to_none(input.description),
+        ingredient_changes,
+        instruction_change,
+        tags,
+        notes: blank_to_none(input.notes),
+    })
+}
+
+// Added and replacement ingredients run through `ingredient_in`, so a comma'd
+// name is split into name and prep exactly as on create. Match targets pass
+// through untouched: the service tries the whole string before any split.
+//
+// An omitted `prep` and an explicit blank one mean different things, which is
+// why `prep` is not routed through `blank_to_none`: omitted accepts any prep,
+// while "" picks out the ingredient that has none.
+fn ingredient_change_in(
+    number: usize,
+    change: IngredientChangeInput,
+) -> Result<IngredientChange, InputError> {
+    let target = |name: String, prep: Option<String>| {
+        if name.trim().is_empty() {
+            return Err(InputError::EmptyIngredientChangeName(number));
+        }
+        let prep = match prep {
+            None => PrepFilter::Any,
+            Some(prep) if prep.trim().is_empty() => PrepFilter::NoPrep,
+            Some(prep) => PrepFilter::Exactly(prep),
+        };
+        Ok(IngredientMatch { name, prep })
+    };
+    Ok(match change {
+        IngredientChangeInput::Add { ingredient } => {
+            IngredientChange::Add(ingredient_in(ingredient))
+        }
+        IngredientChangeInput::Replace {
+            name,
+            prep,
+            replacement,
+        } => IngredientChange::Replace {
+            target: target(name, prep)?,
+            replacement: ingredient_in(replacement),
+        },
+        IngredientChangeInput::Remove { name, prep } => IngredientChange::Remove {
+            target: target(name, prep)?,
+        },
+    })
+}
+
 /// Translate `UpdateRecipeInput` into the `UpdateRecipeDto` the service
 /// layer accepts. The caller resolves the row from `slug` before calling,
 /// so nothing here writes it.
@@ -678,6 +912,225 @@ pub fn rate_recipe_input_to_dto(input: RateRecipeInput) -> Result<UpdateRecipeDt
 mod tests {
     use super::super::common::IngredientAmountOut;
     use super::*;
+
+    // ─── adapt_recipe_input_to_spec ─────────────────────────────────
+
+    // Build an input from the minimal valid call with `overrides` merged over
+    // it; a `null` override removes that key.
+    fn adapt_spec(overrides: serde_json::Value) -> Result<VariantSpec, InputError> {
+        let mut args = serde_json::json!({
+            "parent_recipe_slug": "potato-gnocchi",
+            "name": "Spicy Gnocchi",
+            "ingredient_changes": [{"op": "remove", "name": "sage"}],
+        });
+        let object = args.as_object_mut().expect("the base is an object");
+        for (key, value) in overrides.as_object().expect("overrides are an object") {
+            if value.is_null() {
+                object.remove(key);
+            } else {
+                object.insert(key.clone(), value.clone());
+            }
+        }
+        let input: AdaptRecipeInput =
+            serde_json::from_value(args).expect("AdaptRecipeInput JSON shape");
+        adapt_recipe_input_to_spec(input)
+    }
+
+    #[test]
+    fn adapt_rejects_a_blank_name() {
+        let err = adapt_spec(serde_json::json!({"name": "  "})).unwrap_err();
+        assert!(matches!(err, InputError::EmptyName("name")), "{err:?}");
+    }
+
+    #[test]
+    fn adapt_rejects_both_instruction_forms() {
+        let err = adapt_spec(serde_json::json!({
+            "instructions": "Just cook it.",
+            "instruction_edits": [{"find": "sage", "replace": "basil"}],
+        }))
+        .unwrap_err();
+        assert!(
+            matches!(err, InputError::ConflictingInstructionChanges),
+            "{err:?}"
+        );
+        let message = err.to_string();
+        assert!(message.contains("not both"), "{message}");
+    }
+
+    #[test]
+    fn adapt_rejects_blank_instructions() {
+        let err = adapt_spec(serde_json::json!({"instructions": " \n "})).unwrap_err();
+        assert!(
+            matches!(err, InputError::EmptyName("instructions")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn adapt_rejects_a_blank_change_target_by_number() {
+        let valid = serde_json::json!({"op": "remove", "name": "sage"});
+        for blank in [
+            serde_json::json!({"op": "remove", "name": " "}),
+            serde_json::json!({"op": "replace", "name": "", "with":
+                {"name": "basil", "amount": {"kind": "single", "value": 1.0}}}),
+        ] {
+            let overrides = serde_json::json!({"ingredient_changes": [valid.clone(), blank]});
+            let err = adapt_spec(overrides.clone()).unwrap_err();
+            assert!(
+                matches!(err, InputError::EmptyIngredientChangeName(2)),
+                "{overrides}: {err:?}"
+            );
+            let message = err.to_string();
+            assert!(message.starts_with("ingredient change #2:"), "{message}");
+        }
+    }
+
+    #[test]
+    fn adapt_passes_a_whitespace_only_find_through_as_exact_text() {
+        let spec = adapt_spec(serde_json::json!({
+            "ingredient_changes": null,
+            "instruction_edits": [{"find": "  ", "replace": " "}],
+        }))
+        .expect("a whitespace-only find is an edit");
+        let Some(InstructionChange::Edits(edits)) = spec.instruction_change else {
+            panic!("expected edits, got {:?}", spec.instruction_change);
+        };
+        assert_eq!(edits[0].find, "  ");
+    }
+
+    #[test]
+    fn adapt_treats_null_change_lists_as_omitted() {
+        let input: AdaptRecipeInput = serde_json::from_value(serde_json::json!({
+            "parent_recipe_slug": "potato-gnocchi",
+            "name": "Spicy Gnocchi",
+            "ingredient_changes": null,
+            "instruction_edits": null,
+            "instructions": "Just cook it.",
+        }))
+        .expect("null change lists deserialize");
+        let spec = adapt_recipe_input_to_spec(input).expect("instructions alone are a change");
+        assert!(spec.ingredient_changes.is_empty());
+        assert!(
+            matches!(spec.instruction_change, Some(InstructionChange::Replace(_))),
+            "{:?}",
+            spec.instruction_change
+        );
+    }
+
+    #[test]
+    fn adapt_requires_an_ingredient_or_instruction_change() {
+        for overrides in [
+            serde_json::json!({"ingredient_changes": null}),
+            serde_json::json!({"ingredient_changes": [], "instruction_edits": []}),
+            serde_json::json!({"ingredient_changes": null, "tags": ["spicy"]}),
+            serde_json::json!({"ingredient_changes": null, "notes": "Tuesday"}),
+            serde_json::json!({"ingredient_changes": null, "description": "Hotter"}),
+        ] {
+            let err = adapt_spec(overrides.clone()).unwrap_err();
+            assert!(
+                matches!(err, InputError::NoAdaptationChanges),
+                "{overrides}: {err:?}"
+            );
+            let message = err.to_string();
+            assert!(message.contains("update_recipe"), "{message}");
+            assert!(message.contains("create_recipe"), "{message}");
+        }
+    }
+
+    #[test]
+    fn adapt_instruction_change_alone_is_enough() {
+        let spec = adapt_spec(serde_json::json!({
+            "ingredient_changes": null,
+            "instruction_edits": [{"find": "sage", "replace": "basil"}],
+        }))
+        .expect("an instruction edit is a change");
+        let Some(InstructionChange::Edits(edits)) = spec.instruction_change else {
+            panic!("expected edits, got {:?}", spec.instruction_change);
+        };
+        assert_eq!(edits[0].find, "sage");
+        assert_eq!(edits[0].replace, "basil");
+    }
+
+    #[test]
+    fn adapt_blank_description_and_notes_inherit_the_parent() {
+        let spec = adapt_spec(serde_json::json!({"description": "  ", "notes": ""}))
+            .expect("blank overrides are not an error");
+        assert!(spec.description.is_none());
+        assert!(spec.notes.is_none());
+    }
+
+    #[test]
+    fn adapt_all_blank_tags_inherit_while_an_empty_list_clears() {
+        let blanks = adapt_spec(serde_json::json!({"tags": ["", "   "]})).expect("valid input");
+        assert!(
+            blanks.tags.is_none(),
+            "only blanks must inherit: {:?}",
+            blanks.tags
+        );
+
+        let cleared = adapt_spec(serde_json::json!({"tags": []})).expect("valid input");
+        assert_eq!(cleared.tags, Some(vec![]), "an explicit [] clears the tags");
+
+        let mixed = adapt_spec(serde_json::json!({"tags": ["", "spicy"]})).expect("valid input");
+        assert_eq!(mixed.tags, Some(vec!["".to_string(), "spicy".to_string()]));
+    }
+
+    #[test]
+    fn adapt_omitted_blank_and_given_prep_map_to_distinct_filters() {
+        let spec = adapt_spec(serde_json::json!({"ingredient_changes": [
+            {"op": "remove", "name": "butter"},
+            {"op": "remove", "name": "butter", "prep": ""},
+            {"op": "remove", "name": "butter", "prep": null},
+            {"op": "remove", "name": "butter", "prep": "softened"},
+        ]}))
+        .expect("valid changes");
+        let filters: Vec<&PrepFilter> = spec
+            .ingredient_changes
+            .iter()
+            .map(|change| match change {
+                IngredientChange::Remove { target } => &target.prep,
+                other => panic!("expected remove, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            filters,
+            [
+                &PrepFilter::Any,
+                &PrepFilter::NoPrep,
+                &PrepFilter::Any,
+                &PrepFilter::Exactly("softened".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn adapt_splits_comma_names_in_added_and_replacement_ingredients() {
+        let spec = adapt_spec(serde_json::json!({"ingredient_changes": [
+            {"op": "add", "ingredient":
+                {"name": "garlic, minced", "amount": {"kind": "single", "value": 2.0}, "unit": "clove"}},
+            {"op": "replace", "name": "sage", "prep": "fresh", "with":
+                {"name": "basil, torn", "amount": {"kind": "range", "min": 6.0, "max": 8.0}, "unit": "leaf"}},
+        ]}))
+        .expect("valid changes");
+
+        let IngredientChange::Add(added) = &spec.ingredient_changes[0] else {
+            panic!("expected add, got {:?}", spec.ingredient_changes[0]);
+        };
+        assert_eq!(added.name, "garlic");
+        assert_eq!(added.prep.as_deref(), Some("minced"));
+
+        let IngredientChange::Replace {
+            target,
+            replacement,
+        } = &spec.ingredient_changes[1]
+        else {
+            panic!("expected replace, got {:?}", spec.ingredient_changes[1]);
+        };
+        assert_eq!(target.name, "sage");
+        assert_eq!(target.prep, PrepFilter::Exactly("fresh".into()));
+        assert_eq!(replacement.name, "basil");
+        assert_eq!(replacement.prep.as_deref(), Some("torn"));
+    }
 
     fn mk_input(name: &str, servings: i32) -> CreateRecipeInput {
         CreateRecipeInput {

@@ -5,6 +5,8 @@
 //! clients, with the message dropped — tool-level errors carry the
 //! actionable text through to the LLM.
 
+use crate::services::recipe_variant::VariantError;
+
 /// Error returned when a `create_meal` input references a person name or
 /// recipe slug that doesn't exist. The tool handler routes this through
 /// `tool_user_error` so the Display string reaches the LLM as actionable
@@ -81,6 +83,14 @@ pub enum InputError {
         count: usize,
         max_count: usize,
     },
+    /// An `adapt_recipe` call carries no ingredient or instruction change.
+    NoAdaptationChanges,
+    /// An `adapt_recipe` call sends both `instructions` and
+    /// `instruction_edits`.
+    ConflictingInstructionChanges,
+    /// An `adapt_recipe` ingredient change, numbered from 1, names no
+    /// ingredient to replace or remove.
+    EmptyIngredientChangeName(usize),
 }
 
 impl std::fmt::Display for InputError {
@@ -137,7 +147,50 @@ impl std::fmt::Display for InputError {
                 f,
                 "{field} has {count} items, exceeding the {max_count}-item cap. Trim the list — each item adds a fixed vertical chunk to the printable, and wider lists overflow onto a second page."
             ),
+            Self::NoAdaptationChanges => write!(
+                f,
+                "adapt_recipe needs at least one ingredient_changes op or an instruction change (instruction_edits or instructions). To change only the name, description, tags, or notes, call update_recipe on the parent, or create_recipe with parent_recipe_slug to save a linked copy."
+            ),
+            Self::EmptyIngredientChangeName(number) => write!(
+                f,
+                "ingredient change #{number}: name must not be empty or whitespace-only. Give the whole name of the ingredient to replace or remove, as get_recipe shows it."
+            ),
+            Self::ConflictingInstructionChanges => write!(
+                f,
+                "send instruction_edits or instructions, not both. Use instruction_edits for targeted find/replace changes, or instructions to replace the whole text."
+            ),
         }
+    }
+}
+
+/// Render a [`VariantError`] for the LLM, adding the MCP tool call that
+/// recovers from it. `parent_slug` is the canonical slug of the recipe being
+/// adapted.
+//
+// `VariantError` lives in the service layer and names no tools, so the MCP
+// recovery advice is attached here. A malformed parent is a server fault that
+// the handler reports as an internal error; it gets no hint. A change after
+// the first one runs against what the earlier changes left, which `get_recipe`
+// on the parent does not show, so its hint says so.
+pub fn variant_error_message(err: &VariantError, parent_slug: &str) -> String {
+    let (number, hint) = match err {
+        VariantError::UnmatchedIngredient { number, .. }
+        | VariantError::AmbiguousIngredient { number, .. } => (
+            *number,
+            format!("Call get_recipe on '{parent_slug}' for its current ingredient names."),
+        ),
+        VariantError::EmptyEditFind { number }
+        | VariantError::EditNotFound { number, .. }
+        | VariantError::EditAmbiguous { number, .. } => (
+            *number,
+            format!("Call get_recipe on '{parent_slug}' for its current instruction text."),
+        ),
+        VariantError::MalformedParent(_) => return err.to_string(),
+    };
+    if number > 1 {
+        format!("{err} {hint} The earlier changes in this call apply first, so #{number} sees what they left rather than the parent as stored.")
+    } else {
+        format!("{err} {hint}")
     }
 }
 
