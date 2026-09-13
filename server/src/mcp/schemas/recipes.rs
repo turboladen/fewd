@@ -14,7 +14,6 @@ use super::common::{
     NutritionOut, PortionSizeOut, TimeOut,
 };
 use super::errors::InputError;
-use super::McpToolInput;
 
 /// Trimmed recipe shape for list/search. Omits ingredients/instructions to
 /// keep tool payloads small — use `get_recipe` for the full record.
@@ -111,8 +110,6 @@ pub struct SearchRecipesParams {
     #[serde(default)]
     pub includes_ingredient_substrings: Option<Vec<String>>,
 }
-
-impl McpToolInput for SearchRecipesParams {}
 
 impl SearchRecipesParams {
     /// Reject the all-empty / wildcard-only case. The full archive is
@@ -247,31 +244,6 @@ pub struct CreateRecipeInput {
     pub icon: Option<String>,
 }
 
-// The recipe write inputs share these redirects. Each names where the field
-// can be set, never the tool that rejected it, since tools share types.
-const RATING_REDIRECT: (&str, &str) = (
-    "rating",
-    "Call rate_recipe to set a rating, or unrate_recipe to clear it.",
-);
-const IS_FAVORITE_REDIRECT: (&str, &str) = ("is_favorite", "Call favorite_recipe to set it.");
-const DERIVED_FROM_MEALS: &str =
-    "The server derives it from meals scheduled with create_meal; omit it.";
-const TIMES_PLANNED_REDIRECT: (&str, &str) = ("times_planned", DERIVED_FROM_MEALS);
-const LAST_PLANNED_REDIRECT: (&str, &str) = ("last_planned", DERIVED_FROM_MEALS);
-
-impl McpToolInput for CreateRecipeInput {
-    const FIELD_REDIRECTS: &'static [(&'static str, &'static str)] = &[
-        RATING_REDIRECT,
-        IS_FAVORITE_REDIRECT,
-        TIMES_PLANNED_REDIRECT,
-        LAST_PLANNED_REDIRECT,
-        (
-            "slug",
-            "The server generates the slug from `name`; omit it.",
-        ),
-    ];
-}
-
 pub fn recipe_to_brief(recipe: &recipe::Model) -> Result<RecipeBrief, String> {
     let tags: Vec<String> = parse_json(&recipe.tags, "recipe tags")?;
     let total_time: Option<TimeValueDto> =
@@ -348,8 +320,6 @@ pub struct ImportRecipeUrlInput {
     pub url: url::Url,
 }
 
-impl McpToolInput for ImportRecipeUrlInput {}
-
 /// Input for the `favorite_recipe` MCP tool. `slug` identifies the row and
 /// is never written; `is_favorite` is the only column this tool touches.
 ///
@@ -373,8 +343,6 @@ pub struct FavoriteRecipeInput {
     pub is_favorite: bool,
 }
 
-impl McpToolInput for FavoriteRecipeInput {}
-
 /// Input for the `rate_recipe` MCP tool. `slug` identifies the row and is
 /// never written; `rating` is the only column this tool touches.
 ///
@@ -396,8 +364,6 @@ pub struct RateRecipeInput {
     pub rating: f64,
 }
 
-impl McpToolInput for RateRecipeInput {}
-
 /// Input for the `unrate_recipe` MCP tool. Removing a rating is not the
 /// same as rating 1 star: `search_recipes`'s `min_rating` filter excludes
 /// unrated recipes entirely, so a cleared recipe drops out of every
@@ -409,8 +375,6 @@ pub struct UnrateRecipeInput {
     /// `search_recipes` or `get_recipe` first to find it.
     pub slug: String,
 }
-
-impl McpToolInput for UnrateRecipeInput {}
 
 /// Input for the `update_recipe` MCP tool. `slug` identifies the row to
 /// update and is never written — renaming leaves the slug alone, so the
@@ -502,15 +466,6 @@ pub struct UpdateRecipeInput {
     /// Emoji / icon character displayed next to the recipe.
     #[serde(default)]
     pub icon: Option<String>,
-}
-
-impl McpToolInput for UpdateRecipeInput {
-    const FIELD_REDIRECTS: &'static [(&'static str, &'static str)] = &[
-        RATING_REDIRECT,
-        IS_FAVORITE_REDIRECT,
-        TIMES_PLANNED_REDIRECT,
-        LAST_PLANNED_REDIRECT,
-    ];
 }
 
 pub fn create_recipe_input_to_dto(

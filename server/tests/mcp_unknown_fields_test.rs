@@ -166,30 +166,3 @@ async fn update_recipe_misspelled_field_is_a_tool_level_error_over_http() {
         "the error must name the unknown field and the valid one; got: {body}"
     );
 }
-
-// `rating` is a real recipe attribute that update_recipe does not write. The
-// error must send the caller to the tool that does.
-#[tokio::test]
-async fn update_recipe_rating_names_rate_recipe_over_http() {
-    let (db, token) = setup_db_with_token().await;
-    let app = mcp::router(db);
-    let bearer = format!("Bearer {token}");
-    let session_id = handshake(&app, &bearer).await;
-
-    let body = post_rpc(
-        &app,
-        &bearer,
-        &session_id,
-        r#"{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"update_recipe","arguments":{"slug":"beef-taco-bowls","rating":5}}}"#,
-    )
-    .await;
-
-    assert!(
-        body.contains("\"isError\":true"),
-        "a redirected field must produce a tool-level error; got: {body}"
-    );
-    assert!(
-        body.contains("Call rate_recipe to set a rating"),
-        "the error must name rate_recipe; got: {body}"
-    );
-}

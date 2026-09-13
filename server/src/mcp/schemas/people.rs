@@ -8,7 +8,6 @@ use crate::dto::UpdatePersonDto;
 use crate::entities::person;
 
 use super::common::{blank_to_none, parse_json, parse_optional_json};
-use super::McpToolInput;
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct PersonWithPrefs {
@@ -93,8 +92,6 @@ pub struct UpdatePersonInput {
     #[serde(default)]
     pub drink_dislikes: Option<Vec<String>>,
 }
-
-impl McpToolInput for UpdatePersonInput {}
 
 /// Translate `UpdatePersonInput` into the existing `UpdatePersonDto` the
 /// service layer accepts. The `name` on the input is the lookup key, NOT a

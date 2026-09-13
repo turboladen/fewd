@@ -15,6 +15,7 @@ use rmcp::{
     ServerHandler,
 };
 use sea_orm::DatabaseConnection;
+use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::entities::person;
@@ -34,8 +35,8 @@ use super::schemas::{
     recipe_to_brief, recipe_to_full, render_diet_tags_markdown, render_family_overview,
     shopping_item_from_dto, update_person_input_to_dto, update_recipe_input_to_dto,
     CreateMealError, CreateMealInput, CreateRecipeInput, DateRangeParams, EmptyParams,
-    FavoriteRecipeInput, GetRecipeParams, ImportRecipeUrlInput, McpToolInput, PrintableInput,
-    RateRecipeInput, SearchRecipesParams, UnrateRecipeInput, UpdatePersonInput, UpdateRecipeInput,
+    FavoriteRecipeInput, GetRecipeParams, ImportRecipeUrlInput, PrintableInput, RateRecipeInput,
+    SearchRecipesParams, UnrateRecipeInput, UpdatePersonInput, UpdateRecipeInput,
 };
 use super::AuthenticatedPerson;
 
@@ -1073,63 +1074,20 @@ fn enforce_list_cap(tool: &str, count: usize, narrow_hint: &str) -> Option<CallT
 /// from a literal `Parameters<T>` ident in the function signature
 /// (rmcp-macros `find_parameters_type_in_sig`), so without the override
 /// the LLM sees an empty schema and can't discover the tool's inputs.
-pub(super) struct LenientParameters<T>(Result<T, InputRejection>);
+pub(super) struct LenientParameters<T>(Result<T, String>);
 
-/// Why a tool's arguments failed to deserialize. Its `Display` output is the
-/// middle of the tool-level error that [`LenientParameters::into_tool_input`]
-/// builds, which appends a period and a pointer at the input schema.
-#[derive(Debug)]
-pub(super) struct InputRejection {
-    /// Holds one hint, in complete sentences, for each argument the input
-    /// type redirects, built from [`McpToolInput::FIELD_REDIRECTS`].
-    redirects: Vec<String>,
-    /// Holds serde's error message.
-    detail: String,
-}
-
-impl std::fmt::Display for InputRejection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.redirects.is_empty() {
-            return f.write_str(&self.detail);
-        }
-        write!(f, "{} Details: {}", self.redirects.join(" "), self.detail)
-    }
-}
-
-impl<T: McpToolInput> LenientParameters<T> {
+impl<T: DeserializeOwned> LenientParameters<T> {
     /// Core extraction logic, separated from [`FromContextPart`] so it can
     /// be exercised in tests without spinning up a full `ToolCallContext`
     /// (which is `#[non_exhaustive]` and requires a service reference).
-    /// Mirrors rmcp's stock `Parameters<T>` deserialize step, except errors
-    /// are captured into the inner `Result`, with any redirect hints for the
-    /// arguments the caller sent.
+    /// Mirrors rmcp's stock `Parameters<T>` deserialize step exactly,
+    /// except errors are captured into the inner `Result`.
     fn extract(arguments: Option<rmcp::model::JsonObject>) -> Self {
         let arguments = arguments.unwrap_or_default();
-        // A redirected field is never declared, so a match means serde is
-        // about to reject the input and the redirect only adds advice. Matching
-        // before deserializing lets serde consume the arguments by value.
-        let redirects = redirects_for::<T>(&arguments);
-        let parsed =
-            serde_json::from_value::<T>(serde_json::Value::Object(arguments)).map_err(|err| {
-                InputRejection {
-                    redirects,
-                    detail: err.to_string(),
-                }
-            });
+        let parsed = serde_json::from_value::<T>(serde_json::Value::Object(arguments))
+            .map_err(|e| e.to_string());
         LenientParameters(parsed)
     }
-}
-
-fn redirects_for<T: McpToolInput>(arguments: &rmcp::model::JsonObject) -> Vec<String> {
-    arguments
-        .keys()
-        .filter_map(|key| {
-            T::FIELD_REDIRECTS
-                .iter()
-                .find(|(field, _)| field == key)
-                .map(|(field, recovery)| format!("`{field}` is not accepted here. {recovery}"))
-        })
-        .collect()
 }
 
 impl<T> LenientParameters<T> {
@@ -1138,10 +1096,8 @@ impl<T> LenientParameters<T> {
     /// with the early-return pattern in handlers:
     /// `let input = match input.into_tool_input("name") { Ok(v) => v, Err(e) => return Ok(e) };`
     pub(super) fn into_tool_input(self, tool_name: &'static str) -> Result<T, CallToolResult> {
-        self.0.map_err(|rejection| {
-            tool_user_error(format!(
-                "{tool_name}: {rejection}. Check the tool's input schema."
-            ))
+        self.0.map_err(|e| {
+            tool_user_error(format!("{tool_name}: {e}. Check the tool's input schema."))
         })
     }
 
@@ -1156,7 +1112,7 @@ impl<T> LenientParameters<T> {
 
 impl<S, T> FromContextPart<ToolCallContext<'_, S>> for LenientParameters<T>
 where
-    T: McpToolInput,
+    T: DeserializeOwned,
 {
     fn from_context_part(context: &mut ToolCallContext<S>) -> Result<Self, McpError> {
         Ok(Self::extract(context.arguments.take()))
@@ -2921,9 +2877,7 @@ mod tests {
         let LenientParameters(parsed) = LenientParameters::<FavoriteRecipeInput>::extract(
             args_with(&[("slug", serde_json::json!("beef-taco-bowls"))]),
         );
-        let err = parsed
-            .expect_err("is_favorite must be required")
-            .to_string();
+        let err = parsed.expect_err("is_favorite must be required");
         assert!(
             err.contains("is_favorite"),
             "error must name the missing field: {err}"
@@ -3274,9 +3228,7 @@ mod tests {
             ("ingredients", serde_json::json!([])),
         ]);
         let LenientParameters(parsed) = LenientParameters::<CreateRecipeInput>::extract(args);
-        let err = parsed
-            .expect_err("missing required field must surface as Err")
-            .to_string();
+        let err = parsed.expect_err("missing required field must surface as Err");
         assert!(
             err.contains("source"),
             "error must name the missing field: {err}"
@@ -3304,9 +3256,7 @@ mod tests {
         // EmptyParams this would succeed — separately tested via the
         // EmptyParams tools' integration paths.)
         let LenientParameters(parsed) = LenientParameters::<CreateRecipeInput>::extract(None);
-        let err = parsed
-            .expect_err("None args → empty object → missing required fields")
-            .to_string();
+        let err = parsed.expect_err("None args → empty object → missing required fields");
         assert!(
             err.contains("name") || err.contains("source") || err.contains("servings"),
             "error must name a missing required field: {err}"
@@ -3767,12 +3717,12 @@ mod tests {
         use schemars::JsonSchema;
         use serde_json::{json, Value};
 
-        fn rejection<T: McpToolInput + std::fmt::Debug>(args: Value) -> String {
+        fn rejection<T: DeserializeOwned + std::fmt::Debug>(args: Value) -> String {
             let Value::Object(object) = args else {
                 panic!("tool arguments must be a JSON object");
             };
             let LenientParameters(parsed) = LenientParameters::<T>::extract(Some(object));
-            parsed.expect_err("the input must be rejected").to_string()
+            parsed.expect_err("the input must be rejected")
         }
 
         fn valid_create_recipe_args() -> serde_json::Map<String, Value> {
@@ -3808,65 +3758,24 @@ mod tests {
             );
         }
 
-        #[test]
-        fn redirect_hints_precede_the_serde_message_in_one_sentence_sequence() {
-            // `instruction` precedes `rating` in both sorted and insertion
-            // order, so serde reports it whether or not serde_json's
-            // `preserve_order` feature is on.
-            let args = args_with(&[
-                ("slug", json!("beef-taco-bowls")),
-                ("instruction", json!("New steps")),
-                ("rating", json!(5)),
-            ]);
-            let detail = serde_json::from_value::<UpdateRecipeInput>(Value::Object(
-                args.clone().expect("args_with returns Some"),
-            ))
-            .expect_err("the misspelled field must fail")
-            .to_string();
-            assert!(
-                detail.starts_with("unknown field `instruction`"),
-                "serde must report the misspelled field, not the redirected one: {detail}"
-            );
-
-            let result = LenientParameters::<UpdateRecipeInput>::extract(args)
-                .into_tool_input("update_recipe")
-                .expect_err("the input must be rejected");
-            let text = &result.content[0]
-                .as_text()
-                .expect("a tool-level error carries text")
-                .text;
-            assert_eq!(
-                text,
-                &format!(
-                    "update_recipe: `rating` is not accepted here. Call rate_recipe to set a \
-                     rating, or unrate_recipe to clear it. Details: {detail}. Check \
-                     the tool's input schema."
-                )
-            );
+        // `rating` is a real recipe attribute that update_recipe does not
+        // write, so it must fail the call like any other unknown field.
+        #[tokio::test]
+        async fn update_recipe_rating_returns_tool_level_error() {
+            let mcp = setup_test_mcp().await;
+            let args = args_with(&[("slug", json!("beef-taco-bowls")), ("rating", json!(5))]);
+            let result = mcp
+                .update_recipe(LenientParameters::<UpdateRecipeInput>::extract(args))
+                .await;
+            assert_tool_user_error(result, &["update_recipe: unknown field `rating`"]);
         }
 
         #[test]
-        fn update_recipe_is_favorite_names_favorite_recipe() {
-            let err = rejection::<UpdateRecipeInput>(
-                json!({"slug": "beef-taco-bowls", "is_favorite": true}),
-            );
-            assert!(
-                err.starts_with("`is_favorite` is not accepted here. Call favorite_recipe"),
-                "{err}"
-            );
-        }
-
-        #[test]
-        fn create_recipe_rating_and_slug_name_their_recovery() {
+        fn create_recipe_rating_is_rejected() {
             let mut args = valid_create_recipe_args();
             args.insert("rating".into(), json!(4));
-            args.insert("slug".into(), json!("beef-taco-bowls"));
             let err = rejection::<CreateRecipeInput>(Value::Object(args));
-            assert!(err.contains("Call rate_recipe to set a rating"), "{err}");
-            assert!(
-                err.contains("generates the slug from `name`; omit it."),
-                "{err}"
-            );
+            assert!(err.contains("unknown field `rating`"), "{err}");
         }
 
         #[test]
@@ -4119,41 +4028,6 @@ mod tests {
                     "/properties/documented".to_string(),
                 ]
             );
-        }
-
-        fn assert_redirects_disjoint<T: McpToolInput + JsonSchema + 'static>() {
-            let schema = schema_of::<T>();
-            let properties = schema.get("properties").and_then(Value::as_object);
-            for (field, recovery) in T::FIELD_REDIRECTS {
-                assert!(
-                    !recovery.trim().is_empty(),
-                    "{}: the redirect for `{field}` has no recovery text",
-                    std::any::type_name::<T>()
-                );
-                assert!(
-                    !properties.is_some_and(|declared| declared.contains_key(*field)),
-                    "{}: `{field}` is a declared field, so its redirect can never fire. \
-                     Remove it from FIELD_REDIRECTS.",
-                    std::any::type_name::<T>()
-                );
-            }
-        }
-
-        #[test]
-        fn field_redirects_never_name_a_declared_field() {
-            assert_redirects_disjoint::<EmptyParams>();
-            assert_redirects_disjoint::<GetRecipeParams>();
-            assert_redirects_disjoint::<DateRangeParams>();
-            assert_redirects_disjoint::<SearchRecipesParams>();
-            assert_redirects_disjoint::<CreateRecipeInput>();
-            assert_redirects_disjoint::<UpdateRecipeInput>();
-            assert_redirects_disjoint::<FavoriteRecipeInput>();
-            assert_redirects_disjoint::<RateRecipeInput>();
-            assert_redirects_disjoint::<UnrateRecipeInput>();
-            assert_redirects_disjoint::<ImportRecipeUrlInput>();
-            assert_redirects_disjoint::<CreateMealInput>();
-            assert_redirects_disjoint::<UpdatePersonInput>();
-            assert_redirects_disjoint::<PrintableInput>();
         }
     }
 }
