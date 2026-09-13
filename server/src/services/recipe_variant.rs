@@ -87,6 +87,17 @@ pub struct VariantSpec {
     pub notes: Option<String>,
 }
 
+/// How far a prep filter can tell same-named candidates apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrepSeparation {
+    /// Every candidate has a prep no other candidate shares.
+    Every,
+    /// Some candidates share a prep, so only the others can be picked by prep.
+    Partial,
+    /// Every candidate shares its prep with another, so no prep picks one.
+    Unseparable,
+}
+
 /// Why a variant could not be built. Change numbers are 1-based positions in
 /// the list the caller supplied.
 #[derive(Debug)]
@@ -97,13 +108,13 @@ pub enum VariantError {
         prep: PrepFilter,
         available: Vec<String>,
     },
-    /// Several ingredients match. `separable_by_prep` is false when they all
-    /// share the same prep, so no prep filter can pick one of them.
+    /// Several ingredients match. `prep_separation` says whether a prep filter
+    /// can pick out every candidate, only some of them, or none.
     AmbiguousIngredient {
         number: usize,
         name: String,
         candidates: Vec<String>,
-        separable_by_prep: bool,
+        prep_separation: PrepSeparation,
     },
     EmptyEditFind {
         number: usize,
@@ -157,7 +168,7 @@ impl std::fmt::Display for VariantError {
                 number,
                 name,
                 candidates,
-                separable_by_prep: true,
+                prep_separation: PrepSeparation::Every,
             } => write!(
                 f,
                 "ingredient change #{number}: '{name}' matches {} ingredients ({}). Give the prep of the one you mean, or \"prep\": \"\" for the one with no prep.",
@@ -168,7 +179,18 @@ impl std::fmt::Display for VariantError {
                 number,
                 name,
                 candidates,
-                separable_by_prep: false,
+                prep_separation: PrepSeparation::Partial,
+            } => write!(
+                f,
+                "ingredient change #{number}: '{name}' matches {} ingredients ({}). Give the prep of the one you mean, or \"prep\": \"\" for the one with no prep. Ingredients that share a prep cannot be told apart that way; for those, supply the whole ingredient list instead.",
+                candidates.len(),
+                candidates.join("; ")
+            ),
+            Self::AmbiguousIngredient {
+                number,
+                name,
+                candidates,
+                prep_separation: PrepSeparation::Unseparable,
             } => write!(
                 f,
                 "ingredient change #{number}: '{name}' matches {} ingredients that no change can tell apart ({}). Supply the whole ingredient list instead.",
@@ -390,10 +412,26 @@ fn locate_ingredient(
                 .iter()
                 .map(|&i| describe_candidate(&ingredients[i]))
                 .collect(),
-            separable_by_prep: several.iter().any(|&i| {
-                effective_prep(&ingredients[i]) != effective_prep(&ingredients[several[0]])
-            }),
+            prep_separation: prep_separation(ingredients, several),
         }),
+    }
+}
+
+// A prep held by exactly one candidate picks that candidate out; a prep that
+// several candidates share never can, whatever the other candidates' preps are.
+fn prep_separation(ingredients: &[IngredientDto], candidates: &[usize]) -> PrepSeparation {
+    let preps: Vec<_> = candidates
+        .iter()
+        .map(|&i| effective_prep(&ingredients[i]))
+        .collect();
+    let unique = preps
+        .iter()
+        .filter(|prep| preps.iter().filter(|other| other == prep).count() == 1)
+        .count();
+    match unique {
+        0 => PrepSeparation::Unseparable,
+        n if n == preps.len() => PrepSeparation::Every,
+        _ => PrepSeparation::Partial,
     }
 }
 
@@ -813,7 +851,7 @@ mod tests {
             matches!(
                 err,
                 VariantError::AmbiguousIngredient {
-                    separable_by_prep: false,
+                    prep_separation: PrepSeparation::Unseparable,
                     ..
                 }
             ),
@@ -826,6 +864,40 @@ mod tests {
             "{message}"
         );
         assert!(!message.contains("prep"), "{message}");
+    }
+
+    #[test]
+    fn a_shared_prep_among_distinct_ones_is_only_partially_separable() {
+        // Preps a, a, b: "b" picks one candidate, but neither "a" entry can
+        // be picked out by prep, so the message must say both things.
+        let mut first = ingredient("salt");
+        first.prep = Some("a".into());
+        let mut second = ingredient("salt");
+        second.prep = Some("a".into());
+        second.amount = IngredientAmountDto::Single { value: 2.0 };
+        let mut third = ingredient("salt");
+        third.prep = Some("b".into());
+
+        let err = apply_ingredient_changes(
+            vec![first, second, third],
+            vec![IngredientChange::Remove {
+                target: target("salt", None),
+            }],
+        )
+        .expect_err("three salts with no prep filter are ambiguous");
+        assert!(
+            matches!(
+                err,
+                VariantError::AmbiguousIngredient {
+                    prep_separation: PrepSeparation::Partial,
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+        let message = err.to_string();
+        assert!(message.contains("Give the prep"), "{message}");
+        assert!(message.contains("share a prep"), "{message}");
     }
 
     #[test]
@@ -1173,13 +1245,19 @@ mod tests {
                 number: 1,
                 name: "x".into(),
                 candidates: vec!["x (a)".into(), "x (b)".into()],
-                separable_by_prep: true,
+                prep_separation: PrepSeparation::Every,
+            },
+            VariantError::AmbiguousIngredient {
+                number: 1,
+                name: "x".into(),
+                candidates: vec!["x (a): 1".into(), "x (a): 2".into(), "x (b): 1".into()],
+                prep_separation: PrepSeparation::Partial,
             },
             VariantError::AmbiguousIngredient {
                 number: 1,
                 name: "x".into(),
                 candidates: vec!["x: 1".into(), "x: 2".into()],
-                separable_by_prep: false,
+                prep_separation: PrepSeparation::Unseparable,
             },
             VariantError::EmptyEditFind { number: 1 },
             VariantError::EditNotFound {

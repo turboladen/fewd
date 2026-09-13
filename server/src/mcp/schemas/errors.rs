@@ -176,11 +176,19 @@ pub fn variant_error_message(err: &VariantError, parent_slug: &str) -> String {
     let (number, hint) = match err {
         VariantError::AmbiguousIngredient {
             number,
-            separable_by_prep: false,
+            prep_separation: crate::services::recipe_variant::PrepSeparation::Unseparable,
             ..
         } => (
             *number,
-            format!("No adapt_recipe change can target just one of them. Call create_recipe with parent_recipe_slug '{parent_slug}' and the full ingredient list instead, or leave this change out and fix the saved variant's ingredients with update_recipe."),
+            format!("No adapt_recipe change can target just one of them. Call create_recipe with parent_recipe_slug '{parent_slug}' and the full ingredient list instead, or retry adapt_recipe without this change and then fix the new variant's ingredients with update_recipe on its slug."),
+        ),
+        VariantError::AmbiguousIngredient {
+            number,
+            prep_separation: crate::services::recipe_variant::PrepSeparation::Partial,
+            ..
+        } => (
+            *number,
+            format!("For an ingredient that shares its prep with another, call create_recipe with parent_recipe_slug '{parent_slug}' and the full ingredient list instead, or retry adapt_recipe without this change and then fix the new variant's ingredients with update_recipe on its slug."),
         ),
         VariantError::UnmatchedIngredient { number, .. }
         | VariantError::AmbiguousIngredient { number, .. } => (

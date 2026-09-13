@@ -612,13 +612,16 @@ pub struct InstructionEditInput {
 /// carry at least one ingredient or instruction change, and cannot send both
 /// `instructions` and `instruction_edits`.
 pub fn adapt_recipe_input_to_spec(input: AdaptRecipeInput) -> Result<VariantSpec, InputError> {
+    // Sending both instruction forms is rejected even when `instruction_edits`
+    // is an empty list; only an omitted or null list counts as not sent.
+    let both_instruction_forms = input.instructions.is_some() && input.instruction_edits.is_some();
     // An explicit `null` list means the same as an omitted one.
     let ingredient_changes = input.ingredient_changes.unwrap_or_default();
     let instruction_edits = input.instruction_edits.unwrap_or_default();
     if input.name.trim().is_empty() {
         return Err(InputError::EmptyName("name"));
     }
-    if input.instructions.is_some() && !instruction_edits.is_empty() {
+    if both_instruction_forms {
         return Err(InputError::ConflictingInstructionChanges);
     }
     if input
@@ -862,17 +865,23 @@ mod tests {
 
     #[test]
     fn adapt_rejects_both_instruction_forms() {
-        let err = adapt_spec(serde_json::json!({
-            "instructions": "Just cook it.",
-            "instruction_edits": [{"find": "sage", "replace": "basil"}],
-        }))
-        .unwrap_err();
-        assert!(
-            matches!(err, InputError::ConflictingInstructionChanges),
-            "{err:?}"
-        );
-        let message = err.to_string();
-        assert!(message.contains("not both"), "{message}");
+        // An explicitly empty list still counts as sending both forms.
+        for edits in [
+            serde_json::json!([{"find": "sage", "replace": "basil"}]),
+            serde_json::json!([]),
+        ] {
+            let err = adapt_spec(serde_json::json!({
+                "instructions": "Just cook it.",
+                "instruction_edits": edits,
+            }))
+            .unwrap_err();
+            assert!(
+                matches!(err, InputError::ConflictingInstructionChanges),
+                "{edits}: {err:?}"
+            );
+            let message = err.to_string();
+            assert!(message.contains("not both"), "{message}");
+        }
     }
 
     #[test]
