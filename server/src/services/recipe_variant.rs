@@ -4,9 +4,10 @@
 
 use serde::de::DeserializeOwned;
 
-use crate::dto::{CreateRecipeDto, IngredientDto, TimeValueDto};
+use crate::dto::{CreateRecipeDto, IngredientAmountDto, IngredientDto, TimeValueDto};
 use crate::entities::recipe;
 use crate::services::ingredient_splitter;
+use crate::services::recipe_times::drop_unusable_import_times;
 
 /// The `source` every variant is stored with. The web UI labels a recipe with
 /// this source as "Adapted from" its parent.
@@ -15,14 +16,29 @@ pub const VARIANT_SOURCE: &str = "ai_adapted";
 /// Names one ingredient already on the recipe.
 ///
 /// `name` is compared case-insensitively against the whole stored name, with
-/// surrounding whitespace ignored. When that finds nothing, a comma'd `name`
-/// such as "garlic, minced" is split into name and prep and tried again. A
-/// non-blank `prep` narrows the match to ingredients with that prep. Only the
-/// primary ingredient on each line is matched, never its `or_alternative`.
+/// surrounding whitespace ignored. When that finds nothing and `prep` is
+/// [`PrepFilter::Any`], a comma'd `name` such as "garlic, minced" is split
+/// into name and prep and tried again. Only the primary ingredient on each
+/// line is matched, never its `or_alternative`.
+///
+/// When several ingredients match and all of them are identical in every
+/// field, the first one is used, since no filter could tell them apart.
 #[derive(Debug, Clone)]
 pub struct IngredientMatch {
     pub name: String,
-    pub prep: Option<String>,
+    pub prep: PrepFilter,
+}
+
+/// Which prep an [`IngredientMatch`] accepts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrepFilter {
+    /// Matches an ingredient with any prep, or none.
+    Any,
+    /// Matches only an ingredient with no prep.
+    NoPrep,
+    /// Matches only an ingredient with this prep, compared case-insensitively
+    /// with surrounding whitespace ignored.
+    Exactly(String),
 }
 
 /// One edit to a recipe's ingredient list.
@@ -78,13 +94,16 @@ pub enum VariantError {
     UnmatchedIngredient {
         number: usize,
         name: String,
-        prep: Option<String>,
+        prep: PrepFilter,
         available: Vec<String>,
     },
+    /// Several ingredients match. `separable_by_prep` is false when they all
+    /// share the same prep, so no prep filter can pick one of them.
     AmbiguousIngredient {
         number: usize,
         name: String,
         candidates: Vec<String>,
+        separable_by_prep: bool,
     },
     EmptyEditFind {
         number: usize,
@@ -97,12 +116,6 @@ pub enum VariantError {
         number: usize,
         find: String,
         count: usize,
-    },
-    /// The parent stores a duration whose unit fewd cannot interpret.
-    UnreadableParentTime {
-        field: &'static str,
-        value: i32,
-        unit: String,
     },
     /// The parent's stored JSON does not parse. This is a server-side fault,
     /// not something the caller can correct.
@@ -121,8 +134,10 @@ impl std::fmt::Display for VariantError {
                 available,
             } => {
                 write!(f, "ingredient change #{number}: no ingredient named '{name}'")?;
-                if let Some(prep) = prep {
-                    write!(f, " with prep '{prep}'")?;
+                match prep {
+                    PrepFilter::Any => {}
+                    PrepFilter::NoPrep => write!(f, " with no prep")?,
+                    PrepFilter::Exactly(prep) => write!(f, " with prep '{prep}'")?,
                 }
                 if available.is_empty() {
                     write!(f, ". The recipe has no ingredients.")?;
@@ -142,11 +157,23 @@ impl std::fmt::Display for VariantError {
                 number,
                 name,
                 candidates,
+                separable_by_prep: true,
             } => write!(
                 f,
-                "ingredient change #{number}: '{name}' matches {} ingredients ({}). Give a prep that picks exactly one.",
+                "ingredient change #{number}: '{name}' matches {} ingredients ({}). Give the prep of the one you mean, or \"prep\": \"\" for the one with no prep.",
                 candidates.len(),
-                candidates.join(", ")
+                candidates.join("; ")
+            ),
+            Self::AmbiguousIngredient {
+                number,
+                name,
+                candidates,
+                separable_by_prep: false,
+            } => write!(
+                f,
+                "ingredient change #{number}: '{name}' matches {} ingredients that no change can tell apart ({}). Supply the whole ingredient list instead.",
+                candidates.len(),
+                candidates.join("; ")
             ),
             Self::EmptyEditFind { number } => write!(
                 f,
@@ -164,10 +191,6 @@ impl std::fmt::Display for VariantError {
                 f,
                 "instruction edit #{number}: '{find}' occurs {count} times in the instructions. The text to find must match exactly once, so include more of the surrounding text, or send the full instructions instead."
             ),
-            Self::UnreadableParentTime { field, value, unit } => write!(
-                f,
-                "the parent recipe stores {field} as {value} '{unit}', which fewd cannot read as a duration."
-            ),
             Self::MalformedParent(detail) => {
                 write!(f, "the parent recipe has malformed stored data: {detail}")
             }
@@ -183,20 +206,32 @@ impl std::fmt::Display for VariantError {
 /// when there are no ingredient changes, since changed ingredients make the
 /// parent's figures wrong. `source_url` is never inherited, and favorite,
 /// rating, and planning history start fresh because `RecipeService::create`
-/// sets them.
+/// sets them. `RecipeService::create` also derives a total of prep plus cook
+/// when the parent stores no total, so the saved variant can carry a total
+/// time its parent lacks.
+///
+/// A parent time that `RecipeService::create` would reject, such as one in
+/// an unrecognized unit, is left off the variant and logged as a warning.
 ///
 /// # Errors
 ///
-/// Returns a [`VariantError`] when a change does not apply, when the parent
-/// stores a time in an unreadable unit, or when its stored JSON is malformed.
-/// Nothing is built unless every change applies.
+/// Returns a [`VariantError`] when a change does not apply or when the
+/// parent's stored JSON is malformed. Nothing is built unless every change
+/// applies.
+//
+// Dropping rather than rejecting keeps the parent untouched: the only fix a
+// rejection could suggest is editing the parent, which is exactly what
+// adapting avoids. The web adapt flow drops such times the same way.
 pub fn build_variant_dto(
     parent: &recipe::Model,
     spec: VariantSpec,
 ) -> Result<CreateRecipeDto, VariantError> {
-    let prep_time = parent_time("prep_time", parent.prep_time.as_deref())?;
-    let cook_time = parent_time("cook_time", parent.cook_time.as_deref())?;
-    let total_time = parent_time("total_time", parent.total_time.as_deref())?;
+    let prep_time: Option<TimeValueDto> =
+        parse_optional_stored(parent.prep_time.as_deref(), "prep_time")?;
+    let cook_time: Option<TimeValueDto> =
+        parse_optional_stored(parent.cook_time.as_deref(), "cook_time")?;
+    let total_time: Option<TimeValueDto> =
+        parse_optional_stored(parent.total_time.as_deref(), "total_time")?;
 
     let ingredients_changed = !spec.ingredient_changes.is_empty();
     let parent_ingredients: Vec<IngredientDto> = parse_stored(&parent.ingredients, "ingredients")?;
@@ -224,7 +259,7 @@ pub fn build_variant_dto(
         None => parse_stored(&parent.tags, "tags")?,
     };
 
-    Ok(CreateRecipeDto {
+    let mut dto = CreateRecipeDto {
         name: spec.name,
         description: spec.description.or_else(|| parent.description.clone()),
         source: VARIANT_SOURCE.to_string(),
@@ -241,7 +276,9 @@ pub fn build_variant_dto(
         tags,
         notes: spec.notes.or_else(|| parent.notes.clone()),
         icon: parent.icon.clone(),
-    })
+    };
+    drop_unusable_import_times(&mut dto);
+    Ok(dto)
 }
 
 /// Apply `changes` in order, each one seeing the list as the earlier changes
@@ -321,15 +358,14 @@ fn locate_ingredient(
     number: usize,
     target: &IngredientMatch,
 ) -> Result<usize, VariantError> {
-    let prep = target.prep.as_deref().filter(|p| !p.trim().is_empty());
-    let mut hits = matching_positions(ingredients, &target.name, prep);
+    let mut hits = matching_positions(ingredients, &target.name, &target.prep);
     // The whole string is tried first so a stored name that itself contains a
     // comma stays matchable; the split only rescues a caller who folded the
-    // prep into the name.
-    if hits.is_empty() {
-        let (name, prep) =
-            ingredient_splitter::normalize(target.name.clone(), prep.map(str::to_string));
-        hits = matching_positions(ingredients, &name, prep.as_deref());
+    // prep into the name, which cannot be the case when a prep filter was sent.
+    if hits.is_empty() && target.prep == PrepFilter::Any {
+        let (name, prep) = ingredient_splitter::normalize(target.name.clone(), None);
+        let prep = prep.map_or(PrepFilter::Any, PrepFilter::Exactly);
+        hits = matching_positions(ingredients, &name, &prep);
     }
 
     match hits.as_slice() {
@@ -337,35 +373,64 @@ fn locate_ingredient(
         [] => Err(VariantError::UnmatchedIngredient {
             number,
             name: target.name.clone(),
-            prep: prep.map(str::to_string),
+            prep: target.prep.clone(),
             available: ingredients.iter().map(describe_ingredient).collect(),
         }),
+        [first, rest @ ..]
+            if rest
+                .iter()
+                .all(|&i| identical(&ingredients[*first], &ingredients[i])) =>
+        {
+            Ok(*first)
+        }
         several => Err(VariantError::AmbiguousIngredient {
             number,
             name: target.name.clone(),
             candidates: several
                 .iter()
-                .map(|&i| describe_ingredient(&ingredients[i]))
+                .map(|&i| describe_candidate(&ingredients[i]))
                 .collect(),
+            separable_by_prep: several.iter().any(|&i| {
+                effective_prep(&ingredients[i]) != effective_prep(&ingredients[several[0]])
+            }),
         }),
     }
 }
 
-fn matching_positions(ingredients: &[IngredientDto], name: &str, prep: Option<&str>) -> Vec<usize> {
+// The prep a filter compares against: trimmed and lowercased, with a blank
+// prep counting as none, exactly as `matching_positions` treats it.
+fn effective_prep(ingredient: &IngredientDto) -> Option<String> {
+    ingredient
+        .prep
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(str::to_lowercase)
+}
+
+fn matching_positions(ingredients: &[IngredientDto], name: &str, prep: &PrepFilter) -> Vec<usize> {
     ingredients
         .iter()
         .enumerate()
         .filter(|(_, ingredient)| {
+            let stored_prep = ingredient.prep.as_deref().filter(|p| !p.trim().is_empty());
             same_text(&ingredient.name, name)
-                && prep.is_none_or(|wanted| {
-                    ingredient
-                        .prep
-                        .as_deref()
-                        .is_some_and(|stored| same_text(stored, wanted))
-                })
+                && match prep {
+                    PrepFilter::Any => true,
+                    PrepFilter::NoPrep => stored_prep.is_none(),
+                    PrepFilter::Exactly(wanted) => {
+                        stored_prep.is_some_and(|stored| same_text(stored, wanted))
+                    }
+                }
         })
         .map(|(i, _)| i)
         .collect()
+}
+
+// `IngredientDto` has no `PartialEq`, and its serialized form covers every
+// field, alternatives included.
+fn identical(a: &IngredientDto, b: &IngredientDto) -> bool {
+    serde_json::to_value(a).ok() == serde_json::to_value(b).ok()
 }
 
 fn same_text(a: &str, b: &str) -> bool {
@@ -373,10 +438,28 @@ fn same_text(a: &str, b: &str) -> bool {
 }
 
 fn describe_ingredient(ingredient: &IngredientDto) -> String {
-    match &ingredient.prep {
+    match ingredient.prep.as_deref().filter(|p| !p.trim().is_empty()) {
         Some(prep) => format!("{} ({prep})", ingredient.name),
         None => ingredient.name.clone(),
     }
+}
+
+// Candidates in an ambiguity share a name and may share a prep, so they are
+// listed with the amount, unit, and notes that tell them apart.
+fn describe_candidate(ingredient: &IngredientDto) -> String {
+    let amount = match &ingredient.amount {
+        IngredientAmountDto::Single { value } => value.to_string(),
+        IngredientAmountDto::Range { min, max } => format!("{min}-{max}"),
+    };
+    let mut text = format!("{}: {amount}", describe_ingredient(ingredient));
+    if !ingredient.unit.trim().is_empty() {
+        text.push(' ');
+        text.push_str(ingredient.unit.trim());
+    }
+    if let Some(notes) = ingredient.notes.as_deref().filter(|n| !n.trim().is_empty()) {
+        text.push_str(&format!(" (notes: {})", notes.trim()));
+    }
+    text
 }
 
 fn normalize_line_endings(text: &str) -> String {
@@ -390,30 +473,6 @@ fn occurrences(haystack: &str, needle: &str) -> usize {
         .char_indices()
         .filter(|(i, _)| haystack[*i..].starts_with(needle))
         .count()
-}
-
-fn parent_time(
-    field: &'static str,
-    raw: Option<&str>,
-) -> Result<Option<TimeValueDto>, VariantError> {
-    let Some(time) = parse_optional_stored::<TimeValueDto>(raw, field)? else {
-        return Ok(None);
-    };
-    if !is_readable_duration(&time) {
-        return Err(VariantError::UnreadableParentTime {
-            field,
-            value: time.value,
-            unit: time.unit,
-        });
-    }
-    Ok(Some(time))
-}
-
-// The single place a stored duration is judged readable. A variant built from
-// an unreadable one would carry a time that no time filter can use, so it is
-// reported to the caller instead of copied or guessed at.
-fn is_readable_duration(time: &TimeValueDto) -> bool {
-    migration::total_minutes::total_time_to_minutes(time.value, &time.unit).is_some()
 }
 
 fn parse_stored<T: DeserializeOwned>(raw: &str, field: &str) -> Result<T, VariantError> {
@@ -510,10 +569,16 @@ mod tests {
         }
     }
 
+    // `None` accepts any prep, a blank string only no prep, and anything else
+    // exactly that prep, the same mapping the MCP converter applies.
     fn target(name: &str, prep: Option<&str>) -> IngredientMatch {
         IngredientMatch {
             name: name.into(),
-            prep: prep.map(str::to_string),
+            prep: match prep {
+                None => PrepFilter::Any,
+                Some(p) if p.trim().is_empty() => PrepFilter::NoPrep,
+                Some(p) => PrepFilter::Exactly(p.into()),
+            },
         }
     }
 
@@ -663,19 +728,146 @@ mod tests {
     }
 
     #[test]
-    fn same_named_ingredients_without_prep_are_ambiguous() {
+    fn same_named_ingredients_without_a_prep_filter_are_ambiguous() {
         let err = apply_ingredient_changes(
             parent_ingredients(),
             vec![IngredientChange::Remove {
-                target: target("salt", Some("   ")),
+                target: target("salt", None),
             }],
         )
         .expect_err("two salts match");
         let VariantError::AmbiguousIngredient { candidates, .. } = &err else {
             panic!("expected AmbiguousIngredient, got {err:?}");
         };
-        assert_eq!(candidates, &["salt (for the water)", "salt (to taste)"]);
-        assert!(err.to_string().contains("prep"), "{err}");
+        assert_eq!(
+            candidates,
+            &["salt (for the water): 1 tablespoon", "salt (to taste): 0"]
+        );
+        let message = err.to_string();
+        assert!(message.contains("Give the prep"), "{message}");
+        assert!(message.contains(r#""prep": """#), "{message}");
+    }
+
+    fn butters() -> Vec<IngredientDto> {
+        let mut softened = ingredient("butter");
+        softened.prep = Some("softened".into());
+        vec![ingredient("butter"), softened]
+    }
+
+    #[test]
+    fn a_blank_prep_targets_the_ingredient_with_no_prep() {
+        let result = apply_ingredient_changes(
+            butters(),
+            vec![IngredientChange::Remove {
+                target: target("butter", Some("")),
+            }],
+        )
+        .expect("only the plain butter has no prep");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].prep.as_deref(), Some("softened"));
+    }
+
+    #[test]
+    fn a_prep_targets_the_same_named_ingredient_that_has_it() {
+        let result = apply_ingredient_changes(
+            butters(),
+            vec![IngredientChange::Remove {
+                target: target("butter", Some("softened")),
+            }],
+        )
+        .expect("only one butter is softened");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].prep, None);
+    }
+
+    #[test]
+    fn a_blank_prep_with_no_unprepped_match_is_unmatched() {
+        let err = apply_ingredient_changes(
+            parent_ingredients(),
+            vec![IngredientChange::Remove {
+                target: target("salt", Some("")),
+            }],
+        )
+        .expect_err("both salts carry a prep");
+        assert!(err.to_string().contains("'salt' with no prep"), "{err}");
+    }
+
+    #[test]
+    fn same_prep_candidates_report_a_distinct_message_without_prep_advice() {
+        let mut tablespoons = ingredient("olive oil");
+        tablespoons.amount = IngredientAmountDto::Single { value: 2.0 };
+        tablespoons.unit = "tablespoon".into();
+        let mut cup = ingredient("olive oil");
+        cup.amount = IngredientAmountDto::Single { value: 0.25 };
+        cup.unit = "cup".into();
+        cup.notes = Some("for greasing".into());
+
+        let err = apply_ingredient_changes(
+            vec![tablespoons, cup],
+            vec![IngredientChange::Remove {
+                target: target("olive oil", None),
+            }],
+        )
+        .expect_err("two olive oils with no prep cannot be told apart");
+        assert!(
+            matches!(
+                err,
+                VariantError::AmbiguousIngredient {
+                    separable_by_prep: false,
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+        let message = err.to_string();
+        assert!(message.contains("olive oil: 2 tablespoon"), "{message}");
+        assert!(
+            message.contains("olive oil: 0.25 cup (notes: for greasing)"),
+            "{message}"
+        );
+        assert!(!message.contains("prep"), "{message}");
+    }
+
+    #[test]
+    fn a_blank_stored_prep_is_described_as_no_prep() {
+        let mut blank = ingredient("butter");
+        blank.prep = Some("  ".into());
+        let err = apply_ingredient_changes(
+            vec![blank],
+            vec![IngredientChange::Remove {
+                target: target("margarine", None),
+            }],
+        )
+        .expect_err("no margarine");
+        let message = err.to_string();
+        assert!(message.contains("are: butter."), "{message}");
+        assert!(!message.contains("butter ("), "{message}");
+    }
+
+    #[test]
+    fn identical_duplicates_resolve_to_the_first() {
+        let mut result = apply_ingredient_changes(
+            vec![ingredient("egg"), ingredient("flour"), ingredient("egg")],
+            vec![IngredientChange::Replace {
+                target: target("egg", None),
+                replacement: ingredient("flax egg"),
+            }],
+        )
+        .expect("indistinguishable duplicates are not ambiguous");
+        assert_eq!(names(&result), ["flax egg", "flour", "egg"]);
+
+        // Duplicates that differ in any field stay ambiguous.
+        let mut heavier = ingredient("egg");
+        heavier.amount = IngredientAmountDto::Single { value: 2.0 };
+        result = vec![ingredient("egg"), heavier];
+        let err = apply_ingredient_changes(
+            result,
+            vec![IngredientChange::Remove {
+                target: target("egg", None),
+            }],
+        )
+        .expect_err("different amounts can still be told apart");
+        assert!(matches!(err, VariantError::AmbiguousIngredient { .. }));
     }
 
     #[test]
@@ -910,40 +1102,21 @@ mod tests {
     }
 
     #[test]
-    fn an_unreadable_parent_time_names_its_field() {
-        let unreadable = Some(r#"{"value":3,"unit":"fortnights"}"#.to_string());
-        let cases = [
-            (
-                "prep_time",
-                recipe::Model {
-                    prep_time: unreadable.clone(),
-                    ..parent()
-                },
-            ),
-            (
-                "cook_time",
-                recipe::Model {
-                    cook_time: unreadable.clone(),
-                    ..parent()
-                },
-            ),
-            (
-                "total_time",
-                recipe::Model {
-                    total_time: unreadable.clone(),
-                    ..parent()
-                },
-            ),
-        ];
-        for (expected_field, parent) in cases {
-            let err = build_variant_dto(&parent, spec()).expect_err("unreadable unit");
-            let VariantError::UnreadableParentTime { field, unit, .. } = &err else {
-                panic!("expected UnreadableParentTime, got {err:?}");
-            };
-            assert_eq!(*field, expected_field);
-            assert_eq!(unit, "fortnights");
-            assert!(err.to_string().contains("fortnights"), "{err}");
-        }
+    fn a_parent_time_fewd_cannot_read_is_not_inherited() {
+        let parent = recipe::Model {
+            cook_time: Some(r#"{"value":3,"unit":"fortnights"}"#.into()),
+            total_time: Some(r#"{"value":-5,"unit":"minutes"}"#.into()),
+            ..parent()
+        };
+        let dto = build_variant_dto(&parent, spec())
+            .expect("an unreadable parent time does not block the variant");
+        assert!(dto.cook_time.is_none(), "unrecognized unit is dropped");
+        assert!(dto.total_time.is_none(), "negative value is dropped");
+        assert_eq!(
+            serde_json::to_value(&dto.prep_time).unwrap(),
+            json!({"value": 20, "unit": "minutes"}),
+            "a readable time is still inherited"
+        );
     }
 
     #[test]
@@ -993,13 +1166,20 @@ mod tests {
             VariantError::UnmatchedIngredient {
                 number: 1,
                 name: "x".into(),
-                prep: Some("y".into()),
+                prep: PrepFilter::Exactly("y".into()),
                 available: vec!["z".into()],
             },
             VariantError::AmbiguousIngredient {
                 number: 1,
                 name: "x".into(),
                 candidates: vec!["x (a)".into(), "x (b)".into()],
+                separable_by_prep: true,
+            },
+            VariantError::AmbiguousIngredient {
+                number: 1,
+                name: "x".into(),
+                candidates: vec!["x: 1".into(), "x: 2".into()],
+                separable_by_prep: false,
             },
             VariantError::EmptyEditFind { number: 1 },
             VariantError::EditNotFound {
@@ -1010,11 +1190,6 @@ mod tests {
                 number: 1,
                 find: "x".into(),
                 count: 2,
-            },
-            VariantError::UnreadableParentTime {
-                field: "prep_time",
-                value: 3,
-                unit: "fortnights".into(),
             },
             VariantError::MalformedParent("tags is not valid JSON".into()),
         ];
