@@ -571,7 +571,7 @@ impl FewdMcp {
 
     #[tool(
         name = "adapt_recipe",
-        description = "Adapt a recipe into a saved variant when the user swaps, adds, or drops ingredients for one version of a dish but wants the original kept unchanged — call `get_recipe` on the parent FIRST for its exact ingredient names and instruction text. Returns the full new recipe, whose `parent_recipe_slug` links it to the original; the parent itself is never modified. `name` is required and the new slug is generated from it. `ingredient_changes` apply in order, each one seeing the list the earlier ones left: op \"add\" appends its \"ingredient\"; op \"replace\" swaps the ingredient whose `name` matches for its \"with\" ingredient, keeping its position; op \"remove\" drops it. A `name` matches the whole stored ingredient name, ignoring case and surrounding spaces. When several ingredients share a name, add `prep` to pick one: omit it to match any prep, or send \"prep\": \"\" for the one with no prep. Ingredients identical in every field count as one, and the first is changed. An ingredient's `or_alternative` is never matched on its own, so replace the whole line that carries it. `instruction_edits` are find/replace pairs applied in sequence to the evolving text: each `find` must occur exactly once, character for character including whitespace, so include surrounding words (\"sage\" also matches inside \"sausage\"), and an empty `replace` deletes the text. Send the whole text in `instructions` instead for a broad rewrite, never both. At least one ingredient or instruction change is required: to change only the name, description, tags, or notes, use `update_recipe` on the parent, or `create_recipe` with `parent_recipe_slug` for a linked copy. The variant inherits the parent's description, notes, tags, times, servings, portion size, and icon unless you send `description`, `notes`, or `tags`; a parent with no total time gives the variant a total of prep + cook. A parent time fewd can't read, such as one in an unrecognized unit, is not copied to the variant. Ingredient amounts are per the parent's `servings`. Send `tags` whenever a change breaks an inherited diet tag from `list_diet_tags`, such as adding sausage to a `vegetarian` recipe. `nutrition_per_serving` is cleared whenever ingredients change; set it, or servings, times, or icon, with `update_recipe` on the new slug. A change that matches nothing or more than one ingredient, or a `find` that does not occur exactly once, rejects the whole call and saves nothing. An unknown `parent_recipe_slug` returns an error pointing at `search_recipes`. Example: {\"parent_recipe_slug\":\"potato-gnocchi\",\"name\":\"Gnocchi with Hot Italian Sausage\",\"ingredient_changes\":[{\"op\":\"replace\",\"name\":\"italian sausage\",\"with\":{\"name\":\"hot italian sausage\",\"amount\":{\"kind\":\"single\",\"value\":1.0},\"unit\":\"pound\"}}],\"notes\":\"Spicier Tuesday version\"}",
+        description = "Adapt a recipe into a saved variant when the user swaps, adds, or drops ingredients for one version of a dish but wants the original kept unchanged — call `get_recipe` on the parent FIRST for its exact ingredient names and instruction text. Returns the full new recipe, whose `parent_recipe_slug` links it to the original; the parent itself is never modified. `name` is required and the new slug is generated from it. `ingredient_changes` apply in order, each one seeing the list the earlier ones left: op \"add\" appends its \"ingredient\"; op \"replace\" swaps the ingredient whose `name` matches for its \"with\" ingredient, keeping its position; op \"remove\" drops it. A `name` matches the whole stored ingredient name, ignoring case and surrounding spaces. When several ingredients share a name and their preps differ, add `prep` to pick one: omit it to match any prep, or send \"prep\": \"\" for the one with no prep. Ingredients identical in every field count as one, and the first is changed. Same-named ingredients with the same prep that differ only in amount, unit, or notes cannot be targeted one at a time; for those, call `create_recipe` with `parent_recipe_slug` and the full ingredient list instead. An ingredient's `or_alternative` is never matched on its own, so replace the whole line that carries it. `instruction_edits` are find/replace pairs applied in sequence to the evolving text: each `find` must occur exactly once, character for character including whitespace, so include surrounding words (\"sage\" also matches inside \"sausage\"), and an empty `replace` deletes the text. Send the whole text in `instructions` instead for a broad rewrite, never both. At least one ingredient or instruction change is required: to change only the name, description, tags, or notes, use `update_recipe` on the parent, or `create_recipe` with `parent_recipe_slug` for a linked copy. The variant inherits the parent's description, notes, tags, times, servings, portion size, and icon unless you send `description`, `notes`, or `tags`; a parent with no total time gives the variant a total of prep + cook. A parent time fewd can't read, such as one in an unrecognized unit, is not copied to the variant. Ingredient amounts are per the parent's `servings`. Send `tags` whenever a change breaks an inherited diet tag from `list_diet_tags`, such as adding sausage to a `vegetarian` recipe. `nutrition_per_serving` is cleared whenever ingredients change; set it, or servings, times, or icon, with `update_recipe` on the new slug. A change that matches nothing or more than one distinguishable ingredient, or a `find` that does not occur exactly once, rejects the whole call and saves nothing. An unknown `parent_recipe_slug` returns an error pointing at `search_recipes`. Example: {\"parent_recipe_slug\":\"potato-gnocchi\",\"name\":\"Gnocchi with Hot Italian Sausage\",\"ingredient_changes\":[{\"op\":\"replace\",\"name\":\"italian sausage\",\"with\":{\"name\":\"hot italian sausage\",\"amount\":{\"kind\":\"single\",\"value\":1.0},\"unit\":\"pound\"}}],\"notes\":\"Spicier Tuesday version\"}",
         input_schema = rmcp::handler::server::common::schema_for_type::<AdaptRecipeInput>()
     )]
     async fn adapt_recipe(
@@ -4718,6 +4718,56 @@ mod tests {
                 parent_before,
                 "the parent row must be unchanged"
             );
+        }
+
+        #[tokio::test]
+        async fn same_prep_duplicates_point_at_a_whole_list_fallback_not_prep() {
+            let mcp = setup_test_mcp().await;
+            let ingredients = serde_json::from_value(json!([
+                {"name": "olive oil", "amount": {"type": "single", "value": 2.0}, "unit": "tablespoon", "notes": null},
+                {"name": "lemon", "amount": {"type": "single", "value": 1.0}, "unit": "", "notes": null},
+                {"name": "olive oil", "amount": {"type": "single", "value": 0.25}, "unit": "cup", "notes": "for greasing"}
+            ]))
+            .expect("fixture ingredients parse");
+            RecipeService::create(
+                &mcp.db,
+                CreateRecipeDto {
+                    ingredients,
+                    ..bare_recipe_dto("Vinaigrette")
+                },
+            )
+            .await
+            .expect("seed vinaigrette");
+            let before = recipe_count(&mcp).await;
+
+            let result = adapt(
+                &mcp,
+                json!({
+                    "parent_recipe_slug": "vinaigrette",
+                    "name": "Lemon Vinaigrette",
+                    "ingredient_changes": [{"op": "remove", "name": "olive oil"}],
+                }),
+            )
+            .await
+            .expect("adapt_recipe returns Ok");
+            assert_eq!(result.is_error, Some(true), "{result:?}");
+            let text = &result.content[0]
+                .as_text()
+                .expect("a tool-level error carries text")
+                .text;
+            for fragment in [
+                "olive oil: 2 tablespoon",
+                "olive oil: 0.25 cup (notes: for greasing)",
+                "create_recipe with parent_recipe_slug 'vinaigrette'",
+                "update_recipe",
+            ] {
+                assert!(text.contains(fragment), "{fragment} in {text}");
+            }
+            assert!(
+                !text.contains("prep"),
+                "no prep filter can help here: {text}"
+            );
+            assert_eq!(recipe_count(&mcp).await, before, "nothing is saved");
         }
 
         #[tokio::test]

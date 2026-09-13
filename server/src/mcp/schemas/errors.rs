@@ -174,6 +174,14 @@ impl std::fmt::Display for InputError {
 // on the parent does not show, so its hint says so.
 pub fn variant_error_message(err: &VariantError, parent_slug: &str) -> String {
     let (number, hint) = match err {
+        VariantError::AmbiguousIngredient {
+            number,
+            separable_by_prep: false,
+            ..
+        } => (
+            *number,
+            format!("No adapt_recipe change can target just one of them. Call create_recipe with parent_recipe_slug '{parent_slug}' and the full ingredient list instead, or leave this change out and fix the saved variant's ingredients with update_recipe."),
+        ),
         VariantError::UnmatchedIngredient { number, .. }
         | VariantError::AmbiguousIngredient { number, .. } => (
             *number,

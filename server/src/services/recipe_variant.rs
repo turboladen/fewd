@@ -4,7 +4,7 @@
 
 use serde::de::DeserializeOwned;
 
-use crate::dto::{CreateRecipeDto, IngredientDto, TimeValueDto};
+use crate::dto::{CreateRecipeDto, IngredientAmountDto, IngredientDto, TimeValueDto};
 use crate::entities::recipe;
 use crate::services::ingredient_splitter;
 use crate::services::recipe_times::drop_unusable_import_times;
@@ -97,10 +97,13 @@ pub enum VariantError {
         prep: PrepFilter,
         available: Vec<String>,
     },
+    /// Several ingredients match. `separable_by_prep` is false when they all
+    /// share the same prep, so no prep filter can pick one of them.
     AmbiguousIngredient {
         number: usize,
         name: String,
         candidates: Vec<String>,
+        separable_by_prep: bool,
     },
     EmptyEditFind {
         number: usize,
@@ -154,11 +157,23 @@ impl std::fmt::Display for VariantError {
                 number,
                 name,
                 candidates,
+                separable_by_prep: true,
             } => write!(
                 f,
                 "ingredient change #{number}: '{name}' matches {} ingredients ({}). Give the prep of the one you mean, or \"prep\": \"\" for the one with no prep.",
                 candidates.len(),
-                candidates.join(", ")
+                candidates.join("; ")
+            ),
+            Self::AmbiguousIngredient {
+                number,
+                name,
+                candidates,
+                separable_by_prep: false,
+            } => write!(
+                f,
+                "ingredient change #{number}: '{name}' matches {} ingredients that no change can tell apart ({}). Supply the whole ingredient list instead.",
+                candidates.len(),
+                candidates.join("; ")
             ),
             Self::EmptyEditFind { number } => write!(
                 f,
@@ -373,10 +388,24 @@ fn locate_ingredient(
             name: target.name.clone(),
             candidates: several
                 .iter()
-                .map(|&i| describe_ingredient(&ingredients[i]))
+                .map(|&i| describe_candidate(&ingredients[i]))
                 .collect(),
+            separable_by_prep: several.iter().any(|&i| {
+                effective_prep(&ingredients[i]) != effective_prep(&ingredients[several[0]])
+            }),
         }),
     }
+}
+
+// The prep a filter compares against: trimmed and lowercased, with a blank
+// prep counting as none, exactly as `matching_positions` treats it.
+fn effective_prep(ingredient: &IngredientDto) -> Option<String> {
+    ingredient
+        .prep
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(str::to_lowercase)
 }
 
 fn matching_positions(ingredients: &[IngredientDto], name: &str, prep: &PrepFilter) -> Vec<usize> {
@@ -409,10 +438,28 @@ fn same_text(a: &str, b: &str) -> bool {
 }
 
 fn describe_ingredient(ingredient: &IngredientDto) -> String {
-    match &ingredient.prep {
+    match ingredient.prep.as_deref().filter(|p| !p.trim().is_empty()) {
         Some(prep) => format!("{} ({prep})", ingredient.name),
         None => ingredient.name.clone(),
     }
+}
+
+// Candidates in an ambiguity share a name and may share a prep, so they are
+// listed with the amount, unit, and notes that tell them apart.
+fn describe_candidate(ingredient: &IngredientDto) -> String {
+    let amount = match &ingredient.amount {
+        IngredientAmountDto::Single { value } => value.to_string(),
+        IngredientAmountDto::Range { min, max } => format!("{min}-{max}"),
+    };
+    let mut text = format!("{}: {amount}", describe_ingredient(ingredient));
+    if !ingredient.unit.trim().is_empty() {
+        text.push(' ');
+        text.push_str(ingredient.unit.trim());
+    }
+    if let Some(notes) = ingredient.notes.as_deref().filter(|n| !n.trim().is_empty()) {
+        text.push_str(&format!(" (notes: {})", notes.trim()));
+    }
+    text
 }
 
 fn normalize_line_endings(text: &str) -> String {
@@ -692,7 +739,10 @@ mod tests {
         let VariantError::AmbiguousIngredient { candidates, .. } = &err else {
             panic!("expected AmbiguousIngredient, got {err:?}");
         };
-        assert_eq!(candidates, &["salt (for the water)", "salt (to taste)"]);
+        assert_eq!(
+            candidates,
+            &["salt (for the water): 1 tablespoon", "salt (to taste): 0"]
+        );
         let message = err.to_string();
         assert!(message.contains("Give the prep"), "{message}");
         assert!(message.contains(r#""prep": """#), "{message}");
@@ -740,6 +790,58 @@ mod tests {
         )
         .expect_err("both salts carry a prep");
         assert!(err.to_string().contains("'salt' with no prep"), "{err}");
+    }
+
+    #[test]
+    fn same_prep_candidates_report_a_distinct_message_without_prep_advice() {
+        let mut tablespoons = ingredient("olive oil");
+        tablespoons.amount = IngredientAmountDto::Single { value: 2.0 };
+        tablespoons.unit = "tablespoon".into();
+        let mut cup = ingredient("olive oil");
+        cup.amount = IngredientAmountDto::Single { value: 0.25 };
+        cup.unit = "cup".into();
+        cup.notes = Some("for greasing".into());
+
+        let err = apply_ingredient_changes(
+            vec![tablespoons, cup],
+            vec![IngredientChange::Remove {
+                target: target("olive oil", None),
+            }],
+        )
+        .expect_err("two olive oils with no prep cannot be told apart");
+        assert!(
+            matches!(
+                err,
+                VariantError::AmbiguousIngredient {
+                    separable_by_prep: false,
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+        let message = err.to_string();
+        assert!(message.contains("olive oil: 2 tablespoon"), "{message}");
+        assert!(
+            message.contains("olive oil: 0.25 cup (notes: for greasing)"),
+            "{message}"
+        );
+        assert!(!message.contains("prep"), "{message}");
+    }
+
+    #[test]
+    fn a_blank_stored_prep_is_described_as_no_prep() {
+        let mut blank = ingredient("butter");
+        blank.prep = Some("  ".into());
+        let err = apply_ingredient_changes(
+            vec![blank],
+            vec![IngredientChange::Remove {
+                target: target("margarine", None),
+            }],
+        )
+        .expect_err("no margarine");
+        let message = err.to_string();
+        assert!(message.contains("are: butter."), "{message}");
+        assert!(!message.contains("butter ("), "{message}");
     }
 
     #[test]
@@ -1071,6 +1173,13 @@ mod tests {
                 number: 1,
                 name: "x".into(),
                 candidates: vec!["x (a)".into(), "x (b)".into()],
+                separable_by_prep: true,
+            },
+            VariantError::AmbiguousIngredient {
+                number: 1,
+                name: "x".into(),
+                candidates: vec!["x: 1".into(), "x: 2".into()],
+                separable_by_prep: false,
             },
             VariantError::EmptyEditFind { number: 1 },
             VariantError::EditNotFound {
