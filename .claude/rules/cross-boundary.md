@@ -12,7 +12,7 @@ Invariants the type system does not enforce but production code assumes. Break o
 
 `Meal.meal_type` is the `MealType` enum (`server/src/entities/sea_orm_active_enums.rs`), stored and serialized as Title Case: `Breakfast`, `Lunch`, `Dinner`, `Snack`. `MealType::from_str` accepts any casing, so write paths should parse through it. The web planner compares with strict equality (`meal.meal_type === 'Dinner'`).
 
-`Meal.order_index` is a slot number, not a sort key. `DEFAULT_MEALS` in `src/components/MealPlanner.tsx` renders Breakfast=0, Lunch=1, Dinner=2, and a meal appears only when both its type and its index match a slot. Snack has no slot in the planner. On the MCP boundary, `default_order_index` in `server/src/mcp/schemas/meals.rs` assigns the slot; any other write path (HTTP routes, future tools, SQL migrations) must assign the same index, or the meal will not render.
+`Meal.order_index` is a slot number, not a sort key. `DEFAULT_MEALS` in `src/components/MealPlanner.tsx` defines the default slots Breakfast=0, Lunch=1, Dinner=2, and a meal with an index from 0 to 2 renders only when its type matches that slot: a Dinner stored at index 0 is invisible. Any meal with `order_index >= 3` renders as a custom meal whatever its type, which is where a Snack lands. On the MCP boundary, `default_order_index` in `server/src/mcp/schemas/meals.rs` assigns the index (Snack=3); any other write path (HTTP routes, future tools, SQL migrations) must assign the same mapping, or a default-slot meal will not render.
 
 ## CSRF protection on state-changing POST routes
 

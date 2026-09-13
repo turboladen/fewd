@@ -9,7 +9,7 @@ Topic rules live in `.claude/rules/`. A rule without a `paths:` list loads every
 - Use `bun`/`bunx`, never `npm`/`npx`.
 - Run the app with `just dev` (server on :3000, Vite on :5173, API proxied). It runs the server from the workspace root, so the dev database is `data/fewd.db`.
 - Before opening a PR, run `bun .claude/skills/verify/verify.mjs` (the /verify skill): every CI gate in one pass.
-- A Claude Code hook runs `just ci` before any command that pushes a branch or creates a PR, and blocks it on failure. It runs in the session's working directory, so push from the worktree whose branch you are pushing.
+- A Claude Code hook runs `just ci` before any Bash command containing `git push` or `gh pr create`, and blocks it on failure. It runs in the session's working directory, so push from the worktree whose branch you are pushing. `gh stack submit` and `gh stack sync` push without it, so run `just ci` or /verify before those.
 - Track all work in beads (below). Project rules belong in `.claude/rules/`, not inside the beads block, which `bd` may regenerate.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->

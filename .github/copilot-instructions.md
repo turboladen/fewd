@@ -20,7 +20,7 @@ Several decisions in this repo look unusual on a cold read but have explicit rat
 
 Several classes of structural concern are well-known in this codebase and tracked as bead work items with deliberate priority. Re-surfacing them in PR review is usually noise. If a finding falls into one of these categories, assume it's tracked unless the PR text or commit message specifically rebuts that:
 
-- **Free-form-string fields that should be enums.** Several DTO/entity fields (`IngredientDto.unit`, `Meal.meal_type`, etc.) are typed as `String` and rely on convention to stay consistent. The plan is to promote them to enums; flagging the absence of a type isn't useful.
+- **Free-form-string fields that should be enums.** Several DTO/entity fields (`IngredientDto.unit`, `TimeValueDto.unit`, recipe `source`, etc.) are typed as `String` and rely on convention to stay consistent. The plan is to promote them to enums; flagging the absence of a type isn't useful.
 - **`IngredientDto` shape concerns**, especially around purchasable form vs preparation form (e.g. "garlic cloves, thinly sliced" as one string). Split into `name + prep` is queued.
 - **Missing cross-boundary tests** between MCP writes and HTTP reads (or any "data round-trips through two surfaces with different conventions") — known coverage gap, filed.
 - **Shopping-list ergonomics** — rounding, pantry-staple separation, grocery-section classification, MCP/UI exposure of variants. All queued behind the MCP server work.

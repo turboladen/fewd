@@ -15,7 +15,7 @@ Family meal planner. Plan weekly meals for each family member, manage recipes, g
 ## Architecture
 
 - **Backend:** Rust (Axum + SeaORM + SQLite)
-- **Frontend:** React 18 + TypeScript + Vite + TanStack Query + Tailwind
+- **Frontend:** React 19 + TypeScript + Vite + TanStack Query + React Router 7 + Tailwind v4
 - **Deployment:** Single binary that embeds the SPA and serves everything over HTTP
 
 The frontend is compiled by Vite into `dist/`, then embedded into the Rust binary at compile time via `rust-embed`. The result is one executable that serves the JSON API (`/api/*`), the MCP server (`/mcp`), and the web UI on a configurable port.
