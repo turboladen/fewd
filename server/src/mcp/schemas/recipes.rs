@@ -540,13 +540,13 @@ pub struct AdaptRecipeInput {
     /// blank value, to keep the parent's.
     #[serde(default)]
     pub description: Option<String>,
-    /// Ingredient edits, applied in order, each seeing the list the earlier
-    /// ones left. A `name` matches the whole stored name, ignoring case and
-    /// surrounding spaces; amounts are per the parent's servings. Ingredients
-    /// identical in every field count as one, and the first is changed. An
-    /// `or_alternative` is never matched on its own, so replace its whole
-    /// line. Same-named ingredients with the same prep that differ only in
-    /// amount, unit, or notes cannot be targeted one at a time: call
+    /// Ingredient edits apply in order, and each one sees the list the
+    /// earlier edits left. A `name` matches the whole stored name, ignoring
+    /// case and surrounding spaces; amounts are per the parent's servings.
+    /// Ingredients identical in every field count as one, and the first is
+    /// changed. An `or_alternative` is never matched on its own, so replace
+    /// its whole line. Same-named ingredients with the same prep that differ
+    /// only in amount, unit, or notes cannot be targeted one at a time: call
     /// `create_recipe` with `parent_recipe_slug` and the full list instead.
     /// A change matching nothing, or more than one distinguishable
     /// ingredient, rejects the whole call and saves nothing.
