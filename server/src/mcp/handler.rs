@@ -467,7 +467,7 @@ impl FewdMcp {
 
     #[tool(
         name = "get_meal_planner_printable",
-        description = "Produce the family's canonical fridge-card HTML printable for an upcoming window — the finishing step after the week's `create_meal`s (and optionally `get_shopping_list`). Output is sized to fit a single US Letter portrait sheet at 100% browser print scale. Date range is capped at 14 inclusive days; `use_up_notes` ≤6, `dont_forget` ≤8 items, `prep_notes` ≤6 per day are hard-enforced. Required: start_date, end_date. Optional LLM-supplied overlay: include (meal slots, default ['Dinner']), week_theme (top-right badge), use_up_notes (top-right bullets), dont_forget (dark footer block of cross-day reminders), day_overlays (per-date tag + blurb-override + prep_notes), foot_note (left-footer subtitle).",
+        description = "Produce the family's canonical fridge-card HTML printable for an upcoming window — the finishing step after the week's `create_meal`s (and optionally `get_shopping_list`). Output is sized to fit a single US Letter portrait sheet at 100% browser print scale. Date range is capped at 14 inclusive days; `use_up_notes` ≤6, `dont_forget` ≤8 items, `prep_notes` ≤6 per day are hard-enforced. Required: start_date, end_date. Optional LLM-supplied overlay: include (meal slots, default ['Dinner']), week_theme (top-right badge), use_up_notes (top-right bullets), dont_forget (dark footer block of cross-day reminders), day_overlays (per-date tag, blurb overriding the recipe description, prep_notes), foot_note (left-footer subtitle).",
         input_schema = rmcp::handler::server::common::schema_for_type::<PrintableInput>()
     )]
     async fn get_meal_planner_printable(
@@ -3702,6 +3702,332 @@ mod tests {
                     tool.name
                 );
             }
+        }
+    }
+
+    // ─── Unknown-field rejection ────────────────────────────────────
+    //
+    // A field a tool does not declare must fail the call instead of being
+    // dropped, or a typo like `instruction` reports success after writing
+    // nothing. schemars emits `"additionalProperties": false` only for a type
+    // that denies unknown fields, so the published schema witnesses the
+    // serde behavior at every depth.
+    mod unknown_fields {
+        use super::*;
+        use schemars::JsonSchema;
+        use serde_json::{json, Value};
+
+        fn rejection<T: DeserializeOwned + std::fmt::Debug>(args: Value) -> String {
+            let Value::Object(object) = args else {
+                panic!("tool arguments must be a JSON object");
+            };
+            let LenientParameters(parsed) = LenientParameters::<T>::extract(Some(object));
+            parsed.expect_err("the input must be rejected")
+        }
+
+        fn valid_create_recipe_args() -> serde_json::Map<String, Value> {
+            let Value::Object(object) = json!({
+                "name": "Beef Taco Bowls",
+                "source": "manual",
+                "servings": 4,
+                "instructions": "Brown beef; assemble bowls.",
+                "ingredients": [],
+            }) else {
+                unreachable!("the literal is an object");
+            };
+            object
+        }
+
+        #[tokio::test]
+        async fn update_recipe_misspelled_field_returns_tool_level_error() {
+            let mcp = setup_test_mcp().await;
+            let args = args_with(&[
+                ("slug", json!("beef-taco-bowls")),
+                ("instruction", json!("New steps")),
+            ]);
+            let result = mcp
+                .update_recipe(LenientParameters::<UpdateRecipeInput>::extract(args))
+                .await;
+            assert_tool_user_error(
+                result,
+                &[
+                    "update_recipe: unknown field `instruction`",
+                    "`instructions`",
+                    "Check the tool's input schema.",
+                ],
+            );
+        }
+
+        // `rating` is a real recipe attribute that update_recipe does not
+        // write, so it must fail the call like any other unknown field.
+        #[tokio::test]
+        async fn update_recipe_rating_returns_tool_level_error() {
+            let mcp = setup_test_mcp().await;
+            let args = args_with(&[("slug", json!("beef-taco-bowls")), ("rating", json!(5))]);
+            let result = mcp
+                .update_recipe(LenientParameters::<UpdateRecipeInput>::extract(args))
+                .await;
+            assert_tool_user_error(result, &["update_recipe: unknown field `rating`"]);
+        }
+
+        #[test]
+        fn create_recipe_rating_is_rejected() {
+            let mut args = valid_create_recipe_args();
+            args.insert("rating".into(), json!(4));
+            let err = rejection::<CreateRecipeInput>(Value::Object(args));
+            assert!(err.contains("unknown field `rating`"), "{err}");
+        }
+
+        #[test]
+        fn nested_ingredient_unknown_field_is_rejected() {
+            let mut args = valid_create_recipe_args();
+            args.insert(
+                "ingredients".into(),
+                json!([{"name": "flour", "qty": 2, "amount": {"kind": "single", "value": 1.0}}]),
+            );
+            let err = rejection::<CreateRecipeInput>(Value::Object(args));
+            assert!(err.contains("unknown field `qty`"), "{err}");
+        }
+
+        #[test]
+        fn nested_tagged_amount_unknown_field_is_rejected() {
+            let mut args = valid_create_recipe_args();
+            args.insert(
+                "ingredients".into(),
+                json!([{"name": "flour", "amount": {"kind": "single", "value": 1.0, "unit": "cup"}}]),
+            );
+            let err = rejection::<CreateRecipeInput>(Value::Object(args));
+            assert!(err.contains("unknown field `unit`"), "{err}");
+        }
+
+        #[test]
+        fn nested_tagged_serving_unknown_field_is_rejected() {
+            let err = rejection::<CreateMealInput>(json!({
+                "date": "2026-05-25",
+                "meal_type": "dinner",
+                "servings": [{
+                    "kind": "recipe",
+                    "person_name": "Alice",
+                    "recipe_slug": "beef-taco-bowls",
+                    "recipe": "beef-taco-bowls",
+                }],
+            }));
+            assert!(err.contains("unknown field `recipe`"), "{err}");
+        }
+
+        // `list_meals` returns each serving with a `recipe_name`, which
+        // `create_meal` does not accept. A serving copied from that output
+        // must be rejected with a message that also names the valid fields.
+        #[test]
+        fn create_meal_serving_copied_from_list_meals_names_valid_fields() {
+            let err = rejection::<CreateMealInput>(json!({
+                "date": "2026-05-25",
+                "meal_type": "dinner",
+                "servings": [{
+                    "kind": "recipe",
+                    "person_name": "Alice",
+                    "recipe_slug": "beef-taco-bowls",
+                    "recipe_name": "Beef Taco Bowls",
+                }],
+            }));
+            assert!(err.contains("unknown field `recipe_name`"), "{err}");
+            assert!(err.contains("`recipe_slug`"), "{err}");
+        }
+
+        #[test]
+        fn no_argument_tool_rejects_any_argument() {
+            let err = rejection::<EmptyParams>(json!({"foo": 1}));
+            assert!(err.contains("unknown field `foo`"), "{err}");
+        }
+
+        // These keywords describe a schema without constraining what it
+        // accepts, so a schema made only of them accepts any value.
+        const ANNOTATION_KEYWORDS: &[&str] = &[
+            "$comment",
+            "$schema",
+            "default",
+            "deprecated",
+            "description",
+            "examples",
+            "readOnly",
+            "title",
+            "writeOnly",
+        ];
+
+        // Walk one schema node. A node counts as an object when its `type` is
+        // or includes "object", or when it declares `properties`. Only a
+        // properties map's values are schemas, never the map itself, so a
+        // field named `type` or `properties` cannot mislead the walk. A schema
+        // that accepts any value counts as open. schemars emits `true` for a
+        // bare `serde_json::Value` field, and only annotations, such as
+        // `{"description": ...}`, once that field is documented or defaulted.
+        // `$ref` is not followed, because the caller walks `$defs` once.
+        fn walk_schema(node: &Value, pointer: &str, visited: &mut usize, open: &mut Vec<String>) {
+            let accepts_anything = match node {
+                Value::Bool(accepts) => *accepts,
+                Value::Object(object) => object
+                    .keys()
+                    .all(|keyword| ANNOTATION_KEYWORDS.contains(&keyword.as_str())),
+                _ => false,
+            };
+            if accepts_anything {
+                open.push(pointer.to_string());
+                return;
+            }
+            let Some(object) = node.as_object() else {
+                return;
+            };
+            let typed_object = match object.get("type") {
+                Some(Value::String(kind)) => kind == "object",
+                Some(Value::Array(kinds)) => kinds.iter().any(|kind| kind == "object"),
+                _ => false,
+            };
+            if typed_object || object.contains_key("properties") {
+                *visited += 1;
+                if object.get("additionalProperties") != Some(&Value::Bool(false)) {
+                    open.push(pointer.to_string());
+                }
+            }
+            if let Some(properties) = object.get("properties").and_then(Value::as_object) {
+                for (name, child) in properties {
+                    walk_schema(
+                        child,
+                        &format!("{pointer}/properties/{name}"),
+                        visited,
+                        open,
+                    );
+                }
+            }
+            match object.get("items") {
+                Some(Value::Array(children)) => {
+                    for (index, child) in children.iter().enumerate() {
+                        walk_schema(child, &format!("{pointer}/items/{index}"), visited, open);
+                    }
+                }
+                Some(child) => walk_schema(child, &format!("{pointer}/items"), visited, open),
+                None => {}
+            }
+            for keyword in ["additionalProperties", "not", "if", "then", "else"] {
+                if let Some(child) = object.get(keyword) {
+                    walk_schema(child, &format!("{pointer}/{keyword}"), visited, open);
+                }
+            }
+            if let Some(patterns) = object.get("patternProperties").and_then(Value::as_object) {
+                for (pattern, child) in patterns {
+                    let child_pointer = format!("{pointer}/patternProperties/{pattern}");
+                    walk_schema(child, &child_pointer, visited, open);
+                }
+            }
+            for keyword in ["oneOf", "anyOf", "allOf", "prefixItems"] {
+                if let Some(Value::Array(branches)) = object.get(keyword) {
+                    for (index, branch) in branches.iter().enumerate() {
+                        walk_schema(
+                            branch,
+                            &format!("{pointer}/{keyword}/{index}"),
+                            visited,
+                            open,
+                        );
+                    }
+                }
+            }
+        }
+
+        // Returns how many object nodes the schema has and the JSON pointers
+        // of those that accept unknown fields. The root pointer is "".
+        fn objects_accepting_unknown_fields(schema: &Value) -> (usize, Vec<String>) {
+            let mut visited = 0;
+            let mut open = Vec::new();
+            walk_schema(schema, "", &mut visited, &mut open);
+            if let Some(defs) = schema.get("$defs").and_then(Value::as_object) {
+                for (name, def) in defs {
+                    walk_schema(def, &format!("/$defs/{name}"), &mut visited, &mut open);
+                }
+            }
+            (visited, open)
+        }
+
+        fn schema_of<T: JsonSchema + 'static>() -> Value {
+            Value::Object((*rmcp::handler::server::common::schema_for_type::<T>()).clone())
+        }
+
+        #[test]
+        fn every_tool_input_schema_denies_unknown_fields() {
+            for tool in FewdMcp::tool_router().list_all() {
+                let schema = Value::Object((*tool.input_schema).clone());
+                let (visited, open) = objects_accepting_unknown_fields(&schema);
+                assert!(
+                    visited > 0,
+                    "{}: the walker found no object in the input schema",
+                    tool.name
+                );
+                assert!(
+                    open.is_empty(),
+                    "{}: the input schema accepts unknown fields at {open:?} (\"\" is the \
+                     root). Add #[serde(deny_unknown_fields)] to the type at each pointer, \
+                     or replace an untyped serde_json::Value field with a struct.",
+                    tool.name
+                );
+            }
+        }
+
+        #[test]
+        fn schema_walker_reports_types_that_accept_unknown_fields() {
+            #[derive(JsonSchema)]
+            #[allow(dead_code)]
+            struct Loose {
+                inner: LooseInner,
+            }
+            #[derive(JsonSchema)]
+            #[allow(dead_code)]
+            struct LooseInner {
+                value: String,
+            }
+
+            let (visited, open) = objects_accepting_unknown_fields(&schema_of::<Loose>());
+            assert_eq!(visited, 2, "both structs are objects");
+            assert_eq!(open, vec!["".to_string(), "/$defs/LooseInner".to_string()]);
+        }
+
+        #[test]
+        fn schema_walker_is_not_misled_by_fields_named_like_keywords() {
+            #[derive(serde::Deserialize, JsonSchema)]
+            #[serde(deny_unknown_fields)]
+            #[allow(dead_code)]
+            struct KeywordFields {
+                r#type: String,
+                properties: Vec<String>,
+            }
+
+            let (visited, open) = objects_accepting_unknown_fields(&schema_of::<KeywordFields>());
+            assert_eq!(visited, 1, "only the struct itself is an object");
+            assert!(open.is_empty(), "{open:?}");
+        }
+
+        #[test]
+        fn schema_walker_reports_untyped_value_fields() {
+            // schemars writes these three fields as `true`,
+            // `{"description": ...}`, and `{"default": null}`.
+            #[derive(serde::Deserialize, JsonSchema)]
+            #[serde(deny_unknown_fields)]
+            #[allow(dead_code)]
+            struct Untyped {
+                bare: Value,
+                #[schemars(description = "Free-form data.")]
+                documented: Value,
+                #[serde(default)]
+                defaulted: Option<Value>,
+            }
+
+            let (_, mut open) = objects_accepting_unknown_fields(&schema_of::<Untyped>());
+            open.sort();
+            assert_eq!(
+                open,
+                vec![
+                    "/properties/bare".to_string(),
+                    "/properties/defaulted".to_string(),
+                    "/properties/documented".to_string(),
+                ]
+            );
         }
     }
 }

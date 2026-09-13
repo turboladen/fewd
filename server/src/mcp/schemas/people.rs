@@ -78,6 +78,7 @@ pub fn person_to_prefs(person: &person::Model) -> Result<PersonWithPrefs, String
 ///   empty arrays to "no-op" because that would silently drop a
 ///   legitimate write.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UpdatePersonInput {
     pub name: String,
     #[serde(default)]

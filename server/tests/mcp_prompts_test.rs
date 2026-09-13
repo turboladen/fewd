@@ -271,3 +271,30 @@ async fn prompts_get_rejects_blank_family_schedule() {
         "the error must name the offending field; got: {body}"
     );
 }
+
+// An argument the prompt does not declare must be rejected as invalid_params
+// rather than silently dropped from the rendered plan.
+#[tokio::test]
+async fn prompts_get_rejects_unknown_argument() {
+    let (db, token) = setup_db_with_token().await;
+    let app = mcp::router(db);
+    let bearer = format!("Bearer {token}");
+    let session_id = handshake(&app, &bearer).await;
+
+    let body = post_rpc(
+        &app,
+        &bearer,
+        &session_id,
+        r#"{"jsonrpc":"2.0","method":"prompts/get","id":7,"params":{"name":"weekly_dinner_plan","arguments":{"week_start_date":"2026-05-25","family_schedule":"busy week","bogus":"x"}}}"#,
+    )
+    .await;
+
+    assert!(
+        body.contains("\"error\"") && body.contains("-32602"),
+        "an undeclared argument must return invalid_params; got: {body}"
+    );
+    assert!(
+        body.contains("unknown field") && body.contains("bogus"),
+        "the error must name the undeclared argument; got: {body}"
+    );
+}
