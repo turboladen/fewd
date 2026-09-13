@@ -464,7 +464,8 @@ pub struct UpdateRecipeInput {
     /// Replaces the notes. A blank value is ignored.
     #[serde(default)]
     pub notes: Option<String>,
-    /// Emoji / icon character displayed next to the recipe.
+    /// Emoji / icon character displayed next to the recipe. A blank value is
+    /// ignored.
     #[serde(default)]
     pub icon: Option<String>,
 }
