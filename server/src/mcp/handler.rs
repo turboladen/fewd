@@ -3694,7 +3694,7 @@ mod tests {
     // on every turn. A description carries selection-time guidance; per-field
     // rules belong in the input struct's `///` field docs, which ship as the
     // schema.
-    const MAX_TOOL_DESCRIPTION_CHARS: usize = 1_200;
+    const MAX_TOOL_DESCRIPTION_CHARS: usize = 1_100;
 
     #[test]
     fn every_tool_description_fits_the_length_budget() {
@@ -3712,13 +3712,10 @@ mod tests {
 
     // ─── Dangling tool references ───────────────────────────────────
     //
-    // Descriptions and input-schema docs cross-reference tools by name —
-    // that is how the LLM learns which tool to call first and which one
-    // undoes another. Every `///` on an input type ships as a schema
-    // `description`, so a name there reaches the model as surely as one in
-    // the tool description. A name that does not resolve sends the model at
-    // a tool that is not there, and it recovers only by spending a failed
-    // call.
+    // Descriptions and input-schema docs cross-reference tools by name,
+    // which is how the LLM learns which tool to call first and which one
+    // undoes another. An unresolved name sends the model at a tool that
+    // is not there, and it recovers only by spending a failed call.
     //
     // Nothing else catches that: the intent-verb guard reads the first
     // word and the embedded-example guard reads the trailing payload,
