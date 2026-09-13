@@ -407,6 +407,8 @@ Branches: `fewd-<id>/<short-slug>` (e.g. `fewd-abc/mcp-host-allowlist`). The bra
 
 Commit messages, PR titles, and PR descriptions never contain bead IDs, because a reader of `main` or GitHub cannot look them up. This repo squash-merges with every commit's message in the merge body, so the rule covers each commit on a branch, not just the PR title. Use a conventional-commits prefix with a domain scope — `fix(mcp): ...`, `feat(recipes): ...`, `ci: ...`, `docs: ...` — and describe follow-up work in words ("tracked separately"). PR numbers and commit SHAs are fine to cite. Older commits on `main` carry bead scopes; don't copy that style.
 
+When one PR builds on another, make them a real GitHub stack with the `gh stack` extension (`gh stack init`, `add`, `submit`, `sync`, and `merge`), so each PR shows only its own layer. Don't merge sibling branches into each other or note the dependency in a PR description.
+
 ## Bead Closure: post-merge, not inside the fix PR
 
 Close a bead AFTER its fix PR merges, on `main`, with `bd close <id>` followed by `bd dolt push`.
