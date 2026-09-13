@@ -3661,6 +3661,67 @@ mod tests {
         }
     }
 
+    // Prints each tool's description and input-schema size, then the whole
+    // serialized tool array. Run it with
+    // `cargo test -p fewd-server --lib tools_list_size_report -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "prints a size report and asserts nothing"]
+    fn tools_list_size_report() {
+        let mut tools = FewdMcp::tool_router().list_all();
+        tools.sort_by(|a, b| a.name.cmp(&b.name));
+        let (mut description_total, mut schema_total) = (0, 0);
+        println!("{:<28} {:>11} {:>7}", "tool", "description", "schema");
+        for tool in &tools {
+            let description = tool.description.as_deref().unwrap_or("").chars().count();
+            let schema = serde_json::to_string(&*tool.input_schema)
+                .expect("input schema serializes")
+                .chars()
+                .count();
+            description_total += description;
+            schema_total += schema;
+            println!("{:<28} {description:>11} {schema:>7}", tool.name);
+        }
+        println!("{:<28} {description_total:>11} {schema_total:>7}", "total");
+        let payload = serde_json::to_string(&tools).expect("tool list serializes");
+        println!(
+            "serialized tools array: {} chars (~{} tokens at 4 chars each)",
+            payload.chars().count(),
+            payload.chars().count() / 4
+        );
+    }
+
+    // Clients such as Claude Desktop load every tool definition into context
+    // on every turn. A description carries selection-time guidance; per-field
+    // rules belong in the input struct's `///` field docs, which ship as the
+    // schema.
+    const MAX_TOOL_DESCRIPTION_CHARS: usize = 1_200;
+
+    // Tools whose descriptions are still over budget. Each must actually be
+    // over it, so the list cannot go stale.
+    const OVER_BUDGET_PENDING: &[&str] = &[
+        "adapt_recipe",
+        "favorite_recipe",
+        "rate_recipe",
+        "search_recipes",
+        "update_recipe",
+    ];
+
+    #[test]
+    fn every_tool_description_fits_the_length_budget() {
+        for tool in FewdMcp::tool_router().list_all() {
+            let chars = tool.description.as_deref().unwrap_or("").chars().count();
+            let pending = OVER_BUDGET_PENDING.contains(&tool.name.as_ref());
+            assert_eq!(
+                chars > MAX_TOOL_DESCRIPTION_CHARS,
+                pending,
+                "{}: description is {chars} chars against a budget of \
+                 {MAX_TOOL_DESCRIPTION_CHARS}. Move per-field rules into the input \
+                 struct's field docs, or update OVER_BUDGET_PENDING.",
+                tool.name,
+            );
+        }
+    }
+
     // ─── Dangling tool references ───────────────────────────────────
     //
     // Descriptions cross-reference each other by name — that is how the
