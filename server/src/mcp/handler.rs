@@ -3738,6 +3738,66 @@ mod tests {
             .collect()
     }
 
+    // Collect every doc string an input schema ships: each string-valued
+    // `description` key, paired with its JSON pointer. A property that is
+    // itself named `description` holds a schema object, so the walk descends
+    // into it instead of collecting it.
+    fn schema_doc_strings<'a>(
+        node: &'a serde_json::Value,
+        pointer: &str,
+        out: &mut Vec<(String, &'a str)>,
+    ) {
+        match node {
+            serde_json::Value::Object(object) => {
+                for (key, value) in object {
+                    let child = format!("{pointer}/{key}");
+                    match value {
+                        serde_json::Value::String(text) if key == "description" => {
+                            out.push((child, text.as_str()));
+                        }
+                        _ => schema_doc_strings(value, &child, out),
+                    }
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    schema_doc_strings(item, &format!("{pointer}/{index}"), out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn schema_doc_strings_collects_docs_at_every_depth() {
+        let schema = serde_json::json!({
+            "description": "root doc",
+            "properties": {
+                "description": { "type": "string", "description": "field named description" },
+                "change": { "oneOf": [{ "description": "variant doc" }] }
+            },
+            "$defs": { "Inner": { "description": "def doc" } }
+        });
+        let mut found = Vec::new();
+        schema_doc_strings(&schema, "", &mut found);
+        found.sort();
+        assert_eq!(
+            found,
+            vec![
+                ("/$defs/Inner/description".to_string(), "def doc"),
+                ("/description".to_string(), "root doc"),
+                (
+                    "/properties/change/oneOf/0/description".to_string(),
+                    "variant doc"
+                ),
+                (
+                    "/properties/description/description".to_string(),
+                    "field named description"
+                ),
+            ]
+        );
+    }
+
     #[test]
     fn tool_descriptions_only_reference_tools_that_exist() {
         use super::super::schemas::diet_tags::DIET_TAGS;
