@@ -401,6 +401,14 @@ Check:
 1. This file - How to maintain it
 1. GitHub Issues - Known problems/features
 
+## Branch and Commit Naming
+
+Branches: `fewd-<id>/<short-slug>` (e.g. `fewd-abc/mcp-host-allowlist`). The branch name is the only place a bead ID goes.
+
+Commit messages, PR titles, and PR descriptions never contain bead IDs, because a reader of `main` or GitHub cannot look them up. This repo squash-merges with every commit's message in the merge body, so the rule covers each commit on a branch, not just the PR title. Use a conventional-commits prefix with a domain scope — `fix(mcp): ...`, `feat(recipes): ...`, `ci: ...`, `docs: ...` — and describe follow-up work in words ("tracked separately"). PR numbers and commit SHAs are fine to cite. Older commits on `main` carry bead scopes; don't copy that style.
+
+This section sits outside the beads integration markers below, because `bd` may regenerate everything between them.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
 ## Beads Issue Tracker
 
@@ -420,12 +428,6 @@ bd close <id>         # Complete work
 - Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
-
-### Branch + commit naming
-
-Branches: `fewd-<id>/<short-slug>` (e.g. `fewd-abc/mcp-host-allowlist`). The branch name is the only place a bead ID goes.
-
-Commit messages, PR titles, and PR descriptions never contain bead IDs, because a reader of `main` or GitHub cannot look them up. This repo squash-merges with every commit's message in the merge body, so the rule covers each commit on a branch, not just the PR title. Use a conventional-commits prefix with a domain scope — `fix(mcp): ...`, `feat(recipes): ...`, `ci: ...`, `docs: ...` — and describe follow-up work in words ("tracked separately"). PR numbers and commit SHAs are fine to cite. Older commits on `main` carry bead scopes; don't copy that style.
 
 ### Bead closure: post-merge, not inside the fix PR
 
