@@ -5,6 +5,7 @@ use sea_orm::*;
 use crate::dto::PersonServingDto;
 use crate::dto::{AggregatedIngredientDto, IngredientSourceDto, SourceType};
 use crate::dto::{IngredientAmountDto, IngredientDto, ShoppingListSplitDto};
+use crate::dto::{ShoppingAmountDto, ShoppingListItemDto};
 use crate::entities::recipe::Entity as Recipe;
 use crate::services::meal_service::MealService;
 use crate::services::pantry_classifier;
@@ -174,6 +175,64 @@ impl ShoppingService {
             items_to_buy: to_buy,
             pantry_staples_to_verify: staples,
         })
+    }
+
+    /// Builds the list [`Self::get_shopping_list`] returns for the same date
+    /// range and rounds each line's total up to an amount a shopper can buy.
+    ///
+    /// Every item keeps the unrounded line, including its per-meal sources, in
+    /// `aggregate`. The rounding rule comes from
+    /// [`unit_converter::shopping_unit_class`] on the line's unit, and a range
+    /// rounds each end and stays a range. An item has no shopping amount when
+    /// its line has no total or no unit.
+    pub async fn get_shopping_list_rounded(
+        db: &DatabaseConnection,
+        start_date: String,
+        end_date: String,
+    ) -> Result<Vec<ShoppingListItemDto>, DbErr> {
+        let list = Self::get_shopping_list(db, start_date, end_date).await?;
+        Ok(list.into_iter().map(shopping_item_from_aggregate).collect())
+    }
+}
+
+/// Wraps an aggregated line with its total rounded up for shopping.
+fn shopping_item_from_aggregate(aggregate: AggregatedIngredientDto) -> ShoppingListItemDto {
+    let shopping = match (&aggregate.total_amount, &aggregate.total_unit) {
+        // Rounding starts from the total the aggregator already rounded to two
+        // decimals for display, so noise below 0.005, as in 3.004 lemons, never
+        // buys an extra step. A true total below 0.005 therefore arrives as 0
+        // and passes through as 0 instead of rounding up to one step.
+        (Some(amount), Some(unit)) => Some(round_amount_for_shopping(amount, unit)),
+        _ => None,
+    };
+    ShoppingListItemDto {
+        aggregate,
+        shopping,
+    }
+}
+
+fn round_amount_for_shopping(amount: &IngredientAmountDto, unit: &str) -> ShoppingAmountDto {
+    let class = unit_converter::shopping_unit_class(unit);
+    let (amount, rounded) = match *amount {
+        IngredientAmountDto::Single { value } => {
+            let (value, rounded) = unit_converter::round_up_for_shopping(value, class);
+            (IngredientAmountDto::Single { value }, rounded)
+        }
+        IngredientAmountDto::Range { min, max } => {
+            // Rounding never decreases as the input grows, so min stays at or
+            // below max. The result stays a Range even when both ends meet.
+            let (min, min_rounded) = unit_converter::round_up_for_shopping(min, class);
+            let (max, max_rounded) = unit_converter::round_up_for_shopping(max, class);
+            (
+                IngredientAmountDto::Range { min, max },
+                min_rounded || max_rounded,
+            )
+        }
+    };
+    ShoppingAmountDto {
+        amount,
+        class,
+        rounded,
     }
 }
 
@@ -502,4 +561,149 @@ fn sum_ranges_direct(
 /// Round to 2 decimal places for display
 fn round_display(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::unit_converter::ShoppingUnitClass;
+
+    fn source(amount: IngredientAmountDto, unit: &str, recipe: &str) -> IngredientSourceDto {
+        IngredientSourceDto {
+            amount,
+            unit: unit.to_string(),
+            source_type: SourceType::Recipe,
+            source_name: Some(recipe.to_string()),
+            meal_id: format!("meal-{recipe}"),
+            meal_date: "2025-06-10".to_string(),
+            meal_type: "Dinner".to_string(),
+            recipe_servings: Some(4),
+            person_servings: Some(1.0),
+        }
+    }
+
+    fn aggregate(
+        total: Option<IngredientAmountDto>,
+        unit: Option<&str>,
+    ) -> AggregatedIngredientDto {
+        let source_unit = unit.unwrap_or("lb");
+        AggregatedIngredientDto {
+            ingredient_name: "Potatoes".to_string(),
+            total_amount: total,
+            total_unit: unit.map(str::to_string),
+            items: vec![
+                source(
+                    IngredientAmountDto::Single { value: 1.0 },
+                    source_unit,
+                    "Hash",
+                ),
+                source(
+                    IngredientAmountDto::Range {
+                        min: 0.5,
+                        max: 0.75,
+                    },
+                    source_unit,
+                    "Stew",
+                ),
+            ],
+        }
+    }
+
+    // The DTOs do not derive PartialEq, so the aggregate is compared as JSON.
+    fn assert_aggregate_unchanged(item: &ShoppingListItemDto, input: &AggregatedIngredientDto) {
+        assert_eq!(
+            serde_json::to_value(&item.aggregate).unwrap(),
+            serde_json::to_value(input).unwrap()
+        );
+    }
+
+    fn rounded_item(
+        total: IngredientAmountDto,
+        unit: &str,
+    ) -> (ShoppingListItemDto, AggregatedIngredientDto) {
+        let input = aggregate(Some(total), Some(unit));
+        let item = shopping_item_from_aggregate(input.clone());
+        assert_aggregate_unchanged(&item, &input);
+        (item, input)
+    }
+
+    #[test]
+    fn single_weight_rounds_up_and_keeps_the_exact_total_and_sources() {
+        let (item, _) = rounded_item(IngredientAmountDto::Single { value: 1.75 }, "lb");
+        let shopping = item.shopping.unwrap();
+        assert!(matches!(shopping.amount, IngredientAmountDto::Single { value } if value == 2.0));
+        assert_eq!(item.aggregate.total_unit.as_deref(), Some("lb"));
+        assert!(matches!(shopping.class, ShoppingUnitClass::Graduated));
+        assert!(shopping.rounded);
+        assert!(matches!(
+            item.aggregate.total_amount,
+            Some(IngredientAmountDto::Single { value }) if value == 1.75
+        ));
+    }
+
+    #[test]
+    fn unitless_range_stays_a_range_when_both_ends_meet() {
+        let (item, _) = rounded_item(IngredientAmountDto::Range { min: 0.8, max: 0.9 }, "");
+        let shopping = item.shopping.unwrap();
+        assert!(matches!(
+            shopping.amount,
+            IngredientAmountDto::Range { min, max } if min == 1.0 && max == 1.0
+        ));
+        assert!(matches!(shopping.class, ShoppingUnitClass::Count));
+        assert!(shopping.rounded);
+    }
+
+    #[test]
+    fn graduated_range_rounds_each_end_by_its_own_tier() {
+        let (item, _) = rounded_item(IngredientAmountDto::Range { min: 1.8, max: 2.2 }, "cup");
+        let shopping = item.shopping.unwrap();
+        assert!(matches!(
+            shopping.amount,
+            IngredientAmountDto::Range { min, max } if min == 2.0 && max == 3.0
+        ));
+        assert!(shopping.rounded);
+    }
+
+    #[test]
+    fn range_already_on_buyable_values_is_not_rounded() {
+        let (item, _) = rounded_item(IngredientAmountDto::Range { min: 1.0, max: 2.0 }, "cup");
+        let shopping = item.shopping.unwrap();
+        assert!(matches!(
+            shopping.amount,
+            IngredientAmountDto::Range { min, max } if min == 1.0 && max == 2.0
+        ));
+        assert!(!shopping.rounded);
+    }
+
+    #[test]
+    fn small_measurement_total_passes_through() {
+        let (item, _) = rounded_item(IngredientAmountDto::Single { value: 0.875 }, "tsp");
+        let shopping = item.shopping.unwrap();
+        assert!(matches!(shopping.amount, IngredientAmountDto::Single { value } if value == 0.875));
+        assert!(matches!(shopping.class, ShoppingUnitClass::PassThrough));
+        assert!(!shopping.rounded);
+    }
+
+    #[test]
+    fn to_taste_total_with_an_amount_passes_through() {
+        let (item, _) = rounded_item(IngredientAmountDto::Single { value: 2.0 }, "to taste");
+        let shopping = item.shopping.unwrap();
+        assert!(matches!(shopping.amount, IngredientAmountDto::Single { value } if value == 2.0));
+        assert!(matches!(shopping.class, ShoppingUnitClass::PassThrough));
+        assert!(!shopping.rounded);
+    }
+
+    #[test]
+    fn line_without_a_total_or_unit_has_no_shopping_amount() {
+        let cases = [
+            aggregate(None, None),
+            aggregate(None, Some("lb")),
+            aggregate(Some(IngredientAmountDto::Single { value: 1.75 }), None),
+        ];
+        for input in cases {
+            let item = shopping_item_from_aggregate(input.clone());
+            assert!(item.shopping.is_none());
+            assert_aggregate_unchanged(&item, &input);
+        }
+    }
 }
