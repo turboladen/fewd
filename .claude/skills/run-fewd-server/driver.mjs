@@ -208,9 +208,9 @@ async function mcp(state, method, params) {
   await ensureToken(state);
   await handshake(state);
   let { res, text } = await mcpPost(state, { jsonrpc: '2.0', id: ++rpcId, method, ...(params ? { params } : {}) });
-  // A 404 means the server has forgotten this session id — the recorded one
-  // outlived a restart. Re-handshake once rather than making the caller
-  // clear the state file by hand.
+  // A 404 means the server refuses this session id: it is malformed, or this
+  // server process saw it deleted recently. Re-handshake once rather than
+  // making the caller clear the state file by hand.
   if (res.status === 404 && state.session) {
     state.session = null;
     await handshake(state);

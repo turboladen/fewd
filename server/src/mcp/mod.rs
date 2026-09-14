@@ -52,7 +52,7 @@ use axum::Router;
 use axum_extra::headers::authorization::Bearer;
 use axum_extra::headers::Authorization;
 use axum_extra::typed_header::TypedHeader;
-use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use rmcp::transport::streamable_http_server::session::local::SessionConfig;
 use rmcp::transport::streamable_http_server::tower::{
     StreamableHttpServerConfig, StreamableHttpService,
 };
@@ -63,11 +63,13 @@ use crate::entities::person;
 use crate::services::mcp_token_service::McpTokenService;
 
 use self::handler::FewdMcp;
+use self::session_manager::ReattachingSessionManager;
 
 mod handler;
 mod lookups;
 mod prompts;
 pub(crate) mod schemas;
+mod session_manager;
 
 /// A family member resolved from the `Authorization: Bearer <token>` header.
 /// Inserted into the HTTP request extensions by the auth middleware; tool
@@ -81,24 +83,20 @@ pub struct AuthenticatedPerson(pub person::Model);
 
 /// Build the Axum router for the MCP endpoint.
 pub fn router(db: DatabaseConnection) -> Router {
-    let handler_db = db.clone();
+    let handler_factory = {
+        let db = db.clone();
+        move || Ok::<_, std::io::Error>(FewdMcp::new(db.clone()))
+    };
 
-    // Extend rmcp's idle-session reaper from 5 minutes to 7 days.
-    //
-    // The default 5-minute timeout reaps session workers whenever a Claude
-    // Desktop chat sits idle — even overnight — so the next tool call
-    // lands on a stale session-id, the server correctly returns 404 per
-    // the MCP spec, and `mcp-remote` hangs for ~4 minutes before
-    // surfacing the failure to the user.
-    //
-    // We don't want to disable the reaper outright because it still
-    // catches phantom sessions when a client crashes without sending
-    // DELETE — those would otherwise accumulate in memory until the
-    // server restarts. Seven days is long enough that normal
-    // walk-away-and-come-back usage never hits it, short enough that
-    // crashed-client sessions don't pile up indefinitely.
-    let mut session_manager = LocalSessionManager::default();
-    session_manager.session_config.keep_alive = Some(Duration::from_secs(60 * 60 * 24 * 7));
+    // rmcp reaps a session after 5 idle minutes by default. A reaped or
+    // restart-lost id is rebuilt on its next request, but a rebuilt session
+    // reports placeholder client info, so keeping live sessions for 7 days
+    // leaves normal walk-away-and-come-back usage on the original session.
+    // The reaper stays on so sessions of clients that crash without sending
+    // DELETE do not pile up in memory.
+    let mut session_config = SessionConfig::default();
+    session_config.keep_alive = Some(Duration::from_secs(60 * 60 * 24 * 7));
+    let session_manager = ReattachingSessionManager::new(session_config, handler_factory.clone());
 
     let default_config = StreamableHttpServerConfig::default();
     let allowed_hosts = merge_allowed_hosts(
@@ -107,11 +105,7 @@ pub fn router(db: DatabaseConnection) -> Router {
     );
     let config = default_config.with_allowed_hosts(allowed_hosts);
 
-    let streamable = StreamableHttpService::new(
-        move || Ok(FewdMcp::new(handler_db.clone())),
-        Arc::new(session_manager),
-        config,
-    );
+    let streamable = StreamableHttpService::new(handler_factory, Arc::new(session_manager), config);
 
     Router::new()
         .fallback_service(streamable)

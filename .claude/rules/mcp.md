@@ -11,6 +11,7 @@ The MCP server lives at `server/src/mcp/`, mounted at `/mcp` on the Axum router,
 
 - `mcp/mod.rs`: router factory and bearer-auth middleware (`Authorization: Bearer <mcp-token>`, a per-person 256-bit opaque token, argon2id-hashed; mint with `POST /api/people/{id}/mcp-token`).
 - `mcp/handler.rs`: the `FewdMcp` struct, one method per `#[tool]`, and the `ServerHandler` impl.
+- `mcp/session_manager.rs`: `ReattachingSessionManager`. An authenticated request carrying an unknown session id that is a lowercase hyphenated UUID gets a fresh session under that id, so clients survive restarts and keep-alive reaping. Other unknown ids get 404, and so does an id deleted with `DELETE` until the session keep-alive (7 days) passes, 1024 newer deletions displace it, or the process restarts.
 - `mcp/lookups.rs`: shared name and id resolution (`MealLookups`).
 - `mcp/prompts/`: MCP prompts.
 - `mcp/schemas/`: LLM-facing input and output types, split by domain. Their `///` field docs ship to the model as schema descriptions.
