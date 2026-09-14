@@ -75,3 +75,6 @@ dist-ssr
 
 # Beads issue export mirror — local only; the Dolt DB is the source of truth
 .beads/issues.jsonl
+
+# Superpowers plans are working files; lasting decisions become ADRs instead.
+docs/superpowers/plans/
