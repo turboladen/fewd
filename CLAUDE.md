@@ -8,8 +8,8 @@ Topic rules live in `.claude/rules/`. A rule without a `paths:` list loads every
 
 - Use `bun`/`bunx`, never `npm`/`npx`.
 - Run the app with `just dev` (server on :3000, Vite on :5173, API proxied). It runs the server from the workspace root, so the dev database is `data/fewd.db`.
-- Before opening a PR, run `bun .claude/skills/verify/verify.mjs` (the /verify skill): every CI gate in one pass.
-- A Claude Code hook gates any Bash command containing `git push` or `gh pr create` and blocks it on failure. It checks the tree the command targets, so `cd .claude/worktrees/X && git push` checks X. Judged by the paths the outgoing commits and the working tree change, it runs nothing when there are none, `dprint check` and `typos` when only markdown, `LICENSE` or `.beads/` files change, and `just ci` otherwise. `gh stack submit` and `gh stack sync` push without it, so run `just ci` or /verify before those.
+- Before opening a PR, run `bun .claude/skills/verify/verify.mjs` (the /verify skill): the CI gates your changes select, in one pass. `--all` runs every gate.
+- A Claude Code hook gates any Bash command containing `git push` or `gh pr create` and blocks it on failure. It checks the tree the command targets, so `cd .claude/worktrees/X && git push` checks X. The paths the outgoing commits and the working tree change select its gates through `scripts/changed-scopes.mjs`, the classifier verify.mjs and CI use too, and it runs nothing when there are none. `gh stack submit` and `gh stack sync` push without it, so run `just ci` or /verify before those.
 - Track all work in beads (below). Project rules belong in `.claude/rules/`, not inside the beads block, which `bd` may regenerate.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->

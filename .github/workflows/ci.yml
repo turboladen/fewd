@@ -19,8 +19,32 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Classifies the PR's changed paths with the same script verify.mjs and the
+  # pre-push hook use. A pull_request run checks out the merge commit, whose
+  # first parent is the base tip, so depth 2 is enough to diff the two. When
+  # the diff cannot be computed, the script sets every scope true and exits 0;
+  # a crash fails this job, and All Checks Passed fails with it.
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs: ${{ steps.scopes.outputs.docs }}
+      frontend: ${{ steps.scopes.outputs.frontend }}
+      rust: ${{ steps.scopes.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Classify changed paths
+        id: scopes
+        run: node scripts/changed-scopes.mjs --base HEAD^1 --no-worktree --format github >>"$GITHUB_OUTPUT"
+
   rust-checks:
     name: Rust Checks
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -71,24 +95,31 @@ jobs:
       # migrations and release-only panics that `cargo test` misses
       # because dev-deps unify feature flags differently than the release
       # build (e.g. sea-orm-migration's SchemaManager::has_column gated on
-      # sqlx-sqlite). See scripts/migration-smoke-test.sh and
+      # sqlx-sqlite). Any Rust change can cause the second kind, so this step
+      # runs whenever the job does. See scripts/migration-smoke-test.sh and
       # server/tests/fixtures/schema-snapshots/README.md.
       - name: Migration drift smoke test
         run: bash scripts/migration-smoke-test.sh
 
+  # Runs for docs changes too, because dprint formats markdown. The bun steps
+  # run only for frontend changes.
   frontend-checks:
     name: Frontend Checks
+    needs: changes
+    if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Bun
+        if: needs.changes.outputs.frontend == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.14"
 
       - name: Install dependencies
+        if: needs.changes.outputs.frontend == 'true'
         run: bun install --frozen-lockfile
 
       - name: Setup dprint
@@ -98,9 +129,11 @@ jobs:
         run: dprint check
 
       - name: Run linter
+        if: needs.changes.outputs.frontend == 'true'
         run: bun run lint
 
       - name: Run tests
+        if: needs.changes.outputs.frontend == 'true'
         # `bun test` uses Bun's built-in runner (no jsdom); `bun run test`
         # invokes the npm script which runs vitest with the jsdom env.
         run: bun run test
@@ -122,19 +155,40 @@ jobs:
 
   # A job skipped because a dependency failed reports success to branch
   # protection, so this job runs even after a failure and fails itself unless
-  # every dependency succeeded.
+  # every dependency succeeded. A job in GATED may also be skipped, but only
+  # when every one of its trigger outputs is exactly "false". A job listed in
+  # neither ALWAYS nor GATED fails the check until it is added to one.
   all-checks:
     name: All Checks Passed
     if: ${{ !cancelled() }}
-    needs: [rust-checks, frontend-checks, typos-check]
+    needs: [changes, rust-checks, frontend-checks, typos-check]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Fail unless every check succeeded
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+      - name: Fail unless every triggered check succeeded
         env:
           NEEDS: ${{ toJSON(needs) }}
+          ALWAYS: '["changes", "typos-check"]'
+          GATED: '{"rust-checks": ["rust"], "frontend-checks": ["docs", "frontend"]}'
         run: |
-          echo "::error::A required check did not succeed: $(jq -c 'map_values(.result)' <<<"$NEEDS")"
-          exit 1
-      - run: echo "All checks passed!"
+          problems=$(jq -r --argjson always "$ALWAYS" --argjson gated "$GATED" '
+            . as $needs
+            | ($needs.changes.outputs // {}) as $out
+            | (($always + ($gated | keys)) - ($needs | keys) | .[] | "\(.): listed but not in needs"),
+              ($needs | keys[] | . as $job | $needs[$job].result as $result
+               | if $gated | has($job) then
+                   ($gated[$job] | map($out[.])) as $triggers
+                   | if any($triggers[]; . != "true" and . != "false") then
+                       "\($job): trigger outputs \($gated[$job]) are \($triggers), not true or false"
+                     elif $result == "success" then empty
+                     elif $result == "skipped" and all($triggers[]; . == "false") then empty
+                     else "\($job): \($result)" end
+                 elif $always | index($job) then
+                   if $result == "success" then empty else "\($job): \($result)" end
+                 else "\($job): not listed in ALWAYS or GATED" end)
+          ' <<<"$NEEDS")
+          if [ -n "$problems" ]; then
+            while IFS= read -r p; do echo "::error::$p"; done <<<"$problems"
+            exit 1
+          fi
+          echo "All checks passed!"
