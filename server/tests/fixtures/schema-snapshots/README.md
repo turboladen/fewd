@@ -54,16 +54,23 @@ safe against existing prod state before regenerating.
 From the project root:
 
 ```bash
-just db-reset
+SCRATCH_DIR="$(mktemp -d)" &&
+DATABASE_PATH="$SCRATCH_DIR/fewd.db" just db-reset &&
 {
-  sqlite3 server/data/fewd.db .schema
-  sqlite3 server/data/fewd.db \
+  sqlite3 "$SCRATCH_DIR/fewd.db" .schema &&
+  sqlite3 "$SCRATCH_DIR/fewd.db" \
     "SELECT 'INSERT INTO seaql_migrations VALUES(' || quote(version) || ',' || applied_at || ');' FROM seaql_migrations ORDER BY version;"
-} > server/tests/fixtures/schema-snapshots/baseline.sql
+} > "$SCRATCH_DIR/baseline.sql" &&
+mv "$SCRATCH_DIR/baseline.sql" server/tests/fixtures/schema-snapshots/baseline.sql
+rm -rf "$SCRATCH_DIR"
 ```
 
-`just db-reset` deletes `server/data/fewd.db` and reruns all migrations
-from scratch. The two `sqlite3` invocations dump:
+`just db-reset` deletes the file `DATABASE_PATH` names and reruns all
+migrations from scratch. The scratch path keeps it away from the dev
+database, `data/fewd.db`, which it would otherwise wipe. Each step runs only
+when the one before it succeeds, and the dump is written to the scratch
+directory before it replaces the fixture, so a failed reset or dump leaves
+the committed fixture untouched. The two `sqlite3` invocations dump:
 
 1. All `CREATE` statements (schema only — no data)
 2. One `INSERT` per migration, sorted by version so regenerated

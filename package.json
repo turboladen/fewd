@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:server": "cd server && cargo run",
+    "dev:server": "RUST_LOG=${RUST_LOG:-info} cargo run --bin fewd-server",
     "dev:full": "concurrently --names server,client --prefix-colors blue,green \"bun run dev:server\" \"bun run dev\"",
     "build": "tsc && vite build",
     "build:server": "cd server && cargo build --release",
