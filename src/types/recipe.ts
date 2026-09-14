@@ -166,6 +166,13 @@ export interface ScaleResult {
   flagged: FlaggedIngredient[]
 }
 
+/** Instructions with ingredient amounts injected inline. */
+export interface EnhanceResult {
+  enhanced_text: string
+  /** How many ingredients had an amount placed; zero means nothing was added. */
+  injection_count: number
+}
+
 // --- AI Adaptation ---
 
 export interface PersonAdaptOptions {
