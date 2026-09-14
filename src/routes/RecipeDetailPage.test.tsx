@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
-import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RecipeManager } from '../components/RecipeManager'
@@ -201,8 +201,7 @@ describe('RecipeDetailPage', () => {
         ]),
       })
 
-    async function editAndSave(edit: () => void) {
-      const recipe = tomatoRecipe()
+    async function editAndSave(edit: () => void, recipe = tomatoRecipe()) {
       mockJson('GET', '/api/recipes/r1', recipe)
       renderDetail()
       await waitFor(() =>
@@ -217,9 +216,12 @@ describe('RecipeDetailPage', () => {
       return { putBody: await sentPutBody() }
     }
 
+    const rescaleWarning = () => screen.queryByText(/will not be rescaled/)
+
     it('a servings-only edit leaves ingredients out so the server rescales them', async () => {
       const { putBody } = await editAndSave(() => {
         fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '6' } })
+        expect(rescaleWarning()).not.toBeInTheDocument()
       })
       expect(putBody.servings).toBe(6)
       expect(putBody).not.toHaveProperty('ingredients')
@@ -229,11 +231,74 @@ describe('RecipeDetailPage', () => {
       const { putBody } = await editAndSave(() => {
         fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '6' } })
         fireEvent.change(screen.getByDisplayValue('2'), { target: { value: '3' } })
+        expect(rescaleWarning()).toHaveTextContent(
+          'You changed the ingredients, so their amounts are saved as entered and will not be rescaled to 6 servings.',
+        )
       })
       expect(putBody.servings).toBe(6)
       expect(putBody.ingredients).toEqual([
         { name: 'Tomato', amount: { type: 'single', value: 3 }, unit: 'cups' },
       ])
+    })
+
+    it('the warning names a single serving in the singular', async () => {
+      await editAndSave(() => {
+        fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '1' } })
+        fireEvent.change(screen.getByDisplayValue('2'), { target: { value: '3' } })
+        expect(rescaleWarning()).toHaveTextContent('will not be rescaled to 1 serving.')
+      })
+    })
+
+    it('reverting the ingredient edit removes the warning and lets the server rescale', async () => {
+      const { putBody } = await editAndSave(() => {
+        fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '6' } })
+        fireEvent.change(screen.getByDisplayValue('2'), { target: { value: '3' } })
+        expect(rescaleWarning()).toBeInTheDocument()
+        fireEvent.change(screen.getByDisplayValue('3'), { target: { value: '2' } })
+        expect(rescaleWarning()).not.toBeInTheDocument()
+      })
+      expect(putBody.servings).toBe(6)
+      expect(putBody).not.toHaveProperty('ingredients')
+    })
+
+    it('reverting the servings change removes the warning', async () => {
+      const { putBody } = await editAndSave(() => {
+        fireEvent.change(screen.getByDisplayValue('2'), { target: { value: '3' } })
+        expect(rescaleWarning()).not.toBeInTheDocument()
+        fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '6' } })
+        expect(rescaleWarning()).toBeInTheDocument()
+        fireEvent.change(screen.getByDisplayValue('6'), { target: { value: '4' } })
+        expect(rescaleWarning()).not.toBeInTheDocument()
+      })
+      expect(putBody.servings).toBe(4)
+      expect(putBody.ingredients).toEqual([
+        { name: 'Tomato', amount: { type: 'single', value: 3 }, unit: 'cups' },
+      ])
+    })
+
+    it('a row removed and retyped unchanged does not count as an edit', async () => {
+      // The stored row carries `notes: null`, while a row added in the form
+      // carries no notes at all.
+      const recipe = makeRecipe({
+        id: 'r1',
+        ingredients: JSON.stringify([
+          { name: 'Tomato', amount: { type: 'single', value: 2 }, unit: 'cups', notes: null },
+        ]),
+      })
+      const { putBody } = await editAndSave(() => {
+        fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '6' } })
+        const row = screen.getByDisplayValue('Tomato').parentElement!
+        fireEvent.click(within(row).getAllByRole('button').at(-1)!)
+        fireEvent.click(screen.getByRole('button', { name: '+ Add ingredient' }))
+        fireEvent.change(screen.getByPlaceholderText('Amt'), { target: { value: '2' } })
+        fireEvent.change(screen.getByPlaceholderText('Unit'), { target: { value: 'cups' } })
+        fireEvent.change(screen.getByPlaceholderText('Ingredient name'), {
+          target: { value: 'Tomato' },
+        })
+        expect(rescaleWarning()).not.toBeInTheDocument()
+      }, recipe)
+      expect(putBody.servings).toBe(6)
+      expect(putBody).not.toHaveProperty('ingredients')
     })
 
     describe('after another client resizes the recipe during editing', () => {
@@ -377,6 +442,19 @@ describe('RecipeDetailPage', () => {
     const putBody = await sentPutBody()
     expect(putBody.servings).toBe(6)
     expect(putBody).not.toHaveProperty('ingredients')
+  })
+
+  it('an adapted draft never shows the rescale warning', async () => {
+    // The draft has 2 servings and no ingredients, which differ from the
+    // stored 4 servings and list. A new recipe has nothing to rescale.
+    mockJson('GET', '/api/recipes/r1', makeRecipe({ id: 'r1' }))
+    renderDetail()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Pasta' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Adapt/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use adapted draft' }))
+
+    expect(screen.getByRole('heading', { name: 'Edit Adapted Recipe' })).toBeInTheDocument()
+    expect(screen.queryByText(/will not be rescaled/)).not.toBeInTheDocument()
   })
 
   it('history navigation while editing an adapted draft drops the draft', async () => {
