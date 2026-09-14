@@ -49,34 +49,16 @@ pub fn person_to_prefs(person: &person::Model) -> Result<PersonWithPrefs, String
     })
 }
 
-/// Input for the `update_person` MCP tool. `name` identifies the row to
-/// update (case-insensitive, mirroring `list_people` / `create_meal`
-/// resolution). Every other field is optional with PATCH semantics: an
-/// omitted field — or an explicit JSON `null` — leaves the column
-/// unchanged.
-///
-/// **Clear semantics differ by field shape**:
-///
-/// - `notes` (free-form string column): there is NO clear-to-NULL path
-///   for this column anywhere in fewd today — not via this tool, not via
-///   the web UI (which sends `notes: formData.notes || undefined` and
-///   so cannot clear either). `PersonService::update`'s convention is
-///   "set" only, never "clear". To preserve that invariant at the MCP
-///   boundary, `update_person_input_to_dto` normalizes an empty or
-///   whitespace-only `notes` string to `None` — without that
-///   normalization a caller could persist `Some("")` as a back-door
-///   clear (the renderer collapses it to `_none_`), silently forking
-///   the codebase invariant. If a real "clear" affordance is wanted
-///   later, it has to land in `UpdatePersonDto` + service + UI
-///   together so all three paths agree.
-/// - The four list fields (`dislikes`, `favorites`, `drink_preferences`,
-///   `drink_dislikes`): passing `[]` REPLACES the existing list with an
-///   empty array. That's the same write path as setting them to any other
-///   list — `Some(vec![])` flows through `update_person_input_to_dto` →
-///   `Set(to_json(&vec![]))` → `"[]"` in the DB. Reasonable for the
-///   "clean-up bad data" use case; deliberate that we don't coalesce
-///   empty arrays to "no-op" because that would silently drop a
-///   legitimate write.
+/// Input for the `update_person` MCP tool.
+//
+// The tool description carries the caller-facing contract. `notes` has no
+// clear-to-NULL path anywhere in fewd, and the web UI cannot clear it
+// either, so `update_person_input_to_dto` turns a blank `notes` into `None`
+// rather than letting `Some("")` act as a back-door clear; a real clear
+// affordance has to land in `UpdatePersonDto`, the service, and the UI
+// together. An empty list passes through as a real write that replaces the
+// stored list, which is how bad data gets cleaned up, so it is never
+// coalesced to "no change".
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdatePersonInput {
@@ -101,8 +83,7 @@ pub struct UpdatePersonInput {
 ///
 /// `notes` gets one normalization step: empty / whitespace-only input is
 /// coerced to `None` so the codebase invariant "no clear-to-NULL path for
-/// notes" holds at the MCP boundary. See `UpdatePersonInput`'s docstring
-/// for the full rationale.
+/// notes" holds at the MCP boundary.
 pub fn update_person_input_to_dto(input: UpdatePersonInput) -> UpdatePersonDto {
     UpdatePersonDto {
         name: None,

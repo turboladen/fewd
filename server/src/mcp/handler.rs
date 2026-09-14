@@ -572,7 +572,7 @@ impl FewdMcp {
 
     #[tool(
         name = "adapt_recipe",
-        description = "Adapt a recipe into a saved variant when the user swaps, adds, or drops ingredients for one version of a dish but wants the original kept unchanged — call `get_recipe` on the parent FIRST for its exact ingredient names and instruction text. Returns the full new recipe, linked to the original by `parent_recipe_slug`; the parent is never modified. Send at least one of `ingredient_changes`, `instruction_edits`, or `instructions`: to change only the name, description, tags, or notes, call `update_recipe` on the parent instead. Set `nutrition_per_serving` (cleared when ingredients change), servings, times, or icon afterwards with `update_recipe` on the new slug. A change that does not match exactly rejects the whole call and saves nothing. An unknown `parent_recipe_slug` returns an error pointing at `search_recipes`. Example: {\"parent_recipe_slug\":\"potato-gnocchi\",\"name\":\"Gnocchi with Hot Italian Sausage\",\"ingredient_changes\":[{\"op\":\"replace\",\"name\":\"italian sausage\",\"with\":{\"name\":\"hot italian sausage\",\"amount\":{\"kind\":\"single\",\"value\":1.0},\"unit\":\"pound\"}}],\"notes\":\"Spicier Tuesday version\"}",
+        description = "Adapt a recipe into a saved variant when the user swaps, adds, or drops ingredients for one version of a dish but wants the original kept unchanged — call `get_recipe` on the parent FIRST for its exact ingredient names and instruction text. Returns the full new recipe, linked to the original by `parent_recipe_slug`; the parent is never modified. Send at least one of `ingredient_changes`, `instruction_edits`, or `instructions`: to change only the name, description, tags, or notes, call `update_recipe` on the parent instead. Set `nutrition_per_serving`, servings, times, or icon afterwards with `update_recipe` on the new slug. A change that does not match exactly rejects the whole call and saves nothing. An unknown `parent_recipe_slug` returns an error pointing at `search_recipes`. Example: {\"parent_recipe_slug\":\"potato-gnocchi\",\"name\":\"Gnocchi with Hot Italian Sausage\",\"ingredient_changes\":[{\"op\":\"replace\",\"name\":\"italian sausage\",\"with\":{\"name\":\"hot italian sausage\",\"amount\":{\"kind\":\"single\",\"value\":1.0},\"unit\":\"pound\"}}],\"notes\":\"Spicier Tuesday version\"}",
         input_schema = rmcp::handler::server::common::schema_for_type::<AdaptRecipeInput>()
     )]
     async fn adapt_recipe(
@@ -620,7 +620,7 @@ impl FewdMcp {
 
     #[tool(
         name = "update_recipe",
-        description = "Revise an existing recipe when the user corrects or improves one already in the catalog — call `search_recipes` or `get_recipe` FIRST for the `slug` and current values (use `create_recipe` when the dish isn't in the catalog, or `adapt_recipe` to save a changed copy and keep the original). Returns the full updated recipe. Only the fields you send are written: omitted or null fields are left unchanged, and a blank string is ignored except for `name`, which is rejected. List and structured fields REPLACE the stored value whole: a partial `ingredients` array deletes every ingredient you left out, so send the complete list back. Renaming does not change the slug. Changing `servings` does not rescale `ingredients`, so send both to resize. An invalid field, such as a time `unit` other than minutes, hours, or days, rejects the whole call and writes nothing. Not writable here: `is_favorite` (call `favorite_recipe`), `rating` (call `rate_recipe`, or `unrate_recipe` to clear it), `source`, `source_url`, the parent recipe, and the slug. Example: {\"slug\":\"beef-taco-bowls\",\"notes\":\"double the chili powder\"}",
+        description = "Revise an existing recipe when the user corrects or improves one already in the catalog — call `search_recipes` or `get_recipe` FIRST for the `slug` and current values (use `create_recipe` when the dish isn't in the catalog, or `adapt_recipe` to save a changed copy and keep the original). Returns the full updated recipe. Only the fields you send are written: omitted or null fields are left unchanged, and a blank string is ignored except for `name`, which is rejected. List and structured fields REPLACE the stored value whole: a partial `ingredients` array deletes every ingredient you left out, so send the complete list back. Changing `servings` does not rescale `ingredients`, so send both to resize. An invalid field, such as a time `unit` other than minutes, hours, or days, rejects the whole call and writes nothing. Not writable here: `is_favorite` (call `favorite_recipe`), `rating` (call `rate_recipe`, or `unrate_recipe` to clear it), `source`, `source_url`, the parent recipe, and the slug. Example: {\"slug\":\"beef-taco-bowls\",\"notes\":\"double the chili powder\"}",
         input_schema = rmcp::handler::server::common::schema_for_type::<UpdateRecipeInput>()
     )]
     async fn update_recipe(
@@ -2340,8 +2340,8 @@ mod tests {
         // backdooring a "clear" that the codebase invariant rules out.
         // A regression that removed the trim-coerce-to-None step in
         // `update_person_input_to_dto` would silently let that through;
-        // this test catches it end-to-end. See `UpdatePersonInput` rustdoc
-        // for the full rationale.
+        // this test catches it end-to-end. The comment above
+        // `UpdatePersonInput` gives the full rationale.
         let mcp = setup_test_mcp().await;
         seed_person(&mcp, "Alice").await;
 
@@ -3694,7 +3694,7 @@ mod tests {
     // on every turn. A description carries selection-time guidance; per-field
     // rules belong in the input struct's `///` field docs, which ship as the
     // schema.
-    const MAX_TOOL_DESCRIPTION_CHARS: usize = 1_200;
+    const MAX_TOOL_DESCRIPTION_CHARS: usize = 1_100;
 
     #[test]
     fn every_tool_description_fits_the_length_budget() {
@@ -3712,41 +3712,115 @@ mod tests {
 
     // ─── Dangling tool references ───────────────────────────────────
     //
-    // Descriptions cross-reference each other by name — that is how the
-    // LLM learns which tool to call first and which one undoes another.
-    // A name that does not resolve sends the model at a tool that is not
-    // there, and it recovers only by spending a failed call.
+    // Descriptions and input-type docs name tools; every `///` on an input
+    // type ships as a schema `description`, so both reach the model. A name
+    // that does not resolve sends the model at a tool that is not there,
+    // and it recovers only by spending a failed call.
     //
     // Nothing else catches that: the intent-verb guard reads the first
     // word and the embedded-example guard reads the trailing payload,
     // and neither looks at the prose between.
 
     // Pull the identifier-shaped spans out of a description: text between
-    // backticks made only of lowercase letters, digits, and underscores.
-    // Anything containing a space, brace, or quote is a code fragment or
-    // a JSON example rather than a name.
+    // backticks that starts with a lowercase letter and holds only lowercase
+    // letters, digits, underscores, and hyphens, so hyphenated diet tags such
+    // as `gluten-free` count. Anything with a space, brace, quote, or
+    // parenthesis is a code fragment or a JSON example rather than a name, and
+    // a span that starts with a digit or a hyphen is a literal such as a date.
     fn backticked_identifiers(description: &str) -> Vec<&str> {
         description
             .split('`')
             .skip(1)
             .step_by(2)
             .filter(|s| {
-                !s.is_empty()
-                    && s.chars()
-                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                let mut chars = s.chars();
+                chars.next().is_some_and(|c| c.is_ascii_lowercase())
+                    && chars.all(|c| {
+                        c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-'
+                    })
             })
             .collect()
     }
 
     #[test]
-    fn tool_descriptions_only_reference_tools_that_exist() {
+    fn backticked_identifiers_keeps_hyphenated_names_and_skips_literals() {
+        let text = "Tag `gluten-free` via `search_recipes`, not `search_recipes(tags=[...])`, \
+                    `2026-02-30`, `-`, `{\"a\":1}`, or ``.";
+        assert_eq!(
+            backticked_identifiers(text),
+            vec!["gluten-free", "search_recipes"]
+        );
+    }
+
+    // Collect every doc string an input schema ships: each string-valued
+    // `description` key, paired with its JSON pointer. A property that is
+    // itself named `description` holds a schema object, so the walk descends
+    // into it instead of collecting it.
+    fn schema_doc_strings<'a>(
+        node: &'a serde_json::Value,
+        pointer: &str,
+        out: &mut Vec<(String, &'a str)>,
+    ) {
+        match node {
+            serde_json::Value::Object(object) => {
+                for (key, value) in object {
+                    let child = format!("{pointer}/{key}");
+                    match value {
+                        serde_json::Value::String(text) if key == "description" => {
+                            out.push((child, text.as_str()));
+                        }
+                        _ => schema_doc_strings(value, &child, out),
+                    }
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    schema_doc_strings(item, &format!("{pointer}/{index}"), out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn schema_doc_strings_collects_docs_at_every_depth() {
+        let schema = serde_json::json!({
+            "description": "root doc",
+            "properties": {
+                "description": { "type": "string", "description": "field named description" },
+                "change": { "oneOf": [{ "description": "variant doc" }] }
+            },
+            "$defs": { "Inner": { "description": "def doc" } }
+        });
+        let mut found = Vec::new();
+        schema_doc_strings(&schema, "", &mut found);
+        found.sort();
+        assert_eq!(
+            found,
+            vec![
+                ("/$defs/Inner/description".to_string(), "def doc"),
+                ("/description".to_string(), "root doc"),
+                (
+                    "/properties/change/oneOf/0/description".to_string(),
+                    "variant doc"
+                ),
+                (
+                    "/properties/description/description".to_string(),
+                    "field named description"
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn tool_docs_only_reference_names_that_exist() {
         use super::super::schemas::diet_tags::DIET_TAGS;
 
-        // Everything a description names in backticks has to resolve to
-        // something the server exposes: a registered tool, an input field
-        // on some tool's schema, or a diet tag. These are the only words
-        // that are none of those — JSON literals, and a person field no
-        // tool accepts as input.
+        // Everything a description or schema doc names in backticks has to
+        // resolve to something the server exposes: a registered tool, an
+        // input field on some tool's schema, or a diet tag. These are the
+        // only words that are none of those — JSON literals, and a person
+        // field no tool accepts as input.
         const NON_TOOL_WORDS: &[&str] = &["true", "false", "null", "dietary_goals"];
 
         let router = FewdMcp::tool_router();
@@ -3755,43 +3829,62 @@ mod tests {
         let mut known: Vec<&str> = registered.iter().copied().collect();
         known.sort_unstable();
 
-        // Schemas nest — an ingredient's fields live under `$defs` — so
-        // collect property names at every depth rather than only the top.
+        // Schemas nest — an ingredient's fields live under `$defs`, and an
+        // enum's variants under `oneOf` — so collect property names at every
+        // depth, arrays included, rather than only the top.
         fn field_names(schema: &serde_json::Value, out: &mut HashSet<String>) {
-            let Some(object) = schema.as_object() else {
-                return;
-            };
-            if let Some(properties) = object.get("properties").and_then(|p| p.as_object()) {
-                out.extend(properties.keys().cloned());
-            }
-            for value in object.values() {
-                field_names(value, out);
+            match schema {
+                serde_json::Value::Object(object) => {
+                    if let Some(properties) = object.get("properties").and_then(|p| p.as_object()) {
+                        out.extend(properties.keys().cloned());
+                    }
+                    for value in object.values() {
+                        field_names(value, out);
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    for item in items {
+                        field_names(item, out);
+                    }
+                }
+                _ => {}
             }
         }
+        let schemas: Vec<serde_json::Value> = tools
+            .iter()
+            .map(|tool| serde_json::Value::Object((*tool.input_schema).clone()))
+            .collect();
         let mut fields: HashSet<String> = HashSet::new();
-        for tool in &tools {
-            field_names(
-                &serde_json::Value::Object((*tool.input_schema).clone()),
-                &mut fields,
-            );
+        for schema in &schemas {
+            field_names(schema, &mut fields);
         }
 
-        for tool in &tools {
-            let description = tool.description.as_deref().unwrap_or("");
-            for referenced in backticked_identifiers(description) {
-                let resolves = registered.contains(referenced)
-                    || fields.contains(referenced)
-                    || DIET_TAGS.iter().any(|(tag, _)| *tag == referenced)
-                    || NON_TOOL_WORDS.contains(&referenced);
-                assert!(
-                    resolves,
-                    "{}: description references `{referenced}`, which is not a registered \
-                     tool, an input field, or a diet tag. Correct it to one of {known:?} — \
-                     or, if it is a literal rather than a name, add it to NON_TOOL_WORDS.",
-                    tool.name,
-                );
+        let mut dangling: Vec<String> = Vec::new();
+        for (tool, schema) in tools.iter().zip(&schemas) {
+            let mut docs = vec![(
+                "description".to_string(),
+                tool.description.as_deref().unwrap_or(""),
+            )];
+            schema_doc_strings(schema, "inputSchema", &mut docs);
+            for (location, text) in docs {
+                for referenced in backticked_identifiers(text) {
+                    let resolves = registered.contains(referenced)
+                        || fields.contains(referenced)
+                        || DIET_TAGS.iter().any(|(tag, _)| *tag == referenced)
+                        || NON_TOOL_WORDS.contains(&referenced);
+                    if !resolves {
+                        dangling.push(format!("{} {location}: `{referenced}`", tool.name));
+                    }
+                }
             }
         }
+        assert!(
+            dangling.is_empty(),
+            "these docs reference names that are not a registered tool, an input field, \
+             or a diet tag: {dangling:#?}. Correct each to a registered tool ({known:?}) \
+             or an existing input field, or put a literal value in double quotes instead \
+             of backticks.",
+        );
     }
 
     // ─── Embedded example payloads (fewd-9d8) ───────────────────────
