@@ -69,11 +69,16 @@ check-backend:
 # Check both
 check: check-backend check-frontend
 
-# Run all CI checks locally
+# This recipe skips the migration drift smoke test and the frozen-lockfile
+# check. Clippy and tests run once per package, and the comment on those steps
+# in ci.yml explains why. `just --list` shows only the last comment line.
+# Run the fail-fast subset of the CI checks locally
 ci:
-    cd server && cargo fmt --all -- --check
-    cd server && cargo clippy --all-targets --all-features -- -D warnings
-    cd server && cargo test --all-features
+    cargo fmt --all -- --check
+    cargo clippy -p fewd-server --all-targets --all-features -- -D warnings
+    cargo clippy -p migration --all-targets -- -D warnings
+    cargo test -p fewd-server --all-features
+    cargo test -p migration
     dprint check
     bun run lint
     bun run test

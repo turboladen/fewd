@@ -117,11 +117,12 @@ its database is `target/fewd-driver/fewd.db` (inspect with `sqlite3`).
 ## Direct invocation
 
 Most recent PRs here add or change one MCP tool (`rate_recipe`, `favorite_recipe`,
-`update_recipe`). Two levels below the full boot:
+`update_recipe`). Below the full boot, run the tests directly:
 
 ```bash
-cargo test --workspace                    # 350 lib + 105 migration + integration, all green
-cargo test -p fewd-server mcp::handler    # 87 tool-level unit tests
+cargo test -p fewd-server                 # server lib and integration tests
+cargo test -p migration                   # migration crate unit tests
+cargo test -p fewd-server mcp::handler    # tool-level unit tests only
 ```
 
 `RequestContext<RoleServer>` cannot be constructed in a unit test, so anything

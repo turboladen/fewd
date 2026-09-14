@@ -32,19 +32,21 @@ working; use this before a PR.
 
 ## Gates
 
-| id          | gate                                                       | tier  | warm  |
-| ----------- | ---------------------------------------------------------- | ----- | ----- |
-| `fmt`       | `cargo fmt --all -- --check`                               | CI    | 0.1s  |
-| `dprint`    | `dprint check`                                             | CI    | 0.1s  |
-| `typos`     | `typos --config .typos.toml`                               | CI    | 0.0s  |
-| `lockfile`  | `bun install --frozen-lockfile`                            | CI    | 0.1s  |
-| `lint`      | `bun run lint` (eslint)                                    | CI    | 4s    |
-| `types`     | `bunx tsc --noEmit`                                        | extra | 1s    |
-| `fe-test`   | `bun run test` (vitest)                                    | CI    | 3s    |
-| `clippy`    | `cargo clippy --all-targets --all-features -- -D warnings` | CI    | 0.4s  |
-| `rust-test` | `cargo test --all-features`                                | CI    | 6–16s |
-| `smoke`     | `driver.mjs smoke` from the run-fewd-server skill          | extra | 3s    |
-| `migration` | `bash scripts/migration-smoke-test.sh`                     | CI    | 1–12s |
+| id           | gate                                                                      | tier  | warm  |
+| ------------ | ------------------------------------------------------------------------- | ----- | ----- |
+| `fmt`        | `cargo fmt --all -- --check`                                              | CI    | 0.1s  |
+| `dprint`     | `dprint check`                                                            | CI    | 0.1s  |
+| `typos`      | `typos --config .typos.toml`                                              | CI    | 0.0s  |
+| `lockfile`   | `bun install --frozen-lockfile`                                           | CI    | 0.1s  |
+| `lint`       | `bun run lint` (eslint)                                                   | CI    | 4s    |
+| `types`      | `bunx tsc --noEmit`                                                       | extra | 1s    |
+| `fe-test`    | `bun run test` (vitest)                                                   | CI    | 3s    |
+| `clippy`     | `cargo clippy -p fewd-server --all-targets --all-features -- -D warnings` | CI    | 0.4s  |
+| `mig-clippy` | `cargo clippy -p migration --all-targets -- -D warnings`                  | CI    | 0.3s  |
+| `rust-test`  | `cargo test -p fewd-server --all-features`                                | CI    | 6–16s |
+| `mig-test`   | `cargo test -p migration`                                                 | CI    | 0.3s  |
+| `smoke`      | `driver.mjs smoke` from the run-fewd-server skill                         | extra | 3s    |
+| `migration`  | `bash scripts/migration-smoke-test.sh`                                    | CI    | 1–12s |
 
 **CI** gates block the merge. **extra** gates do not — they cover the two ways
 this repo breaks after a green CI run: a type error (CI never runs `tsc` or the
@@ -71,7 +73,7 @@ lines of each failing gate, then a summary naming the failed ids. Exit is 0 or 1
 …
 ▸ migration drift … ok (11.6s)
 
-11 gates in 29.5s
+13 gates in 29.5s
 PASS
 ```
 
@@ -107,18 +109,20 @@ PASS
 - **Formatters exit non-zero when they leave something behind.** In `--fix`,
   `left issues it cannot fix` next to eslint means unused variables or type
   errors remain — the gate run below names them.
-- **The Rust gates run from `server/`**, matching CI. That is safe for
-  `fmt`/`clippy`/`test` (verified: `cargo test` does not write
-  `server/data/fewd.db`), but never `cd server` to _run_ the server — that
-  creates a parallel database.
+- **The Rust gates run from the repo root, and clippy and tests run one
+  package at a time**, matching CI. A single clippy or test run over both
+  packages unifies the migration crate's dev-dependency features into the
+  server build and passes code the release build rejects. Never `cd server` to
+  _run_ the server: the database path resolves against the working directory,
+  so that creates a parallel database.
 
 ## Troubleshooting
 
-| Symptom                                               | Fix                                                                                                                                        |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `error: lockfile had changes, but lockfile is frozen` | `package.json` moved without `bun.lock`. Run `bun install` and commit the refreshed lockfile.                                              |
-| `Port 3099 is already bound`                          | A `just db-reset` or an earlier smoke run is still up. `lsof -nP -iTCP:3099 -sTCP:LISTEN` and kill it, or `SMOKE_TEST_PORT=3199`.          |
-| `typos: Executable not found in $PATH`                | `cargo install typos-cli` — the binary is `typos`, the crate is `typos-cli`.                                                               |
-| `dprint: Executable not found in $PATH`               | `cargo install dprint`.                                                                                                                    |
-| `no gate matches --only <id>`                         | Ids come from `--list`; they are short (`lint`, not `eslint`).                                                                             |
-| Gate passes here, CI fails                            | Compare against `.github/workflows/ci.yml`. The gate table above mirrors it; if a step was added there, add it to `GATES` in `verify.mjs`. |
+| Symptom                                               | Fix                                                                                                                                                    |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `error: lockfile had changes, but lockfile is frozen` | `package.json` moved without `bun.lock`. Run `bun install` and commit the refreshed lockfile.                                                          |
+| `Port 3099 is already bound`                          | A `just db-reset` or an earlier smoke run is still up. `lsof -nP -iTCP:3099 -sTCP:LISTEN` and kill it, or `SMOKE_TEST_PORT=3199`.                      |
+| `typos: Executable not found in $PATH`                | `cargo install typos-cli` — the binary is `typos`, the crate is `typos-cli`.                                                                           |
+| `dprint: Executable not found in $PATH`               | `cargo install dprint`.                                                                                                                                |
+| `no gate matches --only <id>`                         | Ids come from `--list`; they are short (`lint`, not `eslint`).                                                                                         |
+| Gate passes here, CI fails                            | Compare against `.github/workflows/ci.yml`. The gate table above mirrors it; if a check was added there, add a gate for it to `GATES` in `verify.mjs`. |
