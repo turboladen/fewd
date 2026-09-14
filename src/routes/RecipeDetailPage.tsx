@@ -37,7 +37,10 @@ export function RecipeDetailPage() {
 
   const [mode, setMode] = useState<Mode>('view')
   const [confirmingDelete, setConfirmingDelete] = useState(false)
-  const [adaptDraft, setAdaptDraft] = useState<CreateRecipeDto | null>(null)
+  // An adapted draft keeps the id of the recipe it was adapted from.
+  const [adaptDraft, setAdaptDraft] = useState<
+    { recipeId: string; draft: CreateRecipeDto } | null
+  >(null)
   const [scaleError, setScaleError] = useState<string | null>(null)
   // This holds the servings and ingredients the edit form opened with, and
   // the id of the recipe they came from. A refetch during editing changes the
@@ -130,6 +133,13 @@ export function RecipeDetailPage() {
   const snapshot = editSnapshot?.recipeId === recipe.id ? editSnapshot : null
   const editServings = snapshot?.servings ?? recipe.servings
   const editIngredients = snapshot?.ingredients ?? parsed.ingredients
+  // History navigation also keeps an adapted draft alive on another recipe.
+  // The draft is dropped there, and adapt-edit mode, which has nothing left to
+  // show, returns to the view, so no page offers to save another recipe's draft.
+  if (adaptDraft && adaptDraft.recipeId !== recipe.id) {
+    setAdaptDraft(null)
+    if (mode === 'adapt-edit') setMode('view')
+  }
 
   const handleUpdate = (formData: RecipeFormData) => {
     // Leaving an unedited list out lets the server rescale the stored amounts
@@ -211,8 +221,8 @@ export function RecipeDetailPage() {
     if (!adaptDraft) return
     const dto: CreateRecipeDto = {
       name: formData.name,
-      source: adaptDraft.source,
-      parent_recipe_id: adaptDraft.parent_recipe_id,
+      source: adaptDraft.draft.source,
+      parent_recipe_id: adaptDraft.draft.parent_recipe_id,
       servings: formData.servings,
       portion_size: formData.portion_size,
       instructions: formData.instructions,
@@ -258,18 +268,18 @@ export function RecipeDetailPage() {
     const isAdaptEdit = mode === 'adapt-edit' && !!adaptDraft
     const formInitial: RecipeFormData = isAdaptEdit
       ? {
-        name: adaptDraft!.name,
-        description: adaptDraft!.description || '',
-        prep_time: adaptDraft!.prep_time,
-        cook_time: adaptDraft!.cook_time,
-        total_time: adaptDraft!.total_time,
-        servings: adaptDraft!.servings,
-        portion_size: adaptDraft!.portion_size,
-        instructions: adaptDraft!.instructions,
-        ingredients: adaptDraft!.ingredients,
-        tags: adaptDraft!.tags,
-        notes: adaptDraft!.notes || '',
-        icon: adaptDraft!.icon || '',
+        name: adaptDraft!.draft.name,
+        description: adaptDraft!.draft.description || '',
+        prep_time: adaptDraft!.draft.prep_time,
+        cook_time: adaptDraft!.draft.cook_time,
+        total_time: adaptDraft!.draft.total_time,
+        servings: adaptDraft!.draft.servings,
+        portion_size: adaptDraft!.draft.portion_size,
+        instructions: adaptDraft!.draft.instructions,
+        ingredients: adaptDraft!.draft.ingredients,
+        tags: adaptDraft!.draft.tags,
+        notes: adaptDraft!.draft.notes || '',
+        icon: adaptDraft!.draft.icon || '',
       }
       : {
         name: recipe.name,
@@ -344,7 +354,7 @@ export function RecipeDetailPage() {
             navigate(`/recipes/${newSlug}`)
           }}
           onEdit={(draft) => {
-            setAdaptDraft(draft)
+            setAdaptDraft({ recipeId: recipe.id, draft })
             setMode('adapt-edit')
           }}
           onCancel={() => setMode('view')}

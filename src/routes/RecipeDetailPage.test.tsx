@@ -9,6 +9,28 @@ import { renderWithProviders } from '../test/renderWithProviders'
 import type { Recipe } from '../types/recipe'
 import { RecipeDetailPage } from './RecipeDetailPage'
 
+// The real panel streams an adaptation from the AI endpoint. This stand-in
+// hands the page a finished draft, so a test can reach adapt-edit mode.
+vi.mock('../components/AdaptRecipePanel', () => ({
+  AdaptRecipePanel: ({ onEdit }: { onEdit: (draft: unknown) => void }) => (
+    <button
+      type='button'
+      onClick={() =>
+        onEdit({
+          name: 'Soup for Steve',
+          source: 'adapted',
+          parent_recipe_id: 'r2',
+          servings: 2,
+          instructions: 'Stir.',
+          ingredients: [],
+          tags: [],
+        })}
+    >
+      Use adapted draft
+    </button>
+  ),
+}))
+
 function renderDetail(path = '/recipes/r1') {
   return renderWithProviders(
     <Routes>
@@ -355,6 +377,34 @@ describe('RecipeDetailPage', () => {
     const putBody = await sentPutBody()
     expect(putBody.servings).toBe(6)
     expect(putBody).not.toHaveProperty('ingredients')
+  })
+
+  it('history navigation while editing an adapted draft drops the draft', async () => {
+    // A draft adapted from Soup must not be offered for saving on the recipe
+    // that Back lands on.
+    const pasta = makeRecipe({ id: 'r1', slug: 'pasta', name: 'Pasta' })
+    const soup = makeRecipe({ id: 'r2', slug: 'soup', name: 'Soup', servings: 2 })
+    mockJson('GET', '/api/recipes/pasta', pasta)
+    mockJson('GET', '/api/recipes/soup', soup)
+    renderWithHistory()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Pasta' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go to soup' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Soup' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Adapt/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use adapted draft' }))
+    expect(screen.getByRole('heading', { name: 'Edit Adapted Recipe' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go back' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Pasta' })).toBeInTheDocument())
+    expect(screen.queryByRole('heading', { name: 'Edit Adapted Recipe' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save Adapted Recipe' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Edit Pasta' })).not.toBeInTheDocument()
+
+    // Returning to Soup does not bring the dropped draft back.
+    fireEvent.click(screen.getByRole('button', { name: 'Go to soup' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Soup' })).toBeInTheDocument())
+    expect(screen.queryByRole('heading', { name: 'Edit Adapted Recipe' })).not.toBeInTheDocument()
   })
 
   describe('cooking mode', () => {
