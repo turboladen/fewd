@@ -1,19 +1,48 @@
 ---
 name: verify
-description: Run every quality gate this repo enforces — cargo fmt, clippy, cargo test, migration drift, dprint, eslint, tsc, vitest, typos, lockfile freshness, and the API/MCP smoke — in one pass. Use before opening or updating a PR, when asked whether a branch is green, whether CI will pass, or to check/fix formatting and lint across the repo.
+description: Run the quality gates this repo enforces — cargo fmt, clippy, cargo test, migration drift, dprint, eslint, tsc, vitest, typos, lockfile freshness, and the API/MCP smoke — in one pass. By default it runs only the gates the branch's changes against origin/main select, and none when nothing changed; pass --all for every gate. Use before opening or updating a PR, when asked whether a branch is green, whether CI will pass, or to check/fix formatting and lint across the repo.
 ---
 
 # Verifying the branch
 
-`.claude/skills/verify/verify.mjs` runs every gate `.github/workflows/ci.yml`
+`.claude/skills/verify/verify.mjs` runs the gates `.github/workflows/ci.yml`
 enforces, plus two it doesn't, and reports all of them in one pass rather than
-stopping at the first failure. A green run means this branch will pass CI.
+stopping at the first failure. By default it runs only the gates the branch's
+changes select, the same selection CI makes, so a green run still means this
+branch will pass CI.
 
-Run it from the repo root. A warm full run is about **30 seconds**.
+Run it from the repo root. A warm full run is about **30 seconds**; a docs-only
+change runs `dprint` and `typos` in well under one.
 
 ```bash
 bun .claude/skills/verify/verify.mjs
 ```
+
+It prints which files selected which scopes before the gates run:
+
+```
+scopes vs origin/main:
+  docs      README.md, docs/mcp-testing.md
+  rust      server/src/main.rs
+```
+
+## Scopes
+
+`scripts/changed-scopes.mjs` lists the files changed since the merge base with
+`origin/main`, plus staged, unstaged and untracked files, and maps them to
+scopes. `.claude/rules/ci.md` has the full path rules.
+
+| scope      | paths                                                      | gates                                            |
+| ---------- | ---------------------------------------------------------- | ------------------------------------------------ |
+| `docs`     | markdown, `LICENSE*`, `.beads/`, JSON under `server/`      | `dprint`                                         |
+| `frontend` | `src/`, `public/`, `package.json`, `bun.lock`, the configs | `dprint`, `lockfile`, `lint`, `types`, `fe-test` |
+| `rust`     | `server/` except JS/TS, `Cargo.toml`, `Cargo.lock`         | `dprint`, the cargo gates, `smoke`, `migration`  |
+| `all`      | any path no rule matches, such as `justfile` or `scripts/` | every gate                                       |
+
+`typos` runs for any change. With no changes at all, verify prints
+`no changes vs origin/main; use --all to run every gate` and exits 0. If the
+change list cannot be computed, for example without an `origin/main` ref,
+every gate runs.
 
 ## Why not `just ci`
 
@@ -57,13 +86,19 @@ runtime break in the API/MCP surface.
 ## Flags
 
 ```bash
-bun .claude/skills/verify/verify.mjs --fast      # skip migration drift (the only release build)
-bun .claude/skills/verify/verify.mjs --ci-only   # merge-blocking gates only
-bun .claude/skills/verify/verify.mjs --fix       # cargo fmt + dprint fmt + eslint --fix, then verify
-                                                 # with --only, just that gate's fixer
-bun .claude/skills/verify/verify.mjs --only lint # one gate
-bun .claude/skills/verify/verify.mjs --list      # gate ids and tiers
+bun .claude/skills/verify/verify.mjs --all          # every gate, whatever changed
+bun .claude/skills/verify/verify.mjs --scope rust   # the gates of a scope (repeatable)
+bun .claude/skills/verify/verify.mjs --base HEAD~3  # select from changes since another revision
+bun .claude/skills/verify/verify.mjs --fast         # skip migration drift (the only release build)
+bun .claude/skills/verify/verify.mjs --ci-only      # merge-blocking gates only
+bun .claude/skills/verify/verify.mjs --skip smoke   # leave out a gate (repeatable)
+bun .claude/skills/verify/verify.mjs --fix          # cargo fmt + dprint fmt + eslint --fix, then verify
+                                                    # with --only, just that gate's fixer
+bun .claude/skills/verify/verify.mjs --only lint    # one gate
+bun .claude/skills/verify/verify.mjs --list         # gate ids, tiers and scopes
 ```
+
+`--only`, `--all` and `--scope` each choose the gates, so pass at most one.
 
 Output on success is one line per gate plus a total; on failure, the last 25
 lines of each failing gate, then a summary naming the failed ids. Exit is 0 or 1.
@@ -81,13 +116,14 @@ PASS
 ## Gotchas
 
 - **A `git push` or `gh pr create` already triggers a gate.** The
-  `PreToolUse` hook at `.claude/hooks/ci-before-push.sh` runs `just ci` in the
-  tree the command targets (only `dprint check` and `typos` when the outgoing
-  commits and the working tree change just markdown, `LICENSE` or `.beads/`)
-  and blocks the push if it fails. The hook runs the _narrower_ set, so this
-  skill is not redundant with it. Its timeout is **900 seconds**, and a timeout
-  lets the push through ungated, which a slow cold `cargo clippy` can cause.
-  Bypass one call with `SKIP_CI_HOOK=1 git push`.
+  `PreToolUse` hook at `.claude/hooks/ci-before-push.sh` runs this script in
+  the tree the command targets, as `--ci-only --fast --skip lockfile` with the
+  scopes of the outgoing commits and the working tree, and blocks the push if
+  it fails. That is the _narrower_ set, so a run of this skill is not redundant
+  with it. A tree without `scripts/changed-scopes.mjs` gets `just ci` instead.
+  Its timeout is **900 seconds**, and a timeout lets the push through ungated,
+  which a slow cold `cargo clippy` can cause. Bypass one call with
+  `SKIP_CI_HOOK=1 git push`.
 - **`cargo test` passing does not mean clippy passes.** Dead code is a warning
   to the test build and an error under clippy's `-D warnings`. Verified:
   an unused function leaves `rust-test` green and fails `clippy` with
@@ -129,4 +165,6 @@ PASS
 | `typos: Executable not found in $PATH`                | `cargo install typos-cli` — the binary is `typos`, the crate is `typos-cli`.                                                                           |
 | `dprint: Executable not found in $PATH`               | `cargo install dprint`.                                                                                                                                |
 | `no gate matches --only <id>`                         | Ids come from `--list`; they are short (`lint`, not `eslint`).                                                                                         |
+| `no changes vs origin/main` on a branch with work     | The work is already on `origin/main`, or the ref is stale. Run `git fetch`, or pass `--all`.                                                           |
+| A gate you expected did not run                       | Check the `scopes vs origin/main` lines. A path missing from a rule in `scripts/changed-scopes.mjs` runs everything, never less.                       |
 | Gate passes here, CI fails                            | Compare against `.github/workflows/ci.yml`. The gate table above mirrors it; if a check was added there, add a gate for it to `GATES` in `verify.mjs`. |
