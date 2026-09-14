@@ -1429,7 +1429,7 @@ async fn recipe_scale_preview_doubles_ingredients() {
 }
 
 #[tokio::test]
-async fn recipe_scale_flags_fractional_discrete() {
+async fn recipe_scale_rounds_and_flags_fractional_discrete() {
     let db = setup_db().await;
     let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
         .await
@@ -1439,8 +1439,16 @@ async fn recipe_scale_flags_fractional_discrete() {
     let ratio = 6.0 / recipe.servings as f64; // 4 → 6 servings (1.5x)
     let result = recipe_scaler::scale_ingredients(&ingredients, ratio);
 
-    // Flour: 2 * 1.5 = 3.0 cups → no flag (continuous unit)
-    // Eggs: 3 * 1.5 = 4.5 whole → flagged
+    // Flour: 2 * 1.5 = 3.0 cups is continuous, so it is neither rounded nor
+    // flagged. Eggs: 3 * 1.5 = 4.5 whole rounds to 5 and is flagged.
+    match &result.ingredients[0].amount {
+        IngredientAmountDto::Single { value } => assert_eq!(*value, 3.0),
+        _ => panic!("expected Single"),
+    }
+    match &result.ingredients[1].amount {
+        IngredientAmountDto::Single { value } => assert_eq!(*value, 5.0),
+        _ => panic!("expected Single"),
+    }
     assert_eq!(result.flagged.len(), 1);
     assert_eq!(result.flagged[0].name, "eggs");
     assert_eq!(result.flagged[0].scaled_value, 4.5);

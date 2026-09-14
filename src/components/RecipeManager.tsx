@@ -354,8 +354,8 @@ export function RecipeForm({
 /**
  * Recursive sub-row for the scaling preview's `or_alternative` chain.
  * The scaling preview keeps a column-aligned [amount w-16][unit w-12][label]
- * grid for the primary ingredient (the amount column is editable for
- * fractional-discrete units); each chained alt renders one matching row
+ * grid for the primary ingredient (the amount column is editable wherever
+ * the amount is a single value); each chained alt renders one matching row
  * underneath in italic muted text. Walks `or_alternative` recursively so
  * "milk or cream or water" surfaces all three levels — without this the
  * deeper alts would be hidden before the user saves the scaled recipe.
@@ -597,6 +597,24 @@ function ImportRecipeForm({
 
 // --- Scale Recipe Panel ---
 
+/**
+ * Formats a flag's pre-rounding value for the "Rounded from" hint, with up to
+ * three decimals and trailing zeros trimmed (1.495, 3.75). Up to six decimals
+ * are used instead whenever the three-decimal value would not round to the
+ * amount shown beside it.
+ */
+function formatRoundedFrom(scaledValue: number, roundedValue: number): string {
+  // Without the fallback, 0.9999 would read as 1, 1.49985 as 1.5 (which rounds
+  // to 2), and a clamped 0.0004 as 0.
+  const short = Number(scaledValue.toFixed(3))
+  // Positive amounts round half away from zero, which Math.round matches, and
+  // any positive amount below one half is clamped up to 1.
+  const clampedToOne = roundedValue === 1 && short > 0 && short < 0.5
+  const consistent = short !== roundedValue
+    && (Math.round(short) === roundedValue || clampedToOne)
+  return String(consistent ? short : Number(scaledValue.toFixed(6)))
+}
+
 export function ScaleRecipePanel({
   parsed,
   onSaveAsNew,
@@ -629,7 +647,7 @@ export function ScaleRecipePanel({
     )
   }
 
-  const flaggedIndices = new Set(preview?.flagged.map((f) => f.index) ?? [])
+  const flagsByIndex = new Map(preview?.flagged.map((f) => [f.index, f]) ?? [])
 
   const handleIngredientChange = (index: number, updated: Ingredient) => {
     if (!editedIngredients) return
@@ -677,8 +695,7 @@ export function ScaleRecipePanel({
         <>
           {preview.flagged.length > 0 && (
             <div className='mb-3 panel-warning text-amber-800 text-sm'>
-              Some ingredients have fractional amounts for discrete units. You can adjust them
-              below.
+              Some ingredients were rounded to whole amounts. Adjust them below if needed.
             </div>
           )}
 
@@ -695,7 +712,19 @@ export function ScaleRecipePanel({
               const ratio = original
                 ? ingredientRatio(ing.amount, original.amount)
                 : null
-              const isFlagged = flaggedIndices.has(i)
+              const flag = flagsByIndex.get(i)
+              const isFlagged = flag !== undefined
+              const previewed = preview.ingredients[i]?.amount
+              // A flag carries only a range's min, so a range row, including one
+              // that collapsed to a single amount, gets no hint. The hint also
+              // hides once the user overrides the rounded value.
+              const roundedFrom = flag !== undefined
+                  && parsed.ingredients[i]?.amount.type === 'single'
+                  && previewed?.type === 'single'
+                  && ing.amount.type === 'single'
+                  && ing.amount.value === previewed.value
+                ? formatRoundedFrom(flag.scaled_value, previewed.value)
+                : null
               return (
                 <div key={i}>
                   <div className='grid grid-cols-[6rem_minmax(6rem,8rem)_3rem_1fr_4rem] gap-2 items-center text-sm p-1'>
@@ -707,7 +736,13 @@ export function ScaleRecipePanel({
                         // Range amounts (e.g. "1-2 cups") aren't editable in
                         // place — committing as a single value would silently
                         // drop the max bound.
-                        <span className='font-medium tabular-nums'>{formatAmount(ing.amount)}</span>
+                        <span
+                          className={`font-medium tabular-nums ${
+                            isFlagged ? 'rounded border border-amber-300 px-1' : ''
+                          }`}
+                        >
+                          {formatAmount(ing.amount)}
+                        </span>
                       )
                       : (
                         <NumberInput
@@ -729,6 +764,11 @@ export function ScaleRecipePanel({
                       {formatRatio(ratio)}
                     </span>
                   </div>
+                  {roundedFrom !== null && (
+                    <p className='text-xs text-amber-700 ml-[6.75rem]'>
+                      Rounded from {roundedFrom}
+                    </p>
+                  )}
                   {ing.or_alternative && <ScalingPreviewAltRow ingredient={ing.or_alternative} />}
                 </div>
               )
