@@ -96,6 +96,25 @@ async fn update_recipe_with_out_of_range_rating_answers_400() {
 }
 
 #[tokio::test]
+async fn update_recipe_with_nonpositive_servings_answers_400() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, recipe_dto("Pasta"))
+        .await
+        .expect("seed recipe");
+
+    let (status, body) = send_json(
+        app(&db),
+        "PUT",
+        &format!("/api/recipes/{}", recipe.id),
+        serde_json::json!({ "servings": 0 }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(message(&body).contains("servings"), "{body}");
+}
+
+#[tokio::test]
 async fn update_recipe_with_unrecognized_time_unit_answers_400() {
     let db = setup_db().await;
     let recipe = RecipeService::create(&db, recipe_dto("Pasta"))

@@ -6,6 +6,7 @@
 //! actionable text through to the LLM.
 
 use crate::services::recipe_variant::VariantError;
+use crate::services::service_error::ValidationError;
 
 /// Error returned when a `create_meal` input references a person name or
 /// recipe slug that doesn't exist. The tool handler routes this through
@@ -96,10 +97,11 @@ pub enum InputError {
 impl std::fmt::Display for InputError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NonPositiveServings(n) => write!(
-                f,
-                "servings must be >= 1 (got {n}). Recipes need at least one serving so shopping-list scaling works."
-            ),
+            // The service layer enforces the same rule, so both surfaces share
+            // its message.
+            Self::NonPositiveServings(n) => {
+                write!(f, "{}", ValidationError::NonPositiveServings(*n))
+            }
             Self::NonPositiveServingsCount(n) => write!(
                 f,
                 "servings_count must be > 0 (got {n}). Use 0.5 for a half portion; negative or zero values would corrupt the shopping list."

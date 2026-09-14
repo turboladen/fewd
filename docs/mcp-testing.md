@@ -345,9 +345,9 @@ Substitute the slug of the recipe you seeded for `test-recipe` throughout.
 }
 ```
 
-Expect: the full updated recipe with `servings: 6` and the new note. Every field you did not send — name, instructions, ingredients, tags, nutrition — comes back exactly as it was.
+Expect: the full updated recipe with `servings: 6` and the new note. Every ingredient amount is rescaled from the seeded count to 6 servings (4 to 6 multiplies each by 1.5) and rounded to two decimals, so `get_shopping_list` quantities for meals using this recipe stay the same up to that rounding. Every other field you did not send — name, instructions, tags, nutrition — comes back exactly as it was.
 
-Note what that means for `servings`: the ingredient amounts are untouched, and `get_shopping_list` divides them by `servings`, so this call quietly cut every per-person quantity by a third. Sending `servings` alone is only correct when the stored count was wrong; a genuine resize has to send a rescaled `ingredients` array in the same call.
+Send `ingredients` alongside `servings` to set the amounts yourself; the list you send is stored as is, with no rescale. To correct a count that was recorded wrong, send the current ingredient list back unchanged with it.
 
 **Rename keeps the slug:**
 

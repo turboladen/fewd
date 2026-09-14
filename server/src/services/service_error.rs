@@ -54,6 +54,8 @@ pub enum ValidationError {
     NegativeTime { field: &'static str, value: i32 },
     /// The duration does not fit in whole minutes.
     TimeTooLarge { field: &'static str },
+    /// `servings` is below 1. Carries the count as the caller sent it.
+    NonPositiveServings(i32),
 }
 
 impl std::fmt::Display for ValidationError {
@@ -76,6 +78,10 @@ impl std::fmt::Display for ValidationError {
                     "{field} is too long to store as whole minutes. Use a shorter duration."
                 )
             }
+            Self::NonPositiveServings(n) => write!(
+                f,
+                "servings must be >= 1 (got {n}). Recipes need at least one serving so shopping-list scaling works."
+            ),
         }
     }
 }
@@ -134,6 +140,7 @@ mod tests {
                 ValidationError::UnrecognizedTimeUnit { field, .. }
                 | ValidationError::NegativeTime { field, .. }
                 | ValidationError::TimeTooLarge { field } => field,
+                ValidationError::NonPositiveServings(_) => "servings",
             }
         }
         let samples = [
@@ -149,6 +156,7 @@ mod tests {
             ValidationError::TimeTooLarge {
                 field: "total_time",
             },
+            ValidationError::NonPositiveServings(0),
         ];
         for err in samples {
             let message = err.to_string();

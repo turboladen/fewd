@@ -3,13 +3,42 @@ use std::collections::HashSet;
 use sea_orm::sea_query::Expr;
 use sea_orm::*;
 
-use crate::dto::{CreateRecipeDto, UpdateRecipeDto};
+use crate::dto::{CreateRecipeDto, IngredientDto, UpdateRecipeDto};
 use crate::entities::recipe::{self, Entity as Recipe};
+use crate::services::recipe_scaler::scale_ingredients;
 use crate::services::recipe_times::{resolve_times, SentTimes, StoredTimes};
-use crate::services::service_error::{whole_star_rating, ServiceError};
+use crate::services::service_error::{whole_star_rating, ServiceError, ValidationError};
 use crate::services::to_json;
 
 pub struct RecipeService;
+
+/// Scale `existing`'s stored ingredients from its servings to `new_servings`.
+///
+/// Returns `None` when the count is unchanged, or when the stored count is
+/// below 1 and so gives no ratio to scale by.
+///
+/// # Errors
+///
+/// Returns `DbErr::Custom` when the stored ingredients JSON does not parse.
+fn rescale_stored_ingredients(
+    existing: &recipe::Model,
+    new_servings: i32,
+) -> Result<Option<Vec<IngredientDto>>, DbErr> {
+    if new_servings == existing.servings || existing.servings < 1 {
+        return Ok(None);
+    }
+    let stored: Vec<IngredientDto> = serde_json::from_str(&existing.ingredients).map_err(|e| {
+        DbErr::Custom(format!(
+            "Failed to parse ingredients for recipe {}: {}",
+            existing.id, e
+        ))
+    })?;
+    let ratio = f64::from(new_servings) / f64::from(existing.servings);
+    // The flags for discrete units that come out fractional are dropped.
+    // The returned recipe shows those amounts, and rounding them here would
+    // compound across repeated servings edits.
+    Ok(Some(scale_ingredients(&stored, ratio).ingredients))
+}
 
 /// Trim each tag and drop the ones left empty.
 //
@@ -179,6 +208,12 @@ impl RecipeService {
         id: String,
         data: UpdateRecipeDto,
     ) -> Result<recipe::Model, ServiceError> {
+        // A count below 1 would scale every stored amount to zero or below,
+        // and nothing could scale them back.
+        if let Some(servings) = data.servings.filter(|&s| s < 1) {
+            return Err(ValidationError::NonPositiveServings(servings).into());
+        }
+
         let existing = Recipe::find_by_id(id)
             .one(db)
             .await?
@@ -196,6 +231,13 @@ impl RecipeService {
                 total_time: data.total_time,
             },
         )?;
+
+        // Ingredients sent alongside a new count are taken as already sized
+        // for it.
+        let rescaled = match (data.servings, &data.ingredients) {
+            (Some(servings), None) => rescale_stored_ingredients(&existing, servings)?,
+            _ => None,
+        };
 
         let mut recipe: recipe::ActiveModel = existing.into();
 
@@ -224,7 +266,7 @@ impl RecipeService {
         if let Some(instructions) = data.instructions {
             recipe.instructions = Set(instructions);
         }
-        if let Some(ingredients) = data.ingredients {
+        if let Some(ingredients) = data.ingredients.or(rescaled) {
             recipe.ingredients = Set(to_json(&ingredients)?);
         }
         if let Some(nutrition) = data.nutrition_per_serving {

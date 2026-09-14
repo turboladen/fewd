@@ -39,6 +39,13 @@ export function RecipeDetailPage() {
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [adaptDraft, setAdaptDraft] = useState<CreateRecipeDto | null>(null)
   const [scaleError, setScaleError] = useState<string | null>(null)
+  // This holds the servings and ingredients the edit form opened with, and
+  // the id of the recipe they came from. A refetch during editing changes the
+  // recipe but not this snapshot, so the refetched list cannot pass for an
+  // edit, and a remounted form still pairs the count with the list sized for it.
+  const [editSnapshot, setEditSnapshot] = useState<
+    { recipeId: string; servings: number; ingredients: Ingredient[] } | null
+  >(null)
 
   const isCooking = searchParams.get('mode') === 'cook'
   const { data: enhancedInstructions } = useEnhancedInstructions(
@@ -109,14 +116,36 @@ export function RecipeDetailPage() {
 
   const parsed = parseRecipe(recipe)
   const parentName = recipe.parent_name ?? null
+  // The Edit button clears the snapshot, and history navigation keeps this
+  // page mounted and in edit mode on another recipe, so both reach this block
+  // to snapshot the recipe the form opens on. A snapshot taken on a different
+  // recipe must not seed or judge this form in the meantime.
+  if (mode === 'edit' && editSnapshot?.recipeId !== recipe.id) {
+    setEditSnapshot({
+      recipeId: recipe.id,
+      servings: recipe.servings,
+      ingredients: parsed.ingredients,
+    })
+  }
+  const snapshot = editSnapshot?.recipeId === recipe.id ? editSnapshot : null
+  const editServings = snapshot?.servings ?? recipe.servings
+  const editIngredients = snapshot?.ingredients ?? parsed.ingredients
 
   const handleUpdate = (formData: RecipeFormData) => {
+    // Leaving an unedited list out lets the server rescale the stored amounts
+    // when servings change. An unedited count is left out too, so a count
+    // changed elsewhere during editing is not rescaled back to the old one.
+    // An edited list always carries the count it was sized for; the server
+    // never rescales a list it is sent.
+    const ingredientsEdited =
+      JSON.stringify(formData.ingredients) !== JSON.stringify(editIngredients)
+    const servingsEdited = formData.servings !== editServings
     const dto: UpdateRecipeDto = {
       name: formData.name,
-      servings: formData.servings,
+      servings: servingsEdited || ingredientsEdited ? formData.servings : undefined,
       portion_size: formData.portion_size,
       instructions: formData.instructions,
-      ingredients: formData.ingredients,
+      ingredients: ingredientsEdited ? formData.ingredients : undefined,
       tags: formData.tags,
       description: formData.description || undefined,
       prep_time: formData.prep_time,
@@ -248,10 +277,10 @@ export function RecipeDetailPage() {
         prep_time: parsed.prep_time ?? undefined,
         cook_time: parsed.cook_time ?? undefined,
         total_time: parsed.total_time ?? undefined,
-        servings: recipe.servings,
+        servings: editServings,
         portion_size: parsed.portion_size ?? undefined,
         instructions: recipe.instructions,
-        ingredients: parsed.ingredients,
+        ingredients: editIngredients,
         tags: parsed.tags,
         notes: recipe.notes || '',
         icon: recipe.icon || '',
@@ -265,7 +294,9 @@ export function RecipeDetailPage() {
           <h3 className='font-semibold text-lg mb-3'>
             {isAdaptEdit ? 'Edit Adapted Recipe' : `Edit ${recipe.name}`}
           </h3>
+          {/* The key remounts the form when history navigation lands on another recipe, so form state from the previous one cannot be saved onto it. */}
           <RecipeForm
+            key={recipe.id}
             initialData={formInitial}
             onSubmit={isAdaptEdit ? handleAdaptDraftSave : handleUpdate}
             onCancel={() => {
@@ -329,7 +360,10 @@ export function RecipeDetailPage() {
         <RecipeDetail
           parsed={parsed}
           parentName={parentName}
-          onEdit={() => setMode('edit')}
+          onEdit={() => {
+            setEditSnapshot(null)
+            setMode('edit')
+          }}
           onScale={() => setMode('scale')}
           onAdapt={() => setMode('adapt')}
           onCook={() =>
