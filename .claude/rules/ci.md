@@ -15,13 +15,13 @@ paths:
 
 Checks run against the base as it stood when the run started, so a push to the base branch or a retarget refreshes nothing until the PR's next push. Don't add `edited` to the trigger types to cover retargets: title and body edits would then re-run CI and cancel in-progress runs through the `concurrency` group.
 
-The Rust jobs run `cd server && cargo test --all-features` and `cd server && cargo clippy --all-targets --all-features -- -D warnings`. From a member directory, `cargo test` tests only the `fewd-server` package, so the migration crate's own tests do not run in CI.
+The Rust jobs run from the repo root. `cargo fmt --all` checks both packages at once, but clippy and `cargo test` run once per package: `-p fewd-server --all-features`, then `-p migration`. Don't merge them into one `--workspace` run, which is also what a bare `cargo test` or `cargo clippy` from the root does. Selecting both packages unifies the migration crate's dev-dependency features (`sqlx-sqlite` and `runtime-tokio-rustls` on sea-orm-migration) into the server build, so clippy and tests pass code that fails in the release build. Don't swap the `-p` flags for `cd server` either: from `server/`, bare cargo selects only `fewd-server`, so the migration crate's tests never run.
 
 ## Runner and toolchain notes
 
 All jobs run on `ubuntu-latest`; CI has no host-arch dependency because the dietpi deploy cross-compiles aarch64. These are easy to break:
 
-- **Rust caching is `Swatinem/rust-cache@v2`** with `workspaces: ". -> target"`. The cargo workspace manifest, `Cargo.lock`, and `target/` all live at the **repo root** (members `server`, `server/migration`), even though later steps `cd server`. Do NOT "correct" it to `server -> server/target`: that caches an empty directory, a silent no-op.
+- **Rust caching is `Swatinem/rust-cache@v2`** with `workspaces: ". -> target"`. The cargo workspace manifest, `Cargo.lock`, and `target/` all live at the **repo root** (members `server`, `server/migration`). Do NOT "correct" it to `server -> server/target`: that caches an empty directory, a silent no-op.
 - **`bun-version` is pinned** (`oven-sh/setup-bun@v2`, currently `1.3.14`); bumping bun means editing that pin.
 - **`bun install --frozen-lockfile`** fails CI on a stale `bun.lock`; after a dependency change, run `bun install` and commit the refreshed lockfile.
 - **Typos is installed via `taiki-e/install-action@v2` (`tool: typos`)**. The id is `typos`, not the crate name `typos-cli`.

@@ -276,7 +276,7 @@ just setup-remote user@host  # First-time server setup (creates user, dirs, syst
 just deploy user@host        # Build ARM64 + deploy + restart service
 
 # Testing & Linting
-just ci                    # Run all CI checks locally
+just ci                    # Run the fail-fast subset of the CI checks locally
 ```
 
 ## CI

@@ -2,7 +2,7 @@
 // Runs every gate `.github/workflows/ci.yml` enforces, plus a few it does
 // not, and reports all of them in one pass. Run from the repo root.
 //
-// The gate list below mirrors ci.yml step for step. When a step there
+// The gate list below mirrors every check ci.yml runs. When a check there
 // changes, change it here — a green run has to mean "this branch will pass
 // CI", and it stops meaning that the moment the two lists drift.
 
@@ -12,13 +12,12 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const SERVER = join(REPO, 'server');
 
 // `ci` gates block the merge. `extra` gates do not — they cover the two ways
 // this repo breaks after a green CI run: a type error that only `tsc` sees
 // (CI never runs the build) and a runtime break in the API/MCP surface.
 const GATES = [
-  { id: 'fmt', label: 'cargo fmt', tier: 'ci', cwd: SERVER, cmd: ['cargo', 'fmt', '--all', '--', '--check'] },
+  { id: 'fmt', label: 'cargo fmt', tier: 'ci', cmd: ['cargo', 'fmt', '--all', '--', '--check'] },
   { id: 'dprint', label: 'dprint check', tier: 'ci', cmd: ['dprint', 'check'] },
   { id: 'typos', label: 'typos', tier: 'ci', cmd: ['typos', '--config', '.typos.toml'] },
   // `bun install --frozen-lockfile` installs, so it runs before every gate
@@ -28,8 +27,12 @@ const GATES = [
   { id: 'lint', label: 'eslint', tier: 'ci', cmd: ['bun', 'run', 'lint'] },
   { id: 'types', label: 'tsc --noEmit', tier: 'extra', cmd: ['bunx', 'tsc', '--noEmit'] },
   { id: 'fe-test', label: 'vitest', tier: 'ci', cmd: ['bun', 'run', 'test'] },
-  { id: 'clippy', label: 'clippy', tier: 'ci', cwd: SERVER, cmd: ['cargo', 'clippy', '--all-targets', '--all-features', '--', '-D', 'warnings'] },
-  { id: 'rust-test', label: 'cargo test', tier: 'ci', cwd: SERVER, cmd: ['cargo', 'test', '--all-features'] },
+  // Clippy and tests run once per package, as ci.yml does. The comment on
+  // those steps in ci.yml explains why.
+  { id: 'clippy', label: 'clippy (fewd-server)', tier: 'ci', cmd: ['cargo', 'clippy', '-p', 'fewd-server', '--all-targets', '--all-features', '--', '-D', 'warnings'] },
+  { id: 'mig-clippy', label: 'clippy (migration)', tier: 'ci', cmd: ['cargo', 'clippy', '-p', 'migration', '--all-targets', '--', '-D', 'warnings'] },
+  { id: 'rust-test', label: 'cargo test (fewd-server)', tier: 'ci', cmd: ['cargo', 'test', '-p', 'fewd-server', '--all-features'] },
+  { id: 'mig-test', label: 'cargo test (migration)', tier: 'ci', cmd: ['cargo', 'test', '-p', 'migration'] },
   { id: 'smoke', label: 'API + MCP smoke', tier: 'extra', cmd: ['bun', '.claude/skills/run-fewd-server/driver.mjs', 'smoke'] },
   { id: 'migration', label: 'migration drift', tier: 'ci', slow: true, cmd: ['bash', 'scripts/migration-smoke-test.sh'] },
 ];
@@ -37,7 +40,7 @@ const GATES = [
 // Each fixer names the gate it rewrites for, so `--fix --only <id>` runs the
 // one fixer that gate needs instead of reformatting the whole repo.
 const FIXERS = [
-  { gate: 'fmt', label: 'cargo fmt', cwd: SERVER, cmd: ['cargo', 'fmt', '--all'] },
+  { gate: 'fmt', label: 'cargo fmt', cmd: ['cargo', 'fmt', '--all'] },
   { gate: 'dprint', label: 'dprint fmt', cmd: ['dprint', 'fmt'] },
   { gate: 'lint', label: 'eslint --fix', cmd: ['bun', 'run', 'lint:fix'] },
 ];
@@ -53,10 +56,10 @@ function selectGates({ fast, ciOnly, only }) {
   return gates;
 }
 
-function exec({ cmd, cwd }) {
+function exec({ cmd }) {
   return new Promise((res) => {
     const started = Date.now();
-    const p = spawn(cmd[0], cmd.slice(1), { cwd: cwd ?? REPO, stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(cmd[0], cmd.slice(1), { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     p.stdout.on('data', (d) => (out += d));
     p.stderr.on('data', (d) => (out += d));

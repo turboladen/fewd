@@ -34,12 +34,10 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          # Repo root, not `server/`: the cargo workspace manifest and
-          # Cargo.lock live at the repo root (members = server, server/migration)
-          # and cargo writes to `<root>/target` even though later steps `cd
-          # server`. This matches rust-cache's default; pinned explicitly so it
-          # isn't "corrected" to `server -> server/target`, which would cache an
-          # empty dir (the bug the old `path: server/target` cache silently hit).
+          # The cargo workspace manifest, Cargo.lock, and `target/` all live at
+          # the repo root (members = server, server/migration). This value
+          # matches rust-cache's default and is pinned so nobody "corrects" it
+          # to `server -> server/target`, which caches an empty directory.
           workspaces: ". -> target"
 
       # The server embeds the frontend bundle via RustEmbed (`folder =
@@ -50,13 +48,22 @@ jobs:
         run: mkdir -p dist && touch dist/.gitkeep
 
       - name: Check formatting
-        run: cd server && cargo fmt --all -- --check
+        run: cargo fmt --all -- --check
 
+      # Clippy and tests run once per package. A single invocation that selects
+      # both packages unifies the migration crate's dev-dependency features into
+      # the server build, which turns on sea-orm-migration's `sqlx-sqlite` and
+      # `runtime-tokio-rustls` features. The release binary builds without them,
+      # so a combined run passes code that fails in the release build.
       - name: Run clippy
-        run: cd server && cargo clippy --all-targets --all-features -- -D warnings
+        run: |
+          cargo clippy -p fewd-server --all-targets --all-features -- -D warnings
+          cargo clippy -p migration --all-targets -- -D warnings
 
       - name: Run tests
-        run: cd server && cargo test --all-features
+        run: |
+          cargo test -p fewd-server --all-features
+          cargo test -p migration
 
       # Boot the release binary against (a) a snapshot of the deployed
       # schema and (b) an empty DB, then probe the endpoints that 500'd
