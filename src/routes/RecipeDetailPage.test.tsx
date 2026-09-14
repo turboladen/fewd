@@ -1,5 +1,6 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
-import { Route, Routes } from 'react-router-dom'
+import type { QueryClient } from '@tanstack/react-query'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RecipeManager } from '../components/RecipeManager'
 import { makeRecipe } from '../test/factories'
@@ -8,6 +9,28 @@ import { renderWithProviders } from '../test/renderWithProviders'
 import type { Recipe } from '../types/recipe'
 import { RecipeDetailPage } from './RecipeDetailPage'
 
+// The real panel streams an adaptation from the AI endpoint. This stand-in
+// hands the page a finished draft, so a test can reach adapt-edit mode.
+vi.mock('../components/AdaptRecipePanel', () => ({
+  AdaptRecipePanel: ({ onEdit }: { onEdit: (draft: unknown) => void }) => (
+    <button
+      type='button'
+      onClick={() =>
+        onEdit({
+          name: 'Soup for Steve',
+          source: 'adapted',
+          parent_recipe_id: 'r2',
+          servings: 2,
+          instructions: 'Stir.',
+          ingredients: [],
+          tags: [],
+        })}
+    >
+      Use adapted draft
+    </button>
+  ),
+}))
+
 function renderDetail(path = '/recipes/r1') {
   return renderWithProviders(
     <Routes>
@@ -15,6 +38,50 @@ function renderDetail(path = '/recipes/r1') {
       <Route path='/recipes/:id' element={<RecipeDetailPage />} />
     </Routes>,
     { initialPath: path },
+  )
+}
+
+const isPut = ([, init]: Parameters<typeof fetch>) =>
+  (init as RequestInit | undefined)?.method === 'PUT'
+
+// Wait for the page to send its PUT, then return the parsed request body.
+async function sentPutBody() {
+  await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(isPut)).toBe(true))
+  const putCall = vi.mocked(fetch).mock.calls.find(isPut)
+  return JSON.parse((putCall![1] as RequestInit).body as string)
+}
+
+// TanStack Query hands refetched data to React on a later timer tick, so an
+// event fired straight after `refetchQueries` still runs against the old
+// render. Waiting out that tick makes the page see the refetched recipe.
+async function refetchAndRender(client: QueryClient, queryKey: string[]) {
+  await act(async () => {
+    await client.refetchQueries({ queryKey })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+}
+
+function HistoryButtons() {
+  const navigate = useNavigate()
+  return (
+    <>
+      <button type='button' onClick={() => navigate('/recipes/soup')}>Go to soup</button>
+      <button type='button' onClick={() => navigate(-1)}>Go back</button>
+    </>
+  )
+}
+
+// Render the detail page under buttons that move through history, starting on
+// the pasta recipe.
+function renderWithHistory() {
+  return renderWithProviders(
+    <>
+      <HistoryButtons />
+      <Routes>
+        <Route path='/recipes/:id' element={<RecipeDetailPage />} />
+      </Routes>
+    </>,
+    { initialPath: '/recipes/pasta' },
   )
 }
 
@@ -116,8 +183,228 @@ describe('RecipeDetailPage', () => {
     expect(putCall).toBeDefined()
     const putBody = JSON.parse((putCall![1] as RequestInit).body as string)
     expect(putBody.name).toBe('Pasta v2')
+    // Untouched servings and ingredients stay out of the body.
+    expect(putBody).not.toHaveProperty('servings')
+    expect(putBody).not.toHaveProperty('ingredients')
 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['recipes'] })
+  })
+
+  describe('edit form ingredients payload', () => {
+    // A Tomato amount of 2 keeps its input distinct from the servings input,
+    // which shows 4.
+    const tomatoRecipe = () =>
+      makeRecipe({
+        id: 'r1',
+        ingredients: JSON.stringify([
+          { name: 'Tomato', amount: { type: 'single', value: 2 }, unit: 'cups' },
+        ]),
+      })
+
+    async function editAndSave(edit: () => void) {
+      const recipe = tomatoRecipe()
+      mockJson('GET', '/api/recipes/r1', recipe)
+      renderDetail()
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'Pasta' })).toBeInTheDocument()
+      )
+      fireEvent.click(screen.getByRole('button', { name: /Edit/ }))
+
+      mockJson('PUT', '/api/recipes/r1', recipe)
+      edit()
+      fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+      return { putBody: await sentPutBody() }
+    }
+
+    it('a servings-only edit leaves ingredients out so the server rescales them', async () => {
+      const { putBody } = await editAndSave(() => {
+        fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '6' } })
+      })
+      expect(putBody.servings).toBe(6)
+      expect(putBody).not.toHaveProperty('ingredients')
+    })
+
+    it('an ingredient edit sends the full ingredient list', async () => {
+      const { putBody } = await editAndSave(() => {
+        fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '6' } })
+        fireEvent.change(screen.getByDisplayValue('2'), { target: { value: '3' } })
+      })
+      expect(putBody.servings).toBe(6)
+      expect(putBody.ingredients).toEqual([
+        { name: 'Tomato', amount: { type: 'single', value: 3 }, unit: 'cups' },
+      ])
+    })
+
+    describe('after another client resizes the recipe during editing', () => {
+      // The form stays open on 4 servings while a refetch brings in the same
+      // recipe resized to 8.
+      async function editResizeElsewhereAndSave(edit: () => void) {
+        const recipe = tomatoRecipe()
+        mockJson('GET', '/api/recipes/r1', recipe)
+        const { client } = renderDetail()
+        await waitFor(() =>
+          expect(screen.getByRole('heading', { name: 'Pasta' })).toBeInTheDocument()
+        )
+        fireEvent.click(screen.getByRole('button', { name: /Edit/ }))
+
+        const resized: Recipe = {
+          ...recipe,
+          servings: 8,
+          ingredients: JSON.stringify([
+            { name: 'Tomato', amount: { type: 'single', value: 4 }, unit: 'cups' },
+          ]),
+        }
+        mockJson('GET', '/api/recipes/r1', resized)
+        await refetchAndRender(client, ['recipes', 'r1'])
+
+        mockJson('PUT', '/api/recipes/r1', resized)
+        edit()
+        fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+        return sentPutBody()
+      }
+
+      it('an untouched count stays out, so the resize is not scaled back', async () => {
+        const putBody = await editResizeElsewhereAndSave(() => {
+          fireEvent.change(screen.getByDisplayValue('Pasta'), { target: { value: 'Pasta v2' } })
+        })
+        expect(putBody.name).toBe('Pasta v2')
+        expect(putBody).not.toHaveProperty('servings')
+        expect(putBody).not.toHaveProperty('ingredients')
+      })
+
+      it('an ingredients-only edit sends the count the list was sized for', async () => {
+        const putBody = await editResizeElsewhereAndSave(() => {
+          fireEvent.change(screen.getByDisplayValue('2'), { target: { value: '3' } })
+        })
+        expect(putBody.servings).toBe(4)
+        expect(putBody.ingredients).toEqual([
+          { name: 'Tomato', amount: { type: 'single', value: 3 }, unit: 'cups' },
+        ])
+      })
+    })
+  })
+
+  it('a refetch during editing does not make untouched ingredients look edited', async () => {
+    // The form keeps the ingredients it opened with. A background refetch
+    // that changes the stored list must not turn those into an explicit
+    // ingredients write, which would skip the server rescale.
+    const recipe = makeRecipe({
+      id: 'r1',
+      ingredients: JSON.stringify([
+        { name: 'Tomato', amount: { type: 'single', value: 2 }, unit: 'cups' },
+      ]),
+    })
+    mockJson('GET', '/api/recipes/r1', recipe)
+    const { client } = renderDetail()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Pasta' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Edit/ }))
+
+    const changedElsewhere: Recipe = {
+      ...recipe,
+      ingredients: JSON.stringify([
+        { name: 'Tomato', amount: { type: 'single', value: 7 }, unit: 'cups' },
+      ]),
+    }
+    mockJson('GET', '/api/recipes/r1', changedElsewhere)
+    await refetchAndRender(client, ['recipes', 'r1'])
+
+    fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '6' } })
+    mockJson('PUT', '/api/recipes/r1', changedElsewhere)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    const putBody = await sentPutBody()
+    expect(putBody.servings).toBe(6)
+    expect(putBody).not.toHaveProperty('ingredients')
+  })
+
+  it('history navigation while editing reseeds the form from the recipe it lands on', async () => {
+    // Every recipe shares one mounted page, so an edit form opened on one
+    // recipe must not be saved onto the recipe that Back lands on.
+    const pasta = makeRecipe({ id: 'r1', slug: 'pasta', name: 'Pasta' })
+    const soup = makeRecipe({ id: 'r2', slug: 'soup', name: 'Soup', servings: 2 })
+    mockJson('GET', '/api/recipes/pasta', pasta)
+    mockJson('GET', '/api/recipes/soup', soup)
+    renderWithHistory()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Pasta' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go to soup' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Soup' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Edit/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Go back' }))
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Edit Pasta' })).toBeInTheDocument()
+    )
+
+    mockJson('PUT', '/api/recipes/r1', pasta)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    const putBody = await sentPutBody()
+    expect(putBody.name).toBe('Pasta')
+    // The form reseeded from Pasta, so its untouched count is not sent.
+    expect(putBody).not.toHaveProperty('servings')
+  })
+
+  it('a refetch after history navigation does not make untouched ingredients look edited', async () => {
+    // A form that Back lands on was opened without the Edit button, so it
+    // needs its own snapshot for a refetch to leave the list unedited.
+    const tomatoes = (value: number) =>
+      JSON.stringify([{ name: 'Tomato', amount: { type: 'single', value }, unit: 'cups' }])
+    const pasta = makeRecipe({ id: 'r1', slug: 'pasta', name: 'Pasta', ingredients: tomatoes(2) })
+    const soup = makeRecipe({ id: 'r2', slug: 'soup', name: 'Soup', servings: 2 })
+    mockJson('GET', '/api/recipes/pasta', pasta)
+    mockJson('GET', '/api/recipes/soup', soup)
+    const { client } = renderWithHistory()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Pasta' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go to soup' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Soup' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Edit/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Go back' }))
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Edit Pasta' })).toBeInTheDocument()
+    )
+    await waitFor(() => expect(screen.getByDisplayValue('2')).toBeInTheDocument())
+
+    const changedElsewhere: Recipe = { ...pasta, ingredients: tomatoes(7) }
+    mockJson('GET', '/api/recipes/pasta', changedElsewhere)
+    await refetchAndRender(client, ['recipes', 'pasta'])
+
+    fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '6' } })
+    mockJson('PUT', '/api/recipes/r1', changedElsewhere)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    const putBody = await sentPutBody()
+    expect(putBody.servings).toBe(6)
+    expect(putBody).not.toHaveProperty('ingredients')
+  })
+
+  it('history navigation while editing an adapted draft drops the draft', async () => {
+    // A draft adapted from Soup must not be offered for saving on the recipe
+    // that Back lands on.
+    const pasta = makeRecipe({ id: 'r1', slug: 'pasta', name: 'Pasta' })
+    const soup = makeRecipe({ id: 'r2', slug: 'soup', name: 'Soup', servings: 2 })
+    mockJson('GET', '/api/recipes/pasta', pasta)
+    mockJson('GET', '/api/recipes/soup', soup)
+    renderWithHistory()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Pasta' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go to soup' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Soup' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Adapt/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use adapted draft' }))
+    expect(screen.getByRole('heading', { name: 'Edit Adapted Recipe' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go back' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Pasta' })).toBeInTheDocument())
+    expect(screen.queryByRole('heading', { name: 'Edit Adapted Recipe' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save Adapted Recipe' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Edit Pasta' })).not.toBeInTheDocument()
+
+    // Returning to Soup does not bring the dropped draft back.
+    fireEvent.click(screen.getByRole('button', { name: 'Go to soup' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Soup' })).toBeInTheDocument())
+    expect(screen.queryByRole('heading', { name: 'Edit Adapted Recipe' })).not.toBeInTheDocument()
   })
 
   describe('cooking mode', () => {

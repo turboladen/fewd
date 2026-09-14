@@ -576,6 +576,228 @@ async fn recipe_update_partial() {
     assert_eq!(updated.servings, 6);
     // Instructions unchanged
     assert_eq!(updated.instructions, "Mix and cook");
+    // Going from 4 servings to 6 without new ingredients scales every stored
+    // amount by 1.5. A discrete count keeps its fractional value.
+    let stored = stored_ingredients(&updated.ingredients);
+    assert_eq!(single_value(&stored[0]), 3.0, "flour");
+    assert_eq!(single_value(&stored[1]), 4.5, "eggs");
+}
+
+fn stored_ingredients(json: &str) -> Vec<IngredientDto> {
+    serde_json::from_str(json).expect("stored ingredients parse")
+}
+
+fn single_value(ingredient: &IngredientDto) -> f64 {
+    match &ingredient.amount {
+        IngredientAmountDto::Single { value } => *value,
+        IngredientAmountDto::Range { .. } => panic!("{} has a range amount", ingredient.name),
+    }
+}
+
+#[tokio::test]
+async fn recipe_update_servings_with_ingredients_stores_them_unscaled() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let mut sent = test_recipe_dto("Pasta").ingredients;
+    sent.truncate(1);
+    sent[0].amount = IngredientAmountDto::Single { value: 5.0 };
+
+    let update = UpdateRecipeDto {
+        servings: Some(6),
+        ingredients: Some(sent),
+        ..Default::default()
+    };
+    let updated = RecipeService::update(&db, recipe.id, update).await.unwrap();
+
+    assert_eq!(updated.servings, 6);
+    let stored = stored_ingredients(&updated.ingredients);
+    assert_eq!(stored.len(), 1);
+    assert_eq!(single_value(&stored[0]), 5.0);
+}
+
+#[tokio::test]
+async fn recipe_update_same_servings_leaves_ingredients_untouched() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+
+    let update = UpdateRecipeDto {
+        servings: Some(4),
+        ..Default::default()
+    };
+    let updated = RecipeService::update(&db, recipe.id, update).await.unwrap();
+
+    assert_eq!(updated.servings, 4);
+    assert_eq!(updated.ingredients, recipe.ingredients);
+}
+
+#[tokio::test]
+async fn recipe_update_servings_rescales_ranges_and_alternatives() {
+    let db = setup_db().await;
+    let mut dto = test_recipe_dto("Garlic Bread");
+    dto.ingredients = vec![IngredientDto {
+        name: "garlic".to_string(),
+        prep: Some("minced".to_string()),
+        amount: IngredientAmountDto::Range { min: 2.0, max: 3.0 },
+        unit: "clove".to_string(),
+        notes: Some("fresh".to_string()),
+        or_alternative: Some(Box::new(IngredientDto {
+            name: "garlic powder".to_string(),
+            prep: None,
+            amount: IngredientAmountDto::Single { value: 0.5 },
+            unit: "tsp".to_string(),
+            notes: None,
+            or_alternative: None,
+        })),
+    }];
+    let recipe = RecipeService::create(&db, dto).await.unwrap();
+
+    let update = UpdateRecipeDto {
+        servings: Some(8),
+        ..Default::default()
+    };
+    let updated = RecipeService::update(&db, recipe.id, update).await.unwrap();
+
+    let stored = stored_ingredients(&updated.ingredients);
+    // Only the amounts change; every other ingredient field survives the rescale.
+    let garlic = &stored[0];
+    assert_eq!(
+        (
+            garlic.name.as_str(),
+            garlic.prep.as_deref(),
+            garlic.unit.as_str(),
+            garlic.notes.as_deref(),
+        ),
+        ("garlic", Some("minced"), "clove", Some("fresh")),
+    );
+    match &stored[0].amount {
+        IngredientAmountDto::Range { min, max } => assert_eq!((*min, *max), (4.0, 6.0)),
+        IngredientAmountDto::Single { .. } => panic!("garlic must keep its range"),
+    }
+    let alternative = stored[0].or_alternative.as_ref().expect("alternative kept");
+    assert_eq!(single_value(alternative), 1.0);
+}
+
+#[tokio::test]
+async fn recipe_update_from_nonpositive_stored_servings_skips_rescale() {
+    // A stored count below 1 gives no ratio to scale by, so the update only
+    // repairs the count.
+    // The row is written directly, so this test does not depend on whether
+    // `create` accepts a count below 1.
+    let db = setup_db().await;
+    let created = RecipeService::create(&db, test_recipe_dto("Broken Pasta"))
+        .await
+        .unwrap();
+    let mut row = created.into_active_model();
+    row.servings = Set(0);
+    let recipe = fewd_lib::entities::recipe::Entity::update(row)
+        .exec(&db)
+        .await
+        .unwrap();
+
+    let update = UpdateRecipeDto {
+        servings: Some(4),
+        ..Default::default()
+    };
+    let updated = RecipeService::update(&db, recipe.id, update).await.unwrap();
+
+    assert_eq!(updated.servings, 4);
+    assert_eq!(updated.ingredients, recipe.ingredients);
+}
+
+#[tokio::test]
+async fn recipe_update_rejects_nonpositive_servings_without_writing() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+
+    for servings in [0, -1] {
+        let update = UpdateRecipeDto {
+            name: Some("Renamed".to_string()),
+            servings: Some(servings),
+            ..Default::default()
+        };
+        let result = RecipeService::update(&db, recipe.id.clone(), update).await;
+        assert!(
+            matches!(
+                result,
+                Err(ServiceError::Validation(ValidationError::NonPositiveServings(n))) if n == servings
+            ),
+            "servings {servings} must be rejected: {result:?}"
+        );
+    }
+
+    let reloaded = RecipeService::get_by_id(&db, recipe.id)
+        .await
+        .unwrap()
+        .expect("recipe still exists");
+    assert_eq!(reloaded.name, "Pasta");
+    assert_eq!(reloaded.servings, 4);
+    assert_eq!(reloaded.ingredients, recipe.ingredients);
+}
+
+#[tokio::test]
+async fn shopping_quantities_survive_a_servings_change() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+    MealService::create(
+        &db,
+        CreateMealDto {
+            date: "2025-06-10".to_string(),
+            meal_type: MealType::Dinner,
+            order_index: 2,
+            servings: vec![PersonServingDto::Recipe {
+                person_id: person.id,
+                recipe_id: recipe.id.clone(),
+                servings_count: 1.0,
+                notes: None,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+    let totals = || async {
+        let list = ShoppingService::get_shopping_list(
+            &db,
+            "2025-06-09".to_string(),
+            "2025-06-15".to_string(),
+        )
+        .await
+        .unwrap();
+        let mut totals: Vec<(String, f64)> = list
+            .into_iter()
+            .map(|agg| match agg.total_amount {
+                Some(IngredientAmountDto::Single { value }) => (agg.ingredient_name, value),
+                other => panic!("{} totals to {other:?}", agg.ingredient_name),
+            })
+            .collect();
+        totals.sort_by(|a, b| a.0.cmp(&b.0));
+        totals
+    };
+    let before = totals().await;
+
+    let update = UpdateRecipeDto {
+        servings: Some(6),
+        ..Default::default()
+    };
+    RecipeService::update(&db, recipe.id, update).await.unwrap();
+    let after = totals().await;
+
+    assert_eq!(before.len(), 2, "{before:?}");
+    assert_eq!(before.len(), after.len());
+    for ((name, was), (after_name, now)) in before.iter().zip(&after) {
+        assert_eq!(name, after_name, "{before:?} vs {after:?}");
+        assert!((was - now).abs() < 1e-9, "{name}: {was} became {now}");
+    }
 }
 
 #[tokio::test]

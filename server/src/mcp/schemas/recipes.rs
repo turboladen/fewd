@@ -432,11 +432,14 @@ pub struct UpdateRecipeInput {
     /// `prep_time`.
     #[serde(default)]
     pub total_time: Option<TimeOut>,
-    /// Servings the recipe is authored for. Must be at least 1. Changing
-    /// this does NOT rescale `ingredients`: the shopping list divides the
-    /// stored amounts by this number, so a genuine resize has to send a
-    /// rescaled `ingredients` array in the same call. Send it alone only to
-    /// correct a count that was recorded wrong.
+    /// Servings the recipe is authored for. Must be at least 1. A new count
+    /// sent without `ingredients` rescales every stored amount, alternatives
+    /// included, by the ratio of new to old servings. Scaled amounts round to
+    /// two decimals, and a discrete count such as eggs can come out
+    /// fractional, so check the returned `ingredients`. Send `ingredients` in
+    /// the same call to set the amounts yourself; nothing is rescaled then.
+    /// To correct a count that was recorded wrong, send the current
+    /// `ingredients` back unchanged with it.
     #[serde(default)]
     pub servings: Option<i32>,
     /// How big one serving is, as a `{value, unit}` pair — e.g.

@@ -620,7 +620,7 @@ impl FewdMcp {
 
     #[tool(
         name = "update_recipe",
-        description = "Revise an existing recipe when the user corrects or improves one already in the catalog — call `search_recipes` or `get_recipe` FIRST for the `slug` and current values (use `create_recipe` when the dish isn't in the catalog, or `adapt_recipe` to save a changed copy and keep the original). Returns the full updated recipe. Only the fields you send are written: omitted or null fields are left unchanged, and a blank string is ignored except for `name`, which is rejected. List and structured fields REPLACE the stored value whole: a partial `ingredients` array deletes every ingredient you left out, so send the complete list back. Changing `servings` does not rescale `ingredients`, so send both to resize. An invalid field, such as a time `unit` other than minutes, hours, or days, rejects the whole call and writes nothing. Not writable here: `is_favorite` (call `favorite_recipe`), `rating` (call `rate_recipe`, or `unrate_recipe` to clear it), `source`, `source_url`, the parent recipe, and the slug. Example: {\"slug\":\"beef-taco-bowls\",\"notes\":\"double the chili powder\"}",
+        description = "Revise an existing recipe when the user corrects or improves one already in the catalog — call `search_recipes` or `get_recipe` FIRST for the `slug` and current values (use `create_recipe` when the dish isn't in the catalog, or `adapt_recipe` to save a changed copy and keep the original). Returns the full updated recipe. Only the fields you send are written, except that a new `servings` sent without `ingredients` rescales the stored ingredients. Omitted or null fields are otherwise unchanged, and a blank string is ignored except for `name`, which is rejected. List and structured fields REPLACE the stored value whole: a partial `ingredients` array deletes every ingredient you left out, so send the complete list back. An invalid field, such as a time `unit` other than minutes, hours, or days, rejects the whole call and writes nothing. Not writable here: `is_favorite` (call `favorite_recipe`), `rating` (call `rate_recipe`, or `unrate_recipe` to clear it), `source`, `source_url`, the parent recipe, and the slug. Example: {\"slug\":\"beef-taco-bowls\",\"notes\":\"double the chili powder\"}",
         input_schema = rmcp::handler::server::common::schema_for_type::<UpdateRecipeInput>()
     )]
     async fn update_recipe(
@@ -2508,11 +2508,21 @@ mod tests {
 
         let reloaded = reload_recipe(&mcp, &seeded.slug).await;
         assert_eq!(reloaded.servings, 6);
+        // Going from 4 servings to 6 rescales the stored amounts by 1.5.
+        let stored: Vec<IngredientDto> =
+            serde_json::from_str(&reloaded.ingredients).expect("stored ingredients parse");
+        let amounts: Vec<(&str, f64)> = stored
+            .iter()
+            .map(|ing| match ing.amount {
+                IngredientAmountDto::Single { value } => (ing.name.as_str(), value),
+                IngredientAmountDto::Range { .. } => panic!("{} has a range amount", ing.name),
+            })
+            .collect();
+        assert_eq!(amounts, [("garlic", 3.0), ("olive oil", 1.5)]);
         // Everything else survives byte-for-byte from the seed.
         assert_eq!(reloaded.name, seeded.name);
         assert_eq!(reloaded.description, seeded.description);
         assert_eq!(reloaded.instructions, seeded.instructions);
-        assert_eq!(reloaded.ingredients, seeded.ingredients);
         assert_eq!(reloaded.tags, seeded.tags);
         assert_eq!(reloaded.notes, seeded.notes);
         assert_eq!(reloaded.icon, seeded.icon);
@@ -2617,6 +2627,41 @@ mod tests {
         assert_eq!(stored[0].name, "ground beef");
         // Replacing one list must leave the other alone.
         assert_eq!(reloaded.tags, seeded.tags);
+    }
+
+    #[tokio::test]
+    async fn update_recipe_servings_with_ingredients_stores_them_unscaled() {
+        // Sending both fields sets the amounts explicitly, so the sent list
+        // is stored as is rather than rescaled to the new count.
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let input: UpdateRecipeInput = serde_json::from_value(serde_json::json!({
+            "slug": seeded.slug,
+            "servings": 8,
+            "ingredients": [{
+                "name": "ground beef",
+                "amount": { "kind": "single", "value": 1.0 },
+                "unit": "pound",
+            }],
+        }))
+        .expect("UpdateRecipeInput deserializes");
+        let result = mcp
+            .update_recipe(LenientParameters::for_test(input))
+            .await
+            .expect("update_recipe returns Ok");
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+
+        let reloaded = reload_recipe(&mcp, &seeded.slug).await;
+        assert_eq!(reloaded.servings, 8);
+        let stored: Vec<IngredientDto> =
+            serde_json::from_str(&reloaded.ingredients).expect("stored ingredients parse");
+        assert_eq!(stored.len(), 1);
+        assert!(
+            matches!(stored[0].amount, IngredientAmountDto::Single { value } if value == 1.0),
+            "{:?}",
+            stored[0].amount
+        );
     }
 
     #[tokio::test]
@@ -2870,7 +2915,8 @@ mod tests {
         assert_eq!(after.servings, 6, "the in-scope field must have changed");
         assert!(after.is_favorite);
         assert_eq!(after.rating, Some(5.0));
-        assert_recipe_unchanged_except(&before, &after, &["servings"]);
+        // A servings change rescales the stored ingredients too.
+        assert_recipe_unchanged_except(&before, &after, &["servings", "ingredients"]);
     }
 
     // ─── favorite_recipe ────────────────────────────────────────────
