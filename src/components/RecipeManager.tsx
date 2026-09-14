@@ -13,6 +13,7 @@ import {
 } from '../hooks/useRecipes'
 import type {
   CreateRecipeDto,
+  EnhanceResult,
   Ingredient,
   ParsedRecipe,
   PortionSize,
@@ -810,23 +811,24 @@ export function RecipeDetail({
   onCancelDelete: () => void
 }) {
   const [enhancedMode, setEnhancedMode] = useState(false)
-  const [enhancedText, setEnhancedText] = useState<string | null>(null)
+  // The whole result is cached, a zero count included, so toggling again never refetches.
+  const [enhanceResult, setEnhanceResult] = useState<EnhanceResult | null>(null)
   const enhanceMutation = useEnhanceInstructions()
+  const nothingToAdd = enhanceResult?.injection_count === 0
 
   const handleToggleEnhanced = () => {
     if (enhancedMode) {
       setEnhancedMode(false)
       return
     }
-    // Fetch enhanced instructions if not cached
-    if (enhancedText) {
-      setEnhancedMode(true)
+    if (enhanceResult) {
+      setEnhancedMode(enhanceResult.injection_count > 0)
       return
     }
     enhanceMutation.mutate(parsed.id, {
-      onSuccess: (text) => {
-        setEnhancedText(text)
-        setEnhancedMode(true)
+      onSuccess: (result) => {
+        setEnhanceResult(result)
+        setEnhancedMode(result.injection_count > 0)
       },
     })
   }
@@ -996,11 +998,16 @@ export function RecipeDetail({
                   : 'Enhanced view'}
               </button>
             )}
+            {nothingToAdd && (
+              <span className='text-xs text-stone-500 print:hidden'>No amounts to add</span>
+            )}
           </div>
           {parsed.instructions
             ? (
               <RecipeMarkdown
-                markdown={enhancedMode && enhancedText ? enhancedText : parsed.instructions}
+                markdown={enhancedMode && enhanceResult
+                  ? enhanceResult.enhanced_text
+                  : parsed.instructions}
                 variant='detail'
               />
             )

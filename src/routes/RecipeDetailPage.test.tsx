@@ -409,10 +409,10 @@ describe('RecipeDetailPage', () => {
 
   describe('cooking mode', () => {
     // Cook mode auto-fetches enhanced instructions. Default to a benign
-    // empty-string success so each test can opt into specific behavior
-    // (or override with a later mockJson call).
+    // success that placed nothing, so each test can opt into specific
+    // behavior (or override with a later mockJson call).
     beforeEach(() => {
-      mockJson('POST', '/api/recipes/r1/enhance', '')
+      mockJson('POST', '/api/recipes/r1/enhance', { enhanced_text: '', injection_count: 0 })
     })
 
     it('renders CookingView (not the standard detail view) when ?mode=cook is set', async () => {
@@ -490,7 +490,10 @@ describe('RecipeDetailPage', () => {
       const pasta = makeRecipe({ id: 'r1', name: 'Pasta', instructions: 'Plain step.' })
       mockJson('GET', '/api/recipes/r1', pasta)
       // Enhanced version returns a punchier rewrite with markdown bold.
-      mockJson('POST', '/api/recipes/r1/enhance', 'Bring water to a **rolling boil**.')
+      mockJson('POST', '/api/recipes/r1/enhance', {
+        enhanced_text: 'Bring water to a **rolling boil**.',
+        injection_count: 1,
+      })
 
       renderDetail('/recipes/r1?mode=cook')
 
@@ -501,6 +504,28 @@ describe('RecipeDetailPage', () => {
       await waitFor(() => expect(screen.queryByText('Plain step.')).not.toBeInTheDocument())
       const boldCallout = await screen.findByText('rolling boil')
       expect(boldCallout.tagName).toBe('STRONG')
+    })
+
+    it('keeps plain instructions when the enhance request placed no amounts', async () => {
+      const pasta = makeRecipe({ id: 'r1', name: 'Pasta', instructions: 'Plain step.' })
+      mockJson('GET', '/api/recipes/r1', pasta)
+      mockJson('POST', '/api/recipes/r1/enhance', {
+        enhanced_text: 'Reflowed step.',
+        injection_count: 0,
+      })
+
+      const { client } = renderDetail('/recipes/r1?mode=cook')
+
+      // The plain step shows before the enhance response lands, so wait for the
+      // query to succeed and for React to see it before checking what stayed.
+      await waitFor(() =>
+        expect(client.getQueryState(['recipes', 'r1', 'enhanced'])?.status).toBe('success')
+      )
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      expect(await screen.findByText('Plain step.')).toBeInTheDocument()
+      expect(screen.queryByText('Reflowed step.')).not.toBeInTheDocument()
     })
 
     it('falls back to plain instructions if the enhance request fails', async () => {

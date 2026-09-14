@@ -51,7 +51,7 @@ export function RecipeDetailPage() {
   >(null)
 
   const isCooking = searchParams.get('mode') === 'cook'
-  const { data: enhancedInstructions } = useEnhancedInstructions(
+  const { data: enhanced } = useEnhancedInstructions(
     recipe?.id ?? '',
     isCooking && !!recipe,
   )
@@ -259,7 +259,11 @@ export function RecipeDetailPage() {
       <CookingView
         parsed={parsed}
         onExit={exitCooking}
-        enhancedInstructions={enhancedInstructions ?? undefined}
+        // Text with nothing injected can still differ from the original in its
+        // line endings, and a different text resets saved cooking progress.
+        enhancedInstructions={enhanced && enhanced.injection_count > 0
+          ? enhanced.enhanced_text
+          : undefined}
       />
     )
   }
@@ -368,6 +372,9 @@ export function RecipeDetailPage() {
       {backLink}
       <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
         <RecipeDetail
+          // History navigation can keep this page mounted on another cached
+          // recipe; the key keeps one recipe's enhanced view off the next.
+          key={recipe.id}
           parsed={parsed}
           parentName={parentName}
           onEdit={() => {

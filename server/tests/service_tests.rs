@@ -1482,12 +1482,13 @@ async fn recipe_enhance_injects_amounts() {
     let recipe = RecipeService::create(&db, dto).await.unwrap();
 
     let ingredients: Vec<IngredientDto> = serde_json::from_str(&recipe.ingredients).unwrap();
-    let enhanced = recipe_enhancer::enhance_instructions(&ingredients, &recipe.instructions);
+    let result = recipe_enhancer::enhance_instructions(&ingredients, &recipe.instructions);
 
     // flour (2 cups) should be injected in first line
-    assert!(enhanced.contains("**2 cups flour**"));
+    assert!(result.enhanced_text.contains("**2 cups flour**"));
     // eggs (3 whole) should be injected in second line
-    assert!(enhanced.contains("**3 whole eggs**"));
+    assert!(result.enhanced_text.contains("**3 whole eggs**"));
+    assert_eq!(result.injection_count, 2);
 }
 
 #[tokio::test]
@@ -1499,11 +1500,11 @@ async fn recipe_enhance_skips_already_numbered() {
     let recipe = RecipeService::create(&db, dto).await.unwrap();
 
     let ingredients: Vec<IngredientDto> = serde_json::from_str(&recipe.ingredients).unwrap();
-    let enhanced = recipe_enhancer::enhance_instructions(&ingredients, &recipe.instructions);
+    let result = recipe_enhancer::enhance_instructions(&ingredients, &recipe.instructions);
 
     // Should NOT inject because "flour" already has "2 cups" before it
-    assert!(!enhanced.contains("**"));
-    assert_eq!(enhanced, "Add 2 cups flour to bowl.");
+    assert_eq!(result.enhanced_text, "Add 2 cups flour to bowl.");
+    assert_eq!(result.injection_count, 0);
 }
 
 // --- SeedData Tests ---

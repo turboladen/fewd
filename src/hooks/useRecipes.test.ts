@@ -255,8 +255,9 @@ describe('usePreviewScaleRecipe', () => {
 })
 
 describe('useEnhanceInstructions', () => {
-  it('POSTs to /api/recipes/:id/enhance and returns a string with no invalidation', async () => {
-    mockJson('POST', '/api/recipes/r1/enhance', 'Stir until fragrant.')
+  it('POSTs to /api/recipes/:id/enhance and returns the result with no invalidation', async () => {
+    const enhanced = { enhanced_text: 'Stir **1 tsp cumin** until fragrant.', injection_count: 1 }
+    mockJson('POST', '/api/recipes/r1/enhance', enhanced)
     const { Wrapper, client } = createQueryWrapper()
     const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
 
@@ -266,7 +267,7 @@ describe('useEnhanceInstructions', () => {
     })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
-    expect(result.current.data).toBe('Stir until fragrant.')
+    expect(result.current.data).toEqual(enhanced)
     expect(invalidateSpy).not.toHaveBeenCalled()
   })
 })
