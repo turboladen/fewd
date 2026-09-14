@@ -5,12 +5,19 @@ import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['dist', 'eslint.config.js'] },
+  // Git worktrees under `.claude/worktrees/` are separate checkouts that lint
+  // themselves with their own copy of this config.
+  { ignores: ['dist', 'eslint.config.js', '.claude/worktrees/**'] },
   {
     files: ['src/**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     languageOptions: {
       ecmaVersion: 2020,
+      // typescript-eslint throws when one ESLint run has loaded more than one
+      // eslint.config.js that reads its presets and no root is pinned. Passing
+      // paths from both the main checkout and a worktree loads both configs, so
+      // pin this config's directory.
+      parserOptions: { tsconfigRootDir: import.meta.dirname },
       // Mirror the old eslintrc `env: { browser: true, es2020: true }`: browser
       // DOM globals + the ES2020 built-ins (Promise, Map, Set, globalThis, …).
       globals: { ...globals.browser, ...globals.es2020 },
