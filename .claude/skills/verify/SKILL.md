@@ -104,8 +104,8 @@ PASS
   release binary rebuilds, and minutes from a cold `target/`.
 - **The `migration` gate needs port 3099 free.** It pre-flights and fails in
   0.1s with `Port 3099 is already bound (PID …)` rather than spending the build
-  first. `just db-reset` uses the same port. Set `SMOKE_TEST_PORT` to move it.
-  The `smoke` gate binds `PORT=0`, so it needs no free port of its own.
+  first. Set `SMOKE_TEST_PORT` to move it. The `smoke` gate binds `PORT=0`, so
+  it needs no free port of its own.
 - **Formatters exit non-zero when they leave something behind.** In `--fix`,
   `left issues it cannot fix` next to eslint means unused variables or type
   errors remain — the gate run below names them.
@@ -121,7 +121,7 @@ PASS
 | Symptom                                               | Fix                                                                                                                                                    |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `error: lockfile had changes, but lockfile is frozen` | `package.json` moved without `bun.lock`. Run `bun install` and commit the refreshed lockfile.                                                          |
-| `Port 3099 is already bound`                          | A `just db-reset` or an earlier smoke run is still up. `lsof -nP -iTCP:3099 -sTCP:LISTEN` and kill it, or `SMOKE_TEST_PORT=3199`.                      |
+| `Port 3099 is already bound`                          | An earlier smoke run is still up. `lsof -nP -iTCP:3099 -sTCP:LISTEN` and kill it, or `SMOKE_TEST_PORT=3199`.                                           |
 | `typos: Executable not found in $PATH`                | `cargo install typos-cli` — the binary is `typos`, the crate is `typos-cli`.                                                                           |
 | `dprint: Executable not found in $PATH`               | `cargo install dprint`.                                                                                                                                |
 | `no gate matches --only <id>`                         | Ids come from `--list`; they are short (`lint`, not `eslint`).                                                                                         |

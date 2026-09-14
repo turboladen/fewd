@@ -1,10 +1,9 @@
 arm64_target := "aarch64-unknown-linux-gnu"
 
 # Development: run Axum + Vite concurrently (http://localhost:5173).
-# Cargo is invoked from the workspace root (no `cd server`) so `cargo run`
-# resolves DATABASE_PATH's `./data/fewd.db` default against the project
-# root, not `server/data/`. Avoids silently creating a parallel dev DB
-# whenever any other invocation runs from the project root.
+# Cargo runs from the workspace root (no `cd server`), so DATABASE_PATH's
+# `./data/fewd.db` default resolves against the project root. A server started
+# from `server/` would create a parallel `server/data/fewd.db` instead.
 #
 # RUST_LOG defaults to `info` so server boot, migration application
 # (`sea_orm_migration::Migrator::up` logs each applied migration at info
@@ -94,34 +93,73 @@ ci:
 smoke-test:
     bash scripts/migration-smoke-test.sh
 
-# Reset the dev DB: delete the files, then start the server briefly so
-# startup migrations (and seed_if_empty) apply to a fresh database.
-# Uses PORT=3099 to avoid colliding with a running `just dev`.
+# Like `just dev`, this recipe runs from the workspace root, so the database it
+# resets is `data/fewd.db` unless DATABASE_PATH names another file. It refuses
+# to run while a process holds that file open, such as a busy `just dev`, though
+# an idle server with no open connections escapes the check. It boots on an
+# ephemeral port (PORT=0), so it never competes with `just dev` or the
+# migration smoke test for a port.
+#
+# Delete the dev DB, then boot the server once to migrate and seed a fresh file.
 db-reset:
     #!/usr/bin/env bash
     set -euo pipefail
-    rm -f server/data/fewd.db server/data/fewd.db-shm server/data/fewd.db-wal
-    echo "DB files removed. Building server..."
-    (cd server && cargo build --bin fewd-server --quiet)
-    echo "Running migrations on fresh DB..."
-    LOG=$(mktemp)
-    # `exec` so the subshell *becomes* fewd-server; otherwise $! is the
-    # subshell PID and `kill` only signals the wrapper, leaving the server
-    # orphaned and still bound to PORT (fewd-jx9).
-    (cd server && exec env PORT=3099 RUST_LOG=info ../target/debug/fewd-server >"$LOG" 2>&1) &
-    SERVER_PID=$!
-    # Migrations complete before axum binds; wait for the "Server running" log.
-    for _ in $(seq 1 100); do
-        if grep -q "Server running" "$LOG" 2>/dev/null; then break; fi
-        sleep 0.1
-    done
-    kill "$SERVER_PID" 2>/dev/null || true
-    wait "$SERVER_PID" 2>/dev/null || true
-    if ! grep -q "Server running" "$LOG"; then
-        echo "⚠️  Server did not report ready within 10s. Log:"
-        cat "$LOG"
-        rm -f "$LOG"
+    # An empty DATABASE_PATH usually means a caller's variable failed to expand.
+    # Falling back to the default then would wipe the dev database, so refuse.
+    if [ -n "${DATABASE_PATH+set}" ] && [ -z "$DATABASE_PATH" ]; then
+        echo "DATABASE_PATH is set but empty. Unset it to reset data/fewd.db, or name a file." >&2
         exit 1
     fi
-    rm -f "$LOG"
-    echo "✅ Fresh DB at server/data/fewd.db with migrations applied."
+    DB="${DATABASE_PATH:-data/fewd.db}"
+    if ! command -v lsof >/dev/null; then
+        echo "db-reset needs lsof to check whether a server has $DB open." >&2
+        exit 1
+    fi
+    refuse_if_open() {
+        local holders
+        if [ -e "$DB" ] && holders=$(lsof -t -- "$DB" 2>/dev/null); then
+            echo "$DB is open in PID(s) $(paste -sd' ' - <<<"$holders"). Stop that server (a running just dev?) and rerun." >&2
+            exit 1
+        fi
+    }
+    refuse_if_open
+    # Build before deleting, so a compile error leaves the existing DB in place.
+    echo "Resetting $DB. Building server..."
+    cargo build --bin fewd-server --quiet
+    # Check again, because a `just dev` that finished compiling during this
+    # build can have opened the file since.
+    refuse_if_open
+    rm -f -- "$DB" "$DB-shm" "$DB-wal" "$DB-journal"
+    echo "DB files removed. Running migrations on fresh DB..."
+    LOG=$(mktemp)
+    SERVER_PID=""
+    cleanup() {
+        if [ -n "$SERVER_PID" ]; then
+            kill "$SERVER_PID" 2>/dev/null || true
+            wait "$SERVER_PID" 2>/dev/null || true
+        fi
+        rm -f "$LOG"
+    }
+    trap cleanup EXIT
+    # `exec` so the subshell *becomes* fewd-server; otherwise $! is the
+    # subshell PID and `kill` only signals the wrapper, leaving the server
+    # orphaned and still bound to the port.
+    (exec env PORT=0 DATABASE_PATH="$DB" RUST_LOG=info ./target/debug/fewd-server >"$LOG" 2>&1) &
+    SERVER_PID=$!
+    # Migrations complete before axum binds; wait for the "Server running" log,
+    # and stop waiting as soon as the server exits.
+    for _ in $(seq 1 100); do
+        if grep -q "Server running" "$LOG" 2>/dev/null; then break; fi
+        if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
+        sleep 0.1
+    done
+    if ! grep -q "Server running" "$LOG"; then
+        if kill -0 "$SERVER_PID" 2>/dev/null; then
+            echo "⚠️  Server did not report ready within 10s. Log:" >&2
+        else
+            echo "⚠️  Server exited before reporting ready. Log:" >&2
+        fi
+        cat "$LOG" >&2
+        exit 1
+    fi
+    echo "✅ Fresh DB at $DB with migrations applied."

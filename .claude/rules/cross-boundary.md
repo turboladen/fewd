@@ -24,4 +24,4 @@ Ingredient amounts are tagged `{"type":"single"}` over `/api` and `{"kind":"sing
 
 ## Database path
 
-The server reads `DATABASE_PATH`, defaulting to `./data/fewd.db` relative to its working directory. `just dev` runs `cargo run --bin fewd-server` from the workspace root, so the dev database is `data/fewd.db`; the deployed unit sets `/opt/fewd/data/fewd.db`. Never run the server from `server/`: that creates a parallel `server/data/fewd.db` that silently drifts from the one the UI reads. `bun run dev:server`, `bun run dev:full`, and `just db-reset` currently do exactly that, so use `just dev`.
+The server reads `DATABASE_PATH`, defaulting to `./data/fewd.db` relative to its working directory. `just dev`, `just db-reset`, `bun run dev:server`, and `bun run dev:full` all run the server from the workspace root, so the dev database is `data/fewd.db`; the deployed unit sets `/opt/fewd/data/fewd.db`. Never run the server from `server/`: that creates a parallel `server/data/fewd.db` that silently drifts from the one the UI reads.
