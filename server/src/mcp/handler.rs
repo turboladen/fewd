@@ -2340,8 +2340,8 @@ mod tests {
         // backdooring a "clear" that the codebase invariant rules out.
         // A regression that removed the trim-coerce-to-None step in
         // `update_person_input_to_dto` would silently let that through;
-        // this test catches it end-to-end. See `UpdatePersonInput` rustdoc
-        // for the full rationale.
+        // this test catches it end-to-end. The comment above
+        // `UpdatePersonInput` gives the full rationale.
         let mcp = setup_test_mcp().await;
         seed_person(&mcp, "Alice").await;
 
@@ -3722,20 +3722,34 @@ mod tests {
     // and neither looks at the prose between.
 
     // Pull the identifier-shaped spans out of a description: text between
-    // backticks made only of lowercase letters, digits, and underscores.
-    // Anything containing a space, brace, or quote is a code fragment or
-    // a JSON example rather than a name.
+    // backticks that starts with a lowercase letter and holds only lowercase
+    // letters, digits, underscores, and hyphens, so hyphenated diet tags such
+    // as `gluten-free` count. Anything with a space, brace, quote, or
+    // parenthesis is a code fragment or a JSON example rather than a name, and
+    // a span that starts with a digit or a hyphen is a literal such as a date.
     fn backticked_identifiers(description: &str) -> Vec<&str> {
         description
             .split('`')
             .skip(1)
             .step_by(2)
             .filter(|s| {
-                !s.is_empty()
-                    && s.chars()
-                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                let mut chars = s.chars();
+                chars.next().is_some_and(|c| c.is_ascii_lowercase())
+                    && chars.all(|c| {
+                        c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-'
+                    })
             })
             .collect()
+    }
+
+    #[test]
+    fn backticked_identifiers_keeps_hyphenated_names_and_skips_literals() {
+        let text = "Tag `gluten-free` via `search_recipes`, not `search_recipes(tags=[...])`, \
+                    `2026-02-30`, `-`, `{\"a\":1}`, or ``.";
+        assert_eq!(
+            backticked_identifiers(text),
+            vec!["gluten-free", "search_recipes"]
+        );
     }
 
     // Collect every doc string an input schema ships: each string-valued
