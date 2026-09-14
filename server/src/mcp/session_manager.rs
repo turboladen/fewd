@@ -28,7 +28,7 @@ use rmcp::{serve_server, RoleServer, Service};
 use uuid::Uuid;
 
 /// Caps how many deleted session ids are remembered at once.
-const TOMBSTONE_CAP: usize = 1024;
+const TOMBSTONE_CAP: usize = 32;
 
 /// How long a deleted id stays refused when sessions never expire.
 const TOMBSTONE_TTL_WITHOUT_KEEP_ALIVE: Duration = Duration::from_secs(60 * 60 * 24 * 7);
@@ -53,7 +53,7 @@ const REBUILD_CLIENT_NAME: &str = "fewd-session-rebuild";
 /// sampling nor elicitation.
 ///
 /// A deleted id stays refused for the session keep-alive (7 days when
-/// sessions never expire) or until 1024 newer deletions displace it. The
+/// sessions never expire) or until 32 newer deletions displace it. The
 /// record lives only in memory, so the id can be rebuilt after a restart.
 ///
 /// Callers must authenticate requests before they reach this manager,

@@ -88,14 +88,13 @@ pub fn router(db: DatabaseConnection) -> Router {
         move || Ok::<_, std::io::Error>(FewdMcp::new(db.clone()))
     };
 
-    // rmcp reaps a session after 5 idle minutes by default. A reaped or
-    // restart-lost id is rebuilt on its next request, but a rebuilt session
-    // reports placeholder client info, so keeping live sessions for 7 days
-    // leaves normal walk-away-and-come-back usage on the original session.
-    // The reaper stays on so sessions of clients that crash without sending
-    // DELETE do not pile up in memory.
+    // An idle session is freed after 12 hours, which keeps memory low on the
+    // small deploy box. A short keep-alive is safe because the session
+    // manager rebuilds a freed session under the same id on its next request,
+    // so the client never has to reconnect. The keep-alive also frees sessions
+    // of clients that crash without sending DELETE.
     let mut session_config = SessionConfig::default();
-    session_config.keep_alive = Some(Duration::from_secs(60 * 60 * 24 * 7));
+    session_config.keep_alive = Some(Duration::from_secs(60 * 60 * 12));
     let session_manager = ReattachingSessionManager::new(session_config, handler_factory.clone());
 
     let default_config = StreamableHttpServerConfig::default();
