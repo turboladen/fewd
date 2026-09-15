@@ -149,8 +149,11 @@ answer 200 within ~2s of boot.
   `mcp-session-id` **response header** → `notifications/initialized` (expect
   **202**) → `tools/call`. rmcp serves `initialize` from `get_info(&self)`,
   which never reads request extensions, so the authenticated identity only
-  reaches tools after the notification. A session id the server doesn't know
-  gets **404**, not 401.
+  reaches tools after the notification. An authenticated request with a session
+  id the server doesn't know gets a fresh session under that id when the id is
+  a lowercase hyphenated UUID, so ids survive a restart. A malformed id, or one
+  recently deleted with `DELETE` on this server process, gets **404**. Without
+  a token, any request gets **401** first.
 - **A token exists only after you mint one.** `POST /api/people/{id}/mcp-token`
   returns the plaintext exactly once. It **requires a JSON body** — `-d '{}'`
   with `Content-Type: application/json`; without one it's **415**, by design
@@ -192,6 +195,6 @@ answer 200 within ~2s of boot.
 | `driver: no running instance`                                                        | `api`/`mcp`/`tool` need `up` first; `smoke` tears itself down.                                                                                                                                                                                          |
 | `tools/call → 401: {"error":"invalid or revoked token"}`                             | The token in `state.json` was revoked, or the instance was rebooted onto a fresh DB. Re-run `up`.                                                                                                                                                       |
 | `tools/call → 401: {"error":"missing Authorization: Bearer <mcp-token>"}`            | Hand-rolled request without the header. Mint one via `POST /api/people/{id}/mcp-token`.                                                                                                                                                                 |
-| MCP call returns 404                                                                 | Stale `mcp-session-id`; the driver clears it and re-handshakes automatically. Hand-rolled clients must redo `initialize`.                                                                                                                               |
+| MCP call returns 404                                                                 | The `mcp-session-id` is malformed or was recently deleted on this process; a well-formed unknown id reattaches instead. The driver clears it and re-handshakes automatically. Hand-rolled clients must redo `initialize`.                               |
 | `no JSON frame in MCP response`                                                      | The body was not SSE. The status code is in the message just above it — start there.                                                                                                                                                                    |
 | `<tool>: missing field 'x'. Check the tool's input schema.`                          | Read the real schema with the `tools/list` snippet above; MCP inputs are not the HTTP DTOs.                                                                                                                                                             |
