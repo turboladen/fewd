@@ -291,28 +291,37 @@ describe('ScaleRecipePanel', () => {
       name: 'Test Recipe',
       servings: 4,
       ingredients: JSON.stringify([
-        { name: 'eggs', amount: { type: 'single', value: 3 }, unit: '' },
+        { name: 'eggs', amount: { type: 'single', value: 3 }, unit: 'whole' },
         { name: 'milk', amount: { type: 'single', value: 1 }, unit: 'cup' },
       ]),
     }))
   }
 
+  function makeParsedGarlicRange(): ParsedRecipe {
+    return parseRecipe(makeRecipe({
+      id: 'r1',
+      name: 'Test Recipe',
+      servings: 4,
+      ingredients: JSON.stringify([
+        { name: 'garlic', amount: { type: 'range', min: 2, max: 3 }, unit: 'clove' },
+      ]),
+    }))
+  }
+
+  // Scaling from 4 to 5 servings: 3.75 eggs round to 4, and milk stays exact.
   function makeScaleResult(): ScaleResult {
     return {
       ingredients: [
-        { name: 'eggs', amount: { type: 'single', value: 3.75 }, unit: '' },
+        { name: 'eggs', amount: { type: 'single', value: 4 }, unit: 'whole' },
         { name: 'milk', amount: { type: 'single', value: 1.25 }, unit: 'cup' },
       ],
       flagged: [
-        { index: 0, name: 'eggs', scaled_value: 3.75, unit: '' },
+        { index: 0, name: 'eggs', scaled_value: 3.75, unit: 'whole' },
       ],
     }
   }
 
-  it('renders an editable input for every ingredient row after Preview', async () => {
-    const parsed = makeParsed()
-    mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
-
+  function renderPanel(parsed: ParsedRecipe) {
     renderWithProviders(
       <ScaleRecipePanel
         parsed={parsed}
@@ -321,62 +330,48 @@ describe('ScaleRecipePanel', () => {
         onCancel={() => {}}
       />,
     )
+  }
 
-    const servingsInput = screen.getByDisplayValue('4')
-    fireEvent.change(servingsInput, { target: { value: '5' } })
+  function previewServings(from: string, to: string) {
+    fireEvent.change(screen.getByDisplayValue(from), { target: { value: to } })
     fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+  }
+
+  it('renders an editable input for every ingredient row after Preview', async () => {
+    mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
+    renderPanel(makeParsed())
+    previewServings('4', '5')
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue('3.75')).toBeInTheDocument()
+      expect(screen.getByLabelText('eggs amount')).toHaveDisplayValue('4')
       expect(screen.getByDisplayValue('1.25')).toBeInTheDocument()
     })
   })
 
   it('updates only the edited row’s ratio cell when the user changes its value', async () => {
-    const parsed = makeParsed()
     mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
-
-    renderWithProviders(
-      <ScaleRecipePanel
-        parsed={parsed}
-        onSaveAsNew={() => {}}
-        onUpdateInPlace={() => {}}
-        onCancel={() => {}}
-      />,
-    )
-
-    fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '5' } })
-    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+    renderPanel(makeParsed())
+    previewServings('4', '5')
 
     await waitFor(() => expect(screen.getByDisplayValue('1.25')).toBeInTheDocument())
 
-    // Both rows coincidentally land at 1.25× (eggs 3.75/3, milk 1.25/1), so
-    // the assertion below needs `getAllByText` to match both at this point.
-    expect(screen.getAllByText('1.25×')).toHaveLength(2)
+    // Eggs land at 4/3 and milk at 1.25/1.
+    expect(screen.getByText('1.33×')).toBeInTheDocument()
+    expect(screen.getByText('1.25×')).toBeInTheDocument()
 
     fireEvent.change(screen.getByDisplayValue('1.25'), { target: { value: '1.5' } })
 
     await waitFor(() => {
       expect(screen.getByText('1.5×')).toBeInTheDocument()
-      expect(screen.getByText('1.25×')).toBeInTheDocument()
+      expect(screen.queryByText('1.25×')).not.toBeInTheDocument()
+      expect(screen.getByText('1.33×')).toBeInTheDocument()
     })
   })
 
   it('discards local edits when the user re-Previews with a different target', async () => {
-    const parsed = makeParsed()
     mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
-
-    renderWithProviders(
-      <ScaleRecipePanel
-        parsed={parsed}
-        onSaveAsNew={() => {}}
-        onUpdateInPlace={() => {}}
-        onCancel={() => {}}
-      />,
-    )
-
-    fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '5' } })
-    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+    renderPanel(makeParsed())
+    previewServings('4', '5')
 
     await waitFor(() => expect(screen.getByDisplayValue('1.25')).toBeInTheDocument())
 
@@ -385,34 +380,22 @@ describe('ScaleRecipePanel', () => {
 
     mockJson('POST', '/api/recipes/r1/scale', {
       ingredients: [
-        { name: 'eggs', amount: { type: 'single', value: 4.5 }, unit: '' },
+        { name: 'eggs', amount: { type: 'single', value: 5 }, unit: 'whole' },
         { name: 'milk', amount: { type: 'single', value: 1.5 }, unit: 'cup' },
       ],
-      flagged: [{ index: 0, name: 'eggs', scaled_value: 4.5, unit: '' }],
+      flagged: [{ index: 0, name: 'eggs', scaled_value: 4.5, unit: 'whole' }],
     })
 
-    fireEvent.change(screen.getByDisplayValue('5'), { target: { value: '6' } })
-    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+    previewServings('5', '6')
 
     await waitFor(() => expect(screen.getByDisplayValue('1.5')).toBeInTheDocument())
     expect(screen.queryByDisplayValue('7.7')).not.toBeInTheDocument()
   })
 
   it('does not collapse the row to 0 when the user clears the input mid-typing', async () => {
-    const parsed = makeParsed()
     mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
-
-    renderWithProviders(
-      <ScaleRecipePanel
-        parsed={parsed}
-        onSaveAsNew={() => {}}
-        onUpdateInPlace={() => {}}
-        onCancel={() => {}}
-      />,
-    )
-
-    fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '5' } })
-    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+    renderPanel(makeParsed())
+    previewServings('4', '5')
     await waitFor(() => expect(screen.getByDisplayValue('1.25')).toBeInTheDocument())
 
     fireEvent.change(screen.getByDisplayValue('1.25'), { target: { value: '' } })
@@ -423,7 +406,6 @@ describe('ScaleRecipePanel', () => {
   })
 
   it('renders range-typed amounts as static text so the max bound is not silently dropped on edit', async () => {
-    const parsed = makeParsed()
     // Range amount on the milk row — would silently flatten to single on
     // first keystroke if it rendered as an editable number input.
     mockJson(
@@ -431,29 +413,202 @@ describe('ScaleRecipePanel', () => {
       '/api/recipes/r1/scale',
       {
         ingredients: [
-          { name: 'eggs', amount: { type: 'single', value: 3.75 }, unit: '' },
+          { name: 'eggs', amount: { type: 'single', value: 4 }, unit: 'whole' },
           { name: 'milk', amount: { type: 'range', min: 1.25, max: 1.75 }, unit: 'cup' },
         ],
         flagged: [],
       } satisfies ScaleResult,
     )
-
-    renderWithProviders(
-      <ScaleRecipePanel
-        parsed={parsed}
-        onSaveAsNew={() => {}}
-        onUpdateInPlace={() => {}}
-        onCancel={() => {}}
-      />,
-    )
-
-    fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '5' } })
-    fireEvent.click(screen.getByRole('button', { name: /preview/i }))
+    renderPanel(makeParsed())
+    previewServings('4', '5')
 
     // Eggs is single → editable input.
-    await waitFor(() => expect(screen.getByDisplayValue('3.75')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByLabelText('eggs amount')).toHaveDisplayValue('4'))
     // Milk is range → rendered as text "1.25-1.75", not an input.
     expect(screen.getByText('1.25-1.75')).toBeInTheDocument()
     expect(screen.queryByLabelText('milk amount')).not.toBeInTheDocument()
+  })
+
+  it('shows the rounding banner and the pre-rounding value on a rounded single row', async () => {
+    mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
+    renderPanel(makeParsed())
+    previewServings('4', '5')
+
+    await waitFor(() => expect(screen.getByText('Rounded from 3.75')).toBeInTheDocument())
+    expect(screen.getByText(/rounded to whole amounts/i)).toBeInTheDocument()
+    // The rounded value stays editable, so the user can override it.
+    expect(screen.getByLabelText('eggs amount')).toHaveDisplayValue('4')
+  })
+
+  it('hides the pre-rounding hint once the user overrides the rounded value', async () => {
+    mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
+    renderPanel(makeParsed())
+    previewServings('4', '5')
+    await waitFor(() => expect(screen.getByText('Rounded from 3.75')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('eggs amount'), { target: { value: '3' } })
+    expect(screen.queryByText(/rounded from/i)).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('eggs amount'), { target: { value: '4' } })
+    expect(screen.getByText('Rounded from 3.75')).toBeInTheDocument()
+  })
+
+  it('shows no banner or hint when nothing was rounded', async () => {
+    mockJson(
+      'POST',
+      '/api/recipes/r1/scale',
+      {
+        ingredients: [
+          { name: 'eggs', amount: { type: 'single', value: 6 }, unit: 'whole' },
+          { name: 'milk', amount: { type: 'single', value: 2 }, unit: 'cup' },
+        ],
+        flagged: [],
+      } satisfies ScaleResult,
+    )
+    renderPanel(makeParsed())
+    previewServings('4', '8')
+
+    await waitFor(() => expect(screen.getByLabelText('eggs amount')).toHaveDisplayValue('6'))
+    expect(screen.queryByText(/rounded to whole amounts/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/rounded from/i)).not.toBeInTheDocument()
+  })
+
+  it('shows the banner but no pre-rounding hint on a rounded range row', async () => {
+    // 2-3 cloves at 1.5x is 3-4.5, which rounds to 3-5. The flag carries only
+    // the min, so a hint would wrongly say "rounded from 3".
+    mockJson(
+      'POST',
+      '/api/recipes/r1/scale',
+      {
+        ingredients: [
+          { name: 'garlic', amount: { type: 'range', min: 3, max: 5 }, unit: 'clove' },
+        ],
+        flagged: [{ index: 0, name: 'garlic', scaled_value: 3, unit: 'clove' }],
+      } satisfies ScaleResult,
+    )
+    renderPanel(makeParsedGarlicRange())
+    previewServings('4', '6')
+
+    await waitFor(() => expect(screen.getByText('3-5')).toBeInTheDocument())
+    expect(screen.getByText(/rounded to whole amounts/i)).toBeInTheDocument()
+    expect(screen.queryByText(/rounded from/i)).not.toBeInTheDocument()
+    // The row itself carries the same amber cue as a flagged single row, so the
+    // banner points at something the user can find.
+    expect(screen.getByText('3-5')).toHaveClass('border-amber-300')
+  })
+
+  it('renders a range that collapsed to a single amount as an input without a hint', async () => {
+    // 2-3 cloves at 0.25x is 0.5-0.75, and both bounds round to 1.
+    mockJson(
+      'POST',
+      '/api/recipes/r1/scale',
+      {
+        ingredients: [
+          { name: 'garlic', amount: { type: 'single', value: 1 }, unit: 'clove' },
+        ],
+        flagged: [{ index: 0, name: 'garlic', scaled_value: 0.5, unit: 'clove' }],
+      } satisfies ScaleResult,
+    )
+    renderPanel(makeParsedGarlicRange())
+    previewServings('4', '1')
+
+    await waitFor(() => expect(screen.getByLabelText('garlic amount')).toHaveDisplayValue('1'))
+    expect(screen.getByText(/rounded to whole amounts/i)).toBeInTheDocument()
+    expect(screen.queryByText(/rounded from/i)).not.toBeInTheDocument()
+  })
+
+  it('shows the hint for a unitless count with the value the rounding used', async () => {
+    // 2.99 eggs with no unit at 0.5x is 1.495, which rounds to 1. A two-decimal
+    // hint would say 1.5 beside a 1.
+    const parsed = parseRecipe(makeRecipe({
+      id: 'r1',
+      name: 'Test Recipe',
+      servings: 4,
+      ingredients: JSON.stringify([
+        { name: 'eggs', amount: { type: 'single', value: 2.99 }, unit: '' },
+      ]),
+    }))
+    mockJson(
+      'POST',
+      '/api/recipes/r1/scale',
+      {
+        ingredients: [{ name: 'eggs', amount: { type: 'single', value: 1 }, unit: '' }],
+        flagged: [{ index: 0, name: 'eggs', scaled_value: 1.495, unit: '' }],
+      } satisfies ScaleResult,
+    )
+    renderPanel(parsed)
+    previewServings('4', '2')
+
+    await waitFor(() => expect(screen.getByText('Rounded from 1.495')).toBeInTheDocument())
+    expect(screen.getByLabelText('eggs amount')).toHaveDisplayValue('1')
+  })
+
+  function mockSingleEggFlag(value: number, scaledValue: number) {
+    mockJson(
+      'POST',
+      '/api/recipes/r1/scale',
+      {
+        ingredients: [
+          { name: 'eggs', amount: { type: 'single', value }, unit: 'whole' },
+          { name: 'milk', amount: { type: 'single', value: 2 }, unit: 'cup' },
+        ],
+        flagged: [{ index: 0, name: 'eggs', scaled_value: scaledValue, unit: 'whole' }],
+      } satisfies ScaleResult,
+    )
+  }
+
+  it('shows a value just off a whole number at up to three decimals', async () => {
+    mockSingleEggFlag(2, 2.004)
+    renderPanel(makeParsed())
+    previewServings('4', '8')
+
+    await waitFor(() => expect(screen.getByText('Rounded from 2.004')).toBeInTheDocument())
+    expect(screen.getByLabelText('eggs amount')).toHaveDisplayValue('2')
+  })
+
+  it('shows up to six decimals when three would equal the rounded amount', async () => {
+    // 0.9999 at three decimals is 1, which would read "Rounded from 1" beside a 1.
+    mockSingleEggFlag(1, 0.9999)
+    renderPanel(makeParsed())
+    previewServings('4', '8')
+
+    await waitFor(() => expect(screen.getByText('Rounded from 0.9999')).toBeInTheDocument())
+    expect(screen.queryByText('Rounded from 1')).not.toBeInTheDocument()
+  })
+
+  it('shows up to six decimals when three would round to a different amount', async () => {
+    // 1.49985 at three decimals is 1.5, which rounds to 2, not the 1 shown.
+    mockSingleEggFlag(1, 1.49985)
+    renderPanel(makeParsed())
+    previewServings('4', '8')
+
+    await waitFor(() => expect(screen.getByText('Rounded from 1.49985')).toBeInTheDocument())
+  })
+
+  it('shows up to six decimals when a clamped amount would read as zero', async () => {
+    // 0.0004 at three decimals is 0, which would read as nothing beside the clamped 1.
+    mockSingleEggFlag(1, 0.0004)
+    renderPanel(makeParsed())
+    previewServings('4', '8')
+
+    await waitFor(() => expect(screen.getByText('Rounded from 0.0004')).toBeInTheDocument())
+  })
+
+  it('keeps three decimals for an amount clamped up from below one half', async () => {
+    // Six decimals would read 0.123456, so this pins the clamp's three-decimal branch.
+    mockSingleEggFlag(1, 0.123456)
+    renderPanel(makeParsed())
+    previewServings('4', '8')
+
+    await waitFor(() => expect(screen.getByText('Rounded from 0.123')).toBeInTheDocument())
+  })
+
+  it('keeps three decimals when they round to the amount shown', async () => {
+    // Six decimals would read 3.333333, so this pins the ordinary three-decimal branch.
+    mockSingleEggFlag(3, 3.333333)
+    renderPanel(makeParsed())
+    previewServings('4', '8')
+
+    await waitFor(() => expect(screen.getByText('Rounded from 3.333')).toBeInTheDocument())
   })
 })

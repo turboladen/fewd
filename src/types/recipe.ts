@@ -154,9 +154,17 @@ export interface ImportRecipeDto {
   markdown: string
 }
 
+/**
+ * An ingredient whose discrete amount the scale preview rounded to a whole
+ * number. `ScaleResult.ingredients[index]` holds the rounded amount.
+ */
 export interface FlaggedIngredient {
   index: number
   name: string
+  /**
+   * Reports the primary amount, a range's min, scaled and rounded to six
+   * decimals but not yet to a whole number.
+   */
   scaled_value: number
   unit: string
 }

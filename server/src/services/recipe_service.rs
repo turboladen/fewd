@@ -5,7 +5,7 @@ use sea_orm::*;
 
 use crate::dto::{CreateRecipeDto, IngredientDto, UpdateRecipeDto};
 use crate::entities::recipe::{self, Entity as Recipe};
-use crate::services::recipe_scaler::scale_ingredients;
+use crate::services::recipe_scaler::scale_amounts;
 use crate::services::recipe_times::{resolve_times, SentTimes, StoredTimes};
 use crate::services::service_error::{whole_star_rating, ServiceError, ValidationError};
 use crate::services::to_json;
@@ -34,10 +34,14 @@ fn rescale_stored_ingredients(
         ))
     })?;
     let ratio = f64::from(new_servings) / f64::from(existing.servings);
-    // The flags for discrete units that come out fractional are dropped.
-    // The returned recipe shows those amounts, and rounding them here would
-    // compound across repeated servings edits.
-    Ok(Some(scale_ingredients(&stored, ratio).ingredients))
+    // Stored amounts stay at two decimals, so 3 eggs at 1.5x is stored as 4.5.
+    // Rounding a discrete count to a whole number here would compound across
+    // repeated servings edits and skew the shopping list's per-person math.
+    // A servings-only edit (the web edit form or MCP `update_recipe`) lands
+    // here, while the Scale panel's "Save as New Recipe" and "Update This
+    // Recipe" send the whole-number amounts the user reviewed, including a
+    // range that collapsed to a single amount.
+    Ok(Some(scale_amounts(&stored, ratio)))
 }
 
 /// Trim each tag and drop the ones left empty.
