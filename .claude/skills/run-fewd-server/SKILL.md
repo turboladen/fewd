@@ -154,6 +154,12 @@ answer 200 within ~2s of boot.
   a lowercase hyphenated UUID, so ids survive a restart. A malformed id, or one
   recently deleted with `DELETE` on this server process, gets **404**. Without
   a token, any request gets **401** first.
+- **Restart checks must kill by port and confirm the new boot.** Stop the old
+  server with `lsof -ti tcp:$PORT -sTCP:LISTEN | xargs kill`, wait until that
+  command prints nothing, then require the new `Server running on` log line.
+  A surviving server makes the new one panic with `AddrInUse`, and requests
+  keep reaching the old process. The driver re-handshakes on any 404, so check
+  session behavior across a restart with curl and a fixed `mcp-session-id`.
 - **A token exists only after you mint one.** `POST /api/people/{id}/mcp-token`
   returns the plaintext exactly once. It **requires a JSON body** — `-d '{}'`
   with `Content-Type: application/json`; without one it's **415**, by design
