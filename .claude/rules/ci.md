@@ -32,4 +32,6 @@ All jobs run on `ubuntu-latest`; CI has no host-arch dependency because the diet
 
 `bun .claude/skills/verify/verify.mjs` (the /verify skill) runs every CI gate plus `tsc` and the API/MCP smoke test in one pass; use it before a PR. `just ci` is the fail-fast subset: it omits the migration drift smoke test and `bun install --frozen-lockfile`, the two gates that pass locally and fail in CI. Keep it that way, because the migration gate builds `--release`, which is fast warm but takes minutes against a cold `target/`.
 
+The API/MCP smoke test runs only in /verify, not in `just ci` or GitHub CI. For a change under `server/src/mcp/` or `server/src/routes/`, run `bun .claude/skills/verify/verify.mjs --only smoke` before pushing.
+
 `just ci` is what the Claude Code `PreToolUse` hook (`.claude/hooks/ci-before-push.sh`, registered in `.claude/settings.json`) runs before any command containing `git push` or `gh pr create`, with a 300s timeout. It is not a git hook, and it does not match `gh stack submit` or `gh stack sync`, which push branches too, so run `just ci` or /verify yourself before those. It runs in the session's current working directory, so push from the worktree whose branch you are pushing; `SKIP_CI_HOOK=1` bypasses it for one command.
