@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeRecipe } from '../test/factories'
 import { installFetchMock, mockJson, resetFetchMock } from '../test/fetchMock'
@@ -6,14 +6,10 @@ import { createQueryWrapper } from '../test/queryClient'
 import { parseRecipe } from '../types/recipe'
 import { RecipeDetail } from './RecipeManager'
 
-/**
- * Regression coverage for fewd-6kq: a failed "Enhanced view" request must never
- * leave the recipe unviewable. Reported 2026-05-25 — with the server
- * unreachable, clicking the toggle fired a request that failed and the recipe
- * could no longer be shown. The contract pinned here is that the original
- * instructions stay fully visible, an error is surfaced, and the toggle does
- * NOT flip into enhanced mode when the enhance call fails or rejects.
- */
+// A failed "Enhanced view" request keeps the original instructions fully
+// visible, surfaces the error, and leaves the toggle out of enhanced mode. A
+// successful request enters enhanced mode only when it placed at least one
+// amount; otherwise the original instructions stay and a note says so.
 
 const INSTRUCTIONS = 'Boil water, add pasta.'
 const ENHANCE_URL = '/api/recipes/r1/enhance'
@@ -94,7 +90,7 @@ describe('RecipeDetail enhanced-view failure handling', () => {
 
   it('swaps in enhanced text only on success', async () => {
     const enhanced = 'Step 1: Bring a large pot of salted water to a rolling boil.'
-    mockJson('POST', ENHANCE_URL, enhanced)
+    mockJson('POST', ENHANCE_URL, { enhanced_text: enhanced, injection_count: 1 })
 
     renderDetail()
 
@@ -105,5 +101,35 @@ describe('RecipeDetail enhanced-view failure handling', () => {
     // Toggle flips to the enhanced state and the enhanced text replaces the original.
     expect(await screen.findByText(enhanced)).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByText(INSTRUCTIONS)).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /^enhanced$/i })).toBeInTheDocument()
+    expect(screen.queryByText('No amounts to add')).not.toBeInTheDocument()
+  })
+
+  it('stays on the original instructions with a note when no amounts were placed', async () => {
+    mockJson('POST', ENHANCE_URL, { enhanced_text: INSTRUCTIONS, injection_count: 0 })
+    const enhanceCalls = () =>
+      vi.mocked(global.fetch).mock.calls.filter(([input]) => String(input) === ENHANCE_URL).length
+
+    renderDetail()
+
+    expect(await screen.findByText(INSTRUCTIONS)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /enhanced view/i }))
+
+    expect(await screen.findByText('No amounts to add')).toBeInTheDocument()
+    expect(screen.getByText(INSTRUCTIONS)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^enhanced$/i })).not.toBeInTheDocument()
+
+    // A second click reuses the cached result instead of asking the server again.
+    // A mutation reaches fetch only after a few microtasks, so wait out a timer
+    // tick before counting calls, or a refetch would go unseen.
+    fireEvent.click(screen.getByRole('button', { name: /enhanced view/i }))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(screen.getByText('No amounts to add')).toBeInTheDocument()
+    expect(screen.getByText(INSTRUCTIONS)).toBeInTheDocument()
+    expect(enhanceCalls()).toBe(1)
   })
 })

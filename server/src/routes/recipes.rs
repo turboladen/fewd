@@ -156,7 +156,7 @@ pub async fn preview_scale(
 pub async fn enhance(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<String>, AppError> {
+) -> Result<Json<recipe_enhancer::EnhanceResult>, AppError> {
     let recipe = RecipeService::get_by_id(&state.db, id)
         .await
         .map_err(AppError::from)?
