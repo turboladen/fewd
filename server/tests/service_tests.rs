@@ -801,6 +801,82 @@ async fn shopping_quantities_survive_a_servings_change() {
 }
 
 #[tokio::test]
+async fn rounded_shopping_list_rounds_totals_and_keeps_sources() {
+    let db = setup_db().await;
+    let mut dto = test_recipe_dto("Lemon Potatoes");
+    dto.ingredients = vec![
+        IngredientDto {
+            name: "lemon".to_string(),
+            prep: None,
+            amount: IngredientAmountDto::Single { value: 3.5 },
+            unit: String::new(),
+            notes: None,
+            or_alternative: None,
+        },
+        IngredientDto {
+            name: "potatoes".to_string(),
+            prep: None,
+            amount: IngredientAmountDto::Single { value: 7.0 },
+            unit: "lb".to_string(),
+            notes: None,
+            or_alternative: None,
+        },
+    ];
+    let recipe = RecipeService::create(&db, dto).await.unwrap();
+    let person = PersonService::create(&db, test_person_dto("Alice"))
+        .await
+        .unwrap();
+    // The recipe serves 4 and the meal serves 1, so the aggregate totals are
+    // 0.88 lemons (rounded to two decimals) and 1.75 lb of potatoes.
+    let meal = MealService::create(
+        &db,
+        CreateMealDto {
+            date: "2025-06-10".to_string(),
+            meal_type: MealType::Dinner,
+            order_index: 2,
+            servings: vec![PersonServingDto::Recipe {
+                person_id: person.id,
+                recipe_id: recipe.id.clone(),
+                servings_count: 1.0,
+                notes: None,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+
+    let list = ShoppingService::get_shopping_list_rounded(
+        &db,
+        "2025-06-09".to_string(),
+        "2025-06-15".to_string(),
+    )
+    .await
+    .unwrap();
+
+    let expected = [("lemon", 1.0, "count"), ("potatoes", 2.0, "graduated")];
+    assert_eq!(list.len(), expected.len());
+    for (item, (name, buy, class)) in list.iter().zip(expected) {
+        assert_eq!(item.aggregate.ingredient_name, name);
+        let shopping = item.shopping.as_ref().unwrap();
+        assert!(
+            matches!(shopping.amount, IngredientAmountDto::Single { value } if value == buy),
+            "{name}: {:?}",
+            shopping.amount
+        );
+        assert_eq!(serde_json::to_value(shopping.class).unwrap(), class);
+        assert!(shopping.rounded);
+
+        let [source] = item.aggregate.items.as_slice() else {
+            panic!("{name} should have one source: {:?}", item.aggregate.items);
+        };
+        assert_eq!(source.meal_id, meal.id);
+        assert_eq!(source.meal_date, "2025-06-10");
+        assert_eq!(source.meal_type, "Dinner");
+        assert_eq!(source.source_name.as_deref(), Some("Lemon Potatoes"));
+    }
+}
+
+#[tokio::test]
 async fn recipe_delete() {
     let db = setup_db().await;
     let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
