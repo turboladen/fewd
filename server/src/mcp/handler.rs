@@ -4,10 +4,9 @@ use std::sync::Arc;
 use rmcp::handler::server::common::FromContextPart;
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::{
-    AnnotateAble, CallToolResult, Content, GetPromptRequestParams, GetPromptResult, Implementation,
-    ListPromptsResult, ListResourcesResult, PaginatedRequestParams, PromptsCapability, RawResource,
-    ReadResourceRequestParams, ReadResourceResult, Resource, ResourceContents, ResourcesCapability,
-    ServerCapabilities, ServerInfo, ToolsCapability,
+    CallToolResult, ContentBlock, Implementation, ListResourcesResult, PaginatedRequestParams,
+    PromptsCapability, ReadResourceRequestParams, ReadResourceResult, Resource, ResourceContents,
+    ResourcesCapability, ServerCapabilities, ServerInfo, ToolsCapability,
 };
 use rmcp::service::RequestContext;
 use rmcp::{
@@ -83,7 +82,7 @@ impl FewdMcp {
             return Ok(e);
         }
         let name = authenticated_name(&context)?;
-        Ok(CallToolResult::success(vec![Content::text(format!(
+        Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "Hello, {name}. You are authenticated with fewd."
         ))]))
     }
@@ -401,7 +400,7 @@ impl FewdMcp {
             return Ok(err);
         }
         let markdown = render_family_overview(&people).map_err(internal_error)?;
-        Ok(CallToolResult::success(vec![Content::text(markdown)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(markdown)]))
     }
 
     #[tool(
@@ -508,7 +507,7 @@ impl FewdMcp {
 
         let html =
             printable_service::render(&meals, &recipe_models, &person_names, &validated, &params);
-        Ok(CallToolResult::success(vec![Content::text(html)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(html)]))
     }
 
     #[tool(
@@ -924,10 +923,10 @@ impl ServerHandler for FewdMcp {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, McpError> {
         fn md_resource(uri: &str, name: &str, description: &str) -> Resource {
-            let mut raw = RawResource::new(uri, name);
-            raw.description = Some(description.into());
-            raw.mime_type = Some("text/markdown".into());
-            raw.no_annotation()
+            let mut resource = Resource::new(uri, name);
+            resource.description = Some(description.into());
+            resource.mime_type = Some("text/markdown".into());
+            resource
         }
         let resources: Vec<Resource> = vec![
             md_resource(
@@ -1042,7 +1041,7 @@ fn tool_json_result<T: Serialize>(value: &T) -> Result<CallToolResult, McpError>
         // names back to the LLM client. Details land in tracing only.
         McpError::internal_error("failed to serialize result", None)
     })?;
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(json)]))
 }
 
 // `db_error` and `internal_error` return a fixed wire message on purpose.
@@ -1081,7 +1080,7 @@ fn internal_error(detail: String) -> McpError {
 /// MCP clients as a generic "Tool execution failed" with the message
 /// dropped, so they're reserved for transport / internal failures.
 fn tool_user_error(message: impl Into<String>) -> CallToolResult {
-    CallToolResult::error(vec![Content::text(message.into())])
+    CallToolResult::error(vec![ContentBlock::text(message.into())])
 }
 
 /// Normalize a caller-supplied recipe slug for lookup. Returns `None` when
@@ -1394,7 +1393,7 @@ mod tests {
     fn tool_user_error_returns_call_tool_result_with_is_error_and_text_content() {
         // Regression guard for the "Tool execution failed with no detail"
         // problem: rejection messages MUST surface as CallToolResult { is_error: true,
-        // content: [Content::text(...)] } so MCP clients display the actionable
+        // content: [ContentBlock::text(...)] } so MCP clients display the actionable
         // text to the LLM. JSON-RPC protocol errors get displayed as a generic
         // "Tool execution failed" with the message dropped.
         let result = tool_user_error("retry with at least one filter");
