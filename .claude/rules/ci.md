@@ -28,6 +28,14 @@ All jobs run on `ubuntu-latest`; CI has no host-arch dependency because the diet
 - Workflow-level `permissions: contents: read` and per-job `timeout-minutes` are set; the `auto-format` job keeps job-level `contents: write` (job-level permissions replace workflow-level ones) so its push still works.
 - **Job names are not required status checks today** (main has no branch protection); keep them stable anyway so enabling protection later needs no rename. `All Checks Passed` is the one to require: it runs even when a dependency fails, because a job skipped by a failed `needs` counts as passing.
 
+## Editing guards
+
+A `PreToolUse` hook (`.claude/hooks/block-protected-paths.sh`, registered in `.claude/settings.json`) refuses agent edits to files that change outside an editor. It covers `.env` files, `.envrc`, the `bun.lock`, `bun.lockb` and `Cargo.lock` lock files, and any `*.db` file together with its `-shm`, `-wal` and `-journal` companions. The database rule keys on that extension family, so a `.sqlite` or `.sqlite3` database falls outside it while a non-SQLite `.db` file falls inside. `.env.example` and `.env.sample` stay editable.
+
+The hook matches the path's base name and ignores case, which covers a `DATABASE_PATH` outside `data/` as well as a macOS spelling like `.ENV`. It reads the edited path from the hook's JSON payload on stdin and exits 2, the one exit code that stops a tool call. A missing `jq` exits 1, which reports the inert guard without blocking the edit, and every other branch exits 0. The hook is registered against the editing tools only, so a shell redirect run through `Bash` writes whatever it likes.
+
+`.claude/hooks/block-protected-paths.test.sh` drives the hook with sample payloads and asserts the exit code for each, so run it after changing either file.
+
 ## Running the gates locally
 
 `bun .claude/skills/verify/verify.mjs` (the /verify skill) runs every CI gate plus `tsc` and the API/MCP smoke test in one pass; use it before a PR. `just ci` is the fail-fast subset: it omits the migration drift smoke test and `bun install --frozen-lockfile`, the two gates that pass locally and fail in CI. Keep it that way, because the migration gate builds `--release`, which is fast warm but takes minutes against a cold `target/`.
