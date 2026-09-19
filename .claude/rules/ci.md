@@ -36,9 +36,11 @@ The Claude Code `PreToolUse` hook `.claude/hooks/ci-before-push.sh`, registered 
 
 - No changed paths, or a push that only deletes remote refs, runs nothing.
 - Changes only to markdown, `LICENSE`, `.git-blame-ignore-revs` or `.beads/` run `dprint check` and `typos`, because dprint formats markdown and typos scans every file.
-- Anything else runs `just ci`. That includes a `.gitignore` change, which alters what eslint sees, and a push whose refspec names any branch other than the current one, since the diff cannot see that branch's commits.
+- Anything else runs `just ci`, including a `.gitignore` change, which alters what eslint sees.
 
 A failing gate blocks the command, and so does a missing `just`, `dprint` or `typos`. `SKIP_CI_HOOK=1` bypasses the hook for one command only when it prefixes every `git push` or `gh pr create` in that command.
+
+The hook also exits 2 when it cannot tell what a command publishes, because a gate on the current tree proves nothing about a ref that tree does not hold. That covers a refspec or a `gh pr create --head` naming another branch, the flags `--all`, `--mirror`, `--tags` and `--prune`, the matching refspec `:`, a bare push under `push.default=matching`, and a `git switch` or `git checkout` that runs before the push. Check out the branch in its own Bash call and push from the tree that holds it.
 
 Limits to keep in mind:
 
@@ -46,4 +48,4 @@ Limits to keep in mind:
 - A `cd` the hook cannot resolve after expanding a leading `~` blocks the command, because validating any other tree could pass a branch nobody tested. That covers a bare `cd`, `cd -`, flags such as `-P`, variables, command substitution and missing directories. Run the `cd` as its own Bash call, then push. A `cd` inside a pipeline is ignored.
 - Two harmless cases also block, because the hook reads them as unresolvable `cd` commands: a heredoc body line whose first word is `cd`, and a `cd` with a redirection such as `cd X 2>/dev/null && git push`.
 - Only the tree of the first push is validated. A `cd` after it is ignored, so `cd A && git push && cd B && git push` checks A alone; push from separate trees in separate calls.
-- Matching is substring-based and the command split ignores quoting and subshell boundaries. `git -C path push`, aliases, `gh stack submit` and `gh stack sync` are not gated, so run `just ci` or /verify yourself before those. A commit message that quotes `git push` gates its command too, a quoted `&& SKIP_CI_HOOK=1 git push` counts as a bypass, and `(cd X) && git push` validates X.
+- Matching is substring-based and the command split ignores quoting and subshell boundaries. `git -C path push`, aliases, `gh stack submit` and `gh stack sync` are not gated, so run `just ci` or /verify yourself before those. A commit message that quotes `git push` gates its command too, and a quoted `&& SKIP_CI_HOOK=1 git push` counts as a bypass. A `cd` in a subshell that closes before the push, such as `(cd X) && git push`, leaves the push in the tool's own directory, which is what the hook then validates.
