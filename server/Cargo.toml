@@ -61,7 +61,7 @@ base64 = "0.22"
 rand = "0.8"
 
 # MCP (Model Context Protocol) server — exposes domain to AI assistants
-rmcp = { version = "1.5", features = [
+rmcp = { version = "2.1", features = [
     "server",
     "macros",
     "transport-streamable-http-server",
