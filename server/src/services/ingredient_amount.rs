@@ -4,7 +4,7 @@
 //! Canonical implementation lives in `migration::ingredient_amount` so the
 //! runtime parser and the backfill migration share one source of truth.
 
-pub use migration::{is_known_unit, try_parse_amount, AmountKind};
+pub use migration::{is_known_unit, try_parse_amount, unicode_fraction_value, AmountKind};
 
 use crate::dto::IngredientAmountDto;
 

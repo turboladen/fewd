@@ -9,6 +9,7 @@ use std::ops::Range;
 use serde::Serialize;
 
 use crate::dto::{IngredientAmountDto, IngredientDto};
+use crate::services::ingredient_amount::unicode_fraction_value;
 
 /// Instructions with amounts injected, and how many ingredients were placed.
 #[derive(Debug, Serialize)]
@@ -196,12 +197,30 @@ fn plural_variants(word: &str) -> Vec<String> {
         let stem = &word[..word.len() - cut];
         (stem.len() >= 3).then(|| stem.to_string())
     };
+    // A consonant before a final "y" turns it into "ies", so "cherry" is
+    // "cherries", while the vowel in "turkey" keeps the plain "s".
+    let consonant_before_y = ends_with("y")
+        && word.chars().rev().nth(1).is_some_and(|c| {
+            c.is_alphabetic() && !matches!(c.to_ascii_lowercase(), 'a' | 'e' | 'i' | 'o' | 'u')
+        });
     if ends_with("ss") {
         vec![format!("{word}es")]
+    } else if ends_with("ies") {
+        // The shorter stems run too, for a plural such as "pies" whose
+        // singular keeps the "ie".
+        [stem(3).map(|stem| format!("{stem}y")), stem(2), stem(1)]
+            .into_iter()
+            .flatten()
+            .collect()
     } else if ends_with("es") {
         [stem(2), stem(1)].into_iter().flatten().collect()
     } else if ends_with("s") {
         stem(1).into_iter().collect()
+    } else if consonant_before_y {
+        stem(1)
+            .map(|stem| format!("{stem}ies"))
+            .into_iter()
+            .collect()
     } else {
         vec![format!("{word}s"), format!("{word}es")]
     }
@@ -357,12 +376,12 @@ const UNIT_ABBREVIATIONS: &[&str] = &[
     "tsp", "tsps", "tbsp", "tbsps", "oz", "ozs", "lb", "lbs", "c", "pt", "qt", "g", "kg", "ml", "l",
 ];
 
-/// Whether `text` ends in a quantity: a digit, which covers "1/2" and "2-3", or a
-/// unicode fraction.
+/// Whether `text` ends in a quantity: a digit, which covers "1/2" and "2-3", or
+/// any unicode fraction the amount parser accepts.
 fn ends_in_quantity(text: &str) -> bool {
     text.chars()
         .next_back()
-        .is_some_and(|c| c.is_ascii_digit() || matches!(c, '½' | '⅓' | '⅔' | '¼' | '¾' | '⅛'))
+        .is_some_and(|c| c.is_ascii_digit() || unicode_fraction_value(c).is_some())
 }
 
 /// Split trimmed `text` into the trimmed text before its last word and the word,
@@ -589,6 +608,34 @@ mod tests {
         let ingredients = vec![make_ingredient("egg", 1.0, "")];
         let result = enhance(&ingredients, "Whisk the eggs.");
         assert_eq!(result, "Whisk the **1 eggs**.");
+    }
+
+    #[test]
+    fn a_y_name_matches_its_ies_plural() {
+        let ingredients = vec![make_ingredient("cherry", 12.0, "")];
+        let result = enhance(&ingredients, "Pit the cherries.");
+        assert_eq!(result, "Pit the **12 cherries**.");
+    }
+
+    #[test]
+    fn an_ies_name_matches_its_y_singular() {
+        let ingredients = vec![make_ingredient("blackberries", 1.0, "cup")];
+        let result = enhance(&ingredients, "Fold in the blackberry jam.");
+        assert_eq!(result, "Fold in the **1 cup blackberry** jam.");
+    }
+
+    #[test]
+    fn a_vowel_before_y_takes_a_plain_s() {
+        let ingredients = vec![make_ingredient("turkey", 1.0, "lb")];
+        let result = enhance(&ingredients, "Brown the turkeys.");
+        assert_eq!(result, "Brown the **1 lb turkeys**.");
+    }
+
+    #[test]
+    fn a_name_ending_in_se_is_not_read_as_a_plural() {
+        let ingredients = vec![make_ingredient("cheese", 1.0, "cup")];
+        let result = enhance(&ingredients, "Sprinkle the cheeses on top.");
+        assert_eq!(result, "Sprinkle the **1 cup cheeses** on top.");
     }
 
     #[test]
@@ -820,12 +867,19 @@ mod tests {
     }
 
     #[test]
-    fn a_unicode_fraction_counts_as_numbered() {
-        let ingredients = vec![make_ingredient("salt", 0.5, "tsp")];
-        let instructions = "Stir in ½ tsp salt.";
-        let result = enhance_instructions(&ingredients, instructions);
-        assert_eq!(result.enhanced_text, instructions);
-        assert_eq!(result.injection_count, 0);
+    fn every_unicode_fraction_the_parser_accepts_counts_as_numbered() {
+        for fraction in [
+            "¼", "½", "¾", "⅓", "⅔", "⅕", "⅖", "⅗", "⅘", "⅙", "⅚", "⅛", "⅜", "⅝", "⅞",
+        ] {
+            let ingredients = vec![make_ingredient("salt", 0.5, "tsp")];
+            let instructions = format!("Stir in {fraction} tsp salt.");
+            let result = enhance_instructions(&ingredients, &instructions);
+            assert_eq!(
+                result.enhanced_text, instructions,
+                "{fraction} should count as a quantity"
+            );
+            assert_eq!(result.injection_count, 0);
+        }
     }
 
     #[test]
