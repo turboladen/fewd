@@ -32,12 +32,12 @@ scopes vs origin/main:
 `origin/main`, plus staged, unstaged and untracked files, and maps them to
 scopes. `.claude/rules/ci.md` has the full path rules.
 
-| scope      | paths                                                      | gates                                            |
-| ---------- | ---------------------------------------------------------- | ------------------------------------------------ |
-| `docs`     | markdown, `LICENSE*`, `.beads/`, JSON under `server/`      | `dprint`                                         |
-| `frontend` | `src/`, `public/`, `package.json`, `bun.lock`, the configs | `dprint`, `lockfile`, `lint`, `types`, `fe-test` |
-| `rust`     | `server/` except JS/TS, `Cargo.toml`, `Cargo.lock`         | the cargo gates, `smoke`, `migration`            |
-| `all`      | any path no rule matches, such as `justfile` or `scripts/` | every gate                                       |
+| scope      | paths                                                                           | gates                                            |
+| ---------- | ------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `docs`     | markdown, `LICENSE*`, `.git-blame-ignore-revs`, `.beads/`, JSON under `server/` | `dprint`                                         |
+| `frontend` | `src/`, `public/`, `package.json`, `bun.lock`, the configs                      | `dprint`, `lockfile`, `lint`, `types`, `fe-test` |
+| `rust`     | `server/` except JS/TS, `Cargo.toml`, `Cargo.lock`                              | the cargo gates, `smoke`, `migration`            |
+| `all`      | any path no rule matches, such as `justfile` or `scripts/`                      | every gate                                       |
 
 `typos` runs for any change. With no changes at all, verify prints
 `no changes vs origin/main; use --all to run every gate` and exits 0. If the
