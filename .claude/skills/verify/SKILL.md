@@ -24,8 +24,9 @@ because one needs a release build and the other a fresh checkout.
 
 Folding them in is tempting, since warm they cost about a second. Don't: the
 migration gate builds `--release`, which runs to minutes against a cold or
-stale `target/`, and `.claude/hooks/ci-before-push.sh` gets 300s before it
-blocks the push. Every push would be a gamble on the state of `target/`.
+stale `target/`, and `.claude/hooks/ci-before-push.sh` lets the push through
+ungated when it runs past its 900s timeout. Every push would be a gamble on the
+state of `target/`.
 
 `just ci` also fails fast, so it shows one problem at a time. Use it while
 working; use this before a PR.
@@ -79,11 +80,14 @@ PASS
 
 ## Gotchas
 
-- **A `git push` or `gh pr create` already triggers `just ci`.** The
-  `PreToolUse` hook at `.claude/hooks/ci-before-push.sh` blocks the push if it
-  fails, with a **300-second** timeout. It runs the _narrower_ set, so this
-  skill is not redundant with it — and a slow cold `cargo clippy` can push that
-  hook past its timeout. Bypass one call with `SKIP_CI_HOOK=1 git push`.
+- **A `git push` or `gh pr create` already triggers a gate.** The
+  `PreToolUse` hook at `.claude/hooks/ci-before-push.sh` runs `just ci` in the
+  tree the command targets (only `dprint check` and `typos` when the outgoing
+  commits and the working tree change just markdown, `LICENSE` or `.beads/`)
+  and blocks the push if it fails. The hook runs the _narrower_ set, so this
+  skill is not redundant with it. Its timeout is **900 seconds**, and a timeout
+  lets the push through ungated, which a slow cold `cargo clippy` can cause.
+  Bypass one call with `SKIP_CI_HOOK=1 git push`.
 - **`cargo test` passing does not mean clippy passes.** Dead code is a warning
   to the test build and an error under clippy's `-D warnings`. Verified:
   an unused function leaves `rust-test` green and fails `clippy` with

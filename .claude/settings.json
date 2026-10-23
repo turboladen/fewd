@@ -36,8 +36,8 @@
       {
         "hooks": [
           {
-            "command": ".claude/hooks/ci-before-push.sh",
-            "timeout": 300,
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/ci-before-push.sh",
+            "timeout": 900,
             "type": "command"
           }
         ],
