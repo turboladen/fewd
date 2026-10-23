@@ -183,8 +183,10 @@ impl ShoppingService {
     /// Every item keeps the unrounded line, including its per-meal sources, in
     /// `aggregate`. The rounding rule comes from
     /// [`unit_converter::shopping_unit_class`] on the line's unit, and a range
-    /// rounds each end and stays a range. An item has no shopping amount when
-    /// its line has no total or no unit.
+    /// rounds each end and stays a range. A unitless line counts whole items,
+    /// so it rounds up to the next whole one. An item has no shopping amount
+    /// only when its sources could not be summed into one total, which the
+    /// line reports as a `total_amount` of `None`.
     pub async fn get_shopping_list_rounded(
         db: &DatabaseConnection,
         start_date: String,
@@ -203,6 +205,10 @@ fn shopping_item_from_aggregate(aggregate: AggregatedIngredientDto) -> ShoppingL
         // buys an extra step. A true total below 0.005 therefore arrives as 0
         // and passes through as 0 instead of rounding up to one step.
         (Some(amount), Some(unit)) => Some(round_amount_for_shopping(amount, unit)),
+        // The aggregator sets the total and the unit together or sets neither,
+        // so reaching this arm means the sources did not sum. A unitless line
+        // is not one of those: its unit is an empty string, which classifies
+        // as a count.
         _ => None,
     };
     ShoppingListItemDto {
