@@ -20,7 +20,7 @@ import {
   useUpdateRecipe,
 } from '../hooks/useRecipes'
 import type { CreateRecipeDto, Ingredient, UpdateRecipeDto } from '../types/recipe'
-import { parseRecipe } from '../types/recipe'
+import { ingredientsEqual, parseRecipe } from '../types/recipe'
 
 type Mode = 'view' | 'edit' | 'scale' | 'adapt' | 'adapt-edit'
 
@@ -146,9 +146,8 @@ export function RecipeDetailPage() {
     // when servings change. An unedited count is left out too, so a count
     // changed elsewhere during editing is not rescaled back to the old one.
     // An edited list always carries the count it was sized for; the server
-    // never rescales a list it is sent.
-    const ingredientsEdited =
-      JSON.stringify(formData.ingredients) !== JSON.stringify(editIngredients)
+    // never rescales a list it is sent, so the form warns when both change.
+    const ingredientsEdited = !ingredientsEqual(formData.ingredients, editIngredients)
     const servingsEdited = formData.servings !== editServings
     const dto: UpdateRecipeDto = {
       name: formData.name,
@@ -309,6 +308,9 @@ export function RecipeDetailPage() {
             key={recipe.id}
             initialData={formInitial}
             onSubmit={isAdaptEdit ? handleAdaptDraftSave : handleUpdate}
+            rescaleBaseline={isAdaptEdit
+              ? undefined
+              : { servings: editServings, ingredients: editIngredients }}
             onCancel={() => {
               setMode('view')
               setAdaptDraft(null)

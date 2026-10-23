@@ -26,6 +26,7 @@ import {
   formatServings,
   formatTime,
   ingredientRatio,
+  ingredientsEqual,
   parseRecipe,
 } from '../types/recipe'
 import {
@@ -144,14 +145,24 @@ export function RecipeForm({
   onSubmit,
   onCancel,
   submitLabel,
+  rescaleBaseline,
 }: {
   initialData: RecipeFormData
   onSubmit: (data: RecipeFormData) => void
   onCancel: () => void
   submitLabel: string
+  /** This holds the servings and ingredients the form opened with. When it is set, the form warns that an edited list will not be rescaled to a changed count. */
+  rescaleBaseline?: { servings: number; ingredients: Ingredient[] }
 }) {
   const [form, setForm] = useState<RecipeFormData>(initialData)
   const [validationError, setValidationError] = useState<string | null>(null)
+  const rescaleWarning = rescaleBaseline
+      && form.servings !== rescaleBaseline.servings
+      && !ingredientsEqual(form.ingredients, rescaleBaseline.ingredients)
+    ? `You changed the ingredients, so their amounts are saved as entered and will not be rescaled to ${form.servings} ${
+      form.servings === 1 ? 'serving' : 'servings'
+    }. To rescale them automatically, undo your ingredient changes, save the new servings, then edit the ingredients.`
+    : null
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -329,6 +340,14 @@ export function RecipeForm({
           {validationError}
         </div>
       )}
+
+      {/* The live region stays mounted so screen readers announce the text when it appears. While empty it takes no spacing. */}
+      <div
+        role='status'
+        className={rescaleWarning ? 'panel-warning text-amber-800 text-sm' : 'empty:mb-0'}
+      >
+        {rescaleWarning}
+      </div>
 
       <div className='flex gap-2'>
         <button

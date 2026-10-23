@@ -49,6 +49,37 @@ export function normalizeIngredientPrep(prep?: string): string | undefined {
 }
 
 /**
+ * Returns true when two ingredient lists hold the same ingredients in the same
+ * order. A missing, null, or empty `notes` counts as absent, `prep` compares
+ * after {@link normalizeIngredientPrep}, a missing `unit` equals an empty one,
+ * and key order does not matter. Amounts must match exactly, and alternatives
+ * compare by these same rules.
+ */
+export function ingredientsEqual(a: Ingredient[], b: Ingredient[]): boolean {
+  // Fields are compared by name, so a new `Ingredient` field needs a clause in
+  // `ingredientEqual`, or an edit to that field alone will not count as an edit.
+  return a.length === b.length && a.every((ing, i) => ingredientEqual(ing, b[i]))
+}
+
+function ingredientEqual(a: Ingredient, b: Ingredient): boolean {
+  // Stored rows carry `notes: null` and may carry null for other optional
+  // fields, while new form rows carry undefined.
+  return a.name === b.name
+    && (a.unit ?? '') === (b.unit ?? '')
+    && normalizeIngredientPrep(a.prep ?? undefined) === normalizeIngredientPrep(b.prep ?? undefined)
+    && (a.notes || undefined) === (b.notes || undefined)
+    && amountEqual(a.amount, b.amount)
+    && (a.or_alternative && b.or_alternative
+      ? ingredientEqual(a.or_alternative, b.or_alternative)
+      : !a.or_alternative && !b.or_alternative)
+}
+
+function amountEqual(a: IngredientAmount, b: IngredientAmount): boolean {
+  if (a.type === 'single') return b.type === 'single' && a.value === b.value
+  return b.type === 'range' && a.min === b.min && a.max === b.max
+}
+
+/**
  * Compose the ingredient label as `{name}, {prep}` when prep is present,
  * otherwise just `{name}`. Use this everywhere a recipe ingredient is
  * displayed so the rule stays consistent.

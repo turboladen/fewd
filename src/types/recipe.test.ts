@@ -6,6 +6,7 @@ import {
   formatRatio,
   formatTime,
   ingredientRatio,
+  ingredientsEqual,
   parseInstructionSections,
   parseInstructionSteps,
   parseRecipe,
@@ -320,6 +321,94 @@ describe('parseInstructionSections', () => {
   it('returns an empty array for empty input', () => {
     expect(parseInstructionSections('')).toEqual([])
     expect(parseInstructionSections('   \n  \n')).toEqual([])
+  })
+})
+
+describe('ingredientsEqual', () => {
+  const tomato = (overrides: Partial<Ingredient> = {}): Ingredient => ({
+    name: 'Tomato',
+    amount: { type: 'single', value: 2 },
+    unit: 'cups',
+    ...overrides,
+  })
+  // Stored rows carry null where the TypeScript type says optional.
+  const withNull = (ing: Ingredient, key: 'notes' | 'prep' | 'or_alternative'): Ingredient =>
+    ({ ...ing, [key]: null }) as unknown as Ingredient
+
+  it('treats a row without a notes key as equal to one with notes undefined', () => {
+    expect(ingredientsEqual([tomato()], [tomato({ notes: undefined })])).toBe(true)
+  })
+
+  it('treats null, undefined, and empty notes as absent', () => {
+    expect(ingredientsEqual([withNull(tomato(), 'notes')], [tomato({ notes: '' })])).toBe(true)
+    expect(ingredientsEqual([tomato({ notes: 'ripe' })], [tomato()])).toBe(false)
+  })
+
+  it('treats null, absent, and whitespace prep as equal', () => {
+    expect(ingredientsEqual([withNull(tomato(), 'prep')], [tomato({ prep: '  ' })])).toBe(true)
+  })
+
+  it('ignores key order', () => {
+    const reordered = { unit: 'cups', amount: { value: 2, type: 'single' }, name: 'Tomato' }
+    expect(ingredientsEqual([tomato()], [reordered as Ingredient])).toBe(true)
+  })
+
+  it('treats a missing unit as an empty one', () => {
+    const noUnit = { name: 'Tomato', amount: { type: 'single', value: 2 } } as Ingredient
+    expect(ingredientsEqual([tomato({ unit: '' })], [noUnit])).toBe(true)
+  })
+
+  it('treats a null alternative as absent', () => {
+    expect(ingredientsEqual([withNull(tomato(), 'or_alternative')], [tomato()])).toBe(true)
+  })
+
+  it('detects a name change', () => {
+    expect(ingredientsEqual([tomato()], [tomato({ name: 'Onion' })])).toBe(false)
+  })
+
+  it('detects a unit change', () => {
+    expect(ingredientsEqual([tomato()], [tomato({ unit: 'lb' })])).toBe(false)
+  })
+
+  it('detects an amount change', () => {
+    expect(ingredientsEqual([tomato()], [tomato({ amount: { type: 'single', value: 3 } })]))
+      .toBe(false)
+  })
+
+  it('detects a change of amount type with the same number', () => {
+    expect(ingredientsEqual([tomato()], [tomato({ amount: { type: 'range', min: 2, max: 2 } })]))
+      .toBe(false)
+  })
+
+  it('detects a change to only the maximum of a range', () => {
+    const range = (max: number) => tomato({ amount: { type: 'range', min: 1, max } })
+    expect(ingredientsEqual([range(2)], [range(3)])).toBe(false)
+  })
+
+  it('detects reordered rows', () => {
+    const onion = tomato({ name: 'Onion' })
+    expect(ingredientsEqual([tomato(), onion], [onion, tomato()])).toBe(false)
+  })
+
+  it('detects a different number of rows', () => {
+    expect(ingredientsEqual([tomato()], [tomato(), tomato()])).toBe(false)
+  })
+
+  it('detects an alternative that is present on one side only', () => {
+    const withAlt = tomato({ or_alternative: tomato({ name: 'Canned tomato' }) })
+    expect(ingredientsEqual([withAlt], [tomato()])).toBe(false)
+  })
+
+  it('detects a prep change inside an alternative', () => {
+    const withAlt = (prep?: string) =>
+      tomato({ or_alternative: tomato({ name: 'Canned tomato', prep }) })
+    expect(ingredientsEqual([withAlt('diced')], [withAlt('crushed')])).toBe(false)
+  })
+
+  it('detects an amount change inside an alternative', () => {
+    const withAlt = (value: number) =>
+      tomato({ or_alternative: tomato({ amount: { type: 'single', value } }) })
+    expect(ingredientsEqual([withAlt(1)], [withAlt(4)])).toBe(false)
   })
 })
 
