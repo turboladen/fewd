@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # PreToolUse(Bash) hook: before a command that runs `git push` or `gh pr create`,
 # run a local gate in the tree that command targets, and block it (exit 2) when
-# the gate fails. scripts/changed-scopes.mjs maps the paths the outgoing commits
-# and the working tree change to scopes, and verify.mjs runs the CI gates those
-# scopes select; nothing runs when nothing changed or the push only deletes
-# remote refs. A tree without the classifier, or a machine without bun, runs
-# `just ci`, and a command whose target tree or published ref the hook cannot
-# check exits 2. Any other failure exits 1, so the hook fails open on its own
-# errors. Bypass one call by prefixing each push segment with `SKIP_CI_HOOK=1`.
+# the gate fails. It runs verify.mjs against the paths the outgoing commits and
+# the working tree change, so scripts/changed-scopes.mjs selects the gates;
+# nothing runs when nothing changed or the push only deletes remote refs. A tree
+# without that classifier runs `just ci`, and a command whose target tree or
+# published ref the hook cannot check exits 2. Any other failure exits 1, so the
+# hook fails open on its own errors. Bypass one call by prefixing each push
+# segment with `SKIP_CI_HOOK=1`.
 
 # This must run under macOS's bash 3.2, where `"${a[@]}"` on an empty array is
 # an unbound-variable error, so every array expansion is length guarded. Errors
@@ -464,10 +464,12 @@ fi
 # Uncommitted and untracked paths count too, because a `git commit` earlier in
 # the same command pushes them. Any unknown state gets every gate.
 #
-# The classifier runs inside the target tree, so its own copy decides. A tree
-# without one predates it, and its verify.mjs rejects --scope, so it gets
-# `just ci`, as does a machine without bun.
-if ! command -v bun >/dev/null 2>&1 || [ ! -f "$repo_root/scripts/changed-scopes.mjs" ]; then
+# verify.mjs classifies the diff itself, using the target tree's own copy of the
+# classifier, and runs the gates those scopes select. It exits 0 on an empty
+# diff and runs every gate when it cannot list the changes. A tree without the
+# classifier predates it, and its verify.mjs rejects --base, so it gets
+# `just ci`; both paths need bun, so a machine without it fails either way.
+if [ ! -f "$repo_root/scripts/changed-scopes.mjs" ]; then
   gate_name="just ci"
   output=$(cd "$repo_root" && just ci </dev/null 2>&1) && exit 0
 else
@@ -477,30 +479,8 @@ else
     git -C "$repo_root" merge-base --is-ancestor "$upstream" HEAD 2>/dev/null; then
     base_ref=$upstream
   fi
-
-  # The classifier prints `none` for an empty diff and `all` for a base it
-  # cannot diff against. A failure, no output, or an unknown line selects
-  # every gate.
-  run_all=1
-  scope_args=()
-  if listed=$(cd "$repo_root" && bun scripts/changed-scopes.mjs --base "$base_ref" --format lines </dev/null 2>/dev/null) &&
-    [ -n "$listed" ]; then
-    run_all=0
-    while IFS= read -r scope; do
-      [ -n "$scope" ] || continue
-      case "$scope" in
-        none) ;;
-        docs | frontend | rust) scope_args+=(--scope "$scope") ;;
-        *) run_all=1 ;;
-      esac
-    done <<LISTED
-$listed
-LISTED
-    [ "$run_all" -eq 0 ] && [ "${#scope_args[@]}" -eq 0 ] && exit 0
-  fi
-  [ "$run_all" -eq 1 ] && scope_args=(--all)
-  gate_name="verify.mjs ${scope_args[*]}"
-  output=$(cd "$repo_root" && bun .claude/skills/verify/verify.mjs --ci-only --fast --skip lockfile ${scope_args[@]+"${scope_args[@]}"} </dev/null 2>&1) && exit 0
+  gate_name="verify.mjs --base $base_ref"
+  output=$(cd "$repo_root" && bun .claude/skills/verify/verify.mjs --ci-only --fast --skip lockfile --base "$base_ref" </dev/null 2>&1) && exit 0
 fi
 
 {

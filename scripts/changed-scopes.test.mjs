@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { GATES } from '../.claude/skills/verify/verify.mjs';
 import { GATE_SCOPES, SCOPES, changedPaths, classifyPaths, formatGithub, gateApplies } from './changed-scopes.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -86,9 +87,12 @@ describe('gate selection', () => {
     expect(ids.sort()).toEqual(['dprint', 'typos']);
   });
 
-  it('runs dprint for a Cargo.toml-only change', () => {
+  // dprint.jsonc includes only ts/tsx/js/jsx/json/md. Every such path under
+  // server/ also takes the docs scope, or no scope at all, so a rust-only
+  // change has nothing for dprint to check.
+  it('skips dprint for a Cargo.toml-only change', () => {
     expect(scopesOf('Cargo.toml')).toEqual(['rust']);
-    expect(gateApplies('dprint', ['rust'])).toBe(true);
+    expect(gateApplies('dprint', ['rust'])).toBe(false);
   });
 
   it('runs every gate, known or not, for all', () => {
@@ -104,10 +108,14 @@ describe('gate selection', () => {
   });
 
   it('covers exactly the gates verify.mjs defines', () => {
-    const source = readFileSync(join(HERE, '../.claude/skills/verify/verify.mjs'), 'utf8');
-    const ids = [...source.matchAll(/\{ id: '([^']+)'/g)].map((m) => m[1]);
-    expect(ids.length).toBeGreaterThan(0);
-    expect(Object.keys(GATE_SCOPES).sort()).toEqual(ids.sort());
+    expect(Object.keys(GATE_SCOPES).sort()).toEqual(GATES.map((g) => g.id).sort());
+  });
+
+  // verify.mjs creates a placeholder dist/ before any gate that compiles the
+  // crate embedding it. That set is the gates the rust scope alone selects.
+  it('marks every rust-only gate as a Rust gate in verify.mjs', () => {
+    const rustOnly = Object.keys(GATE_SCOPES).filter((id) => GATE_SCOPES[id].every((s) => s === 'rust'));
+    expect(GATES.filter((g) => g.rust).map((g) => g.id).sort()).toEqual(rustOnly.sort());
   });
 
   it('formats GitHub outputs, with all setting every scope', () => {
@@ -200,6 +208,8 @@ describe('changedPaths', () => {
   describe('CLI', () => {
     const run = (cwd, args, input) =>
       spawnSync(process.execPath, [CLI, ...args], { cwd, env, input, encoding: 'utf8' });
+    // Each text-format line is a scope name indented ahead of its paths.
+    const scopeLines = (r) => r.stdout.trim().split('\n').map((line) => line.trim().split(/\s+/)[0]);
 
     it('selects every gate and exits 0 when the base is unknown', () => {
       const repo = repoWithBranch();
@@ -209,23 +219,67 @@ describe('changedPaths', () => {
       expect(r.stderr).toContain('could not list changes');
     });
 
-    it('prints one scope per line, and none for no changes', () => {
+    it('names each scope and says when nothing changed', () => {
       const repo = repoWithBranch();
-      expect(run(repo, ['--base', 'main', '--format', 'lines']).stdout).toBe('none\n');
+      expect(run(repo, ['--base', 'main']).stdout).toContain('no changed files');
       write(repo, 'README.md', 'edited\n');
       write(repo, 'server/a.rs');
-      expect(run(repo, ['--base', 'main', '--format', 'lines']).stdout).toBe('docs\nrust\n');
+      expect(scopeLines(run(repo, ['--base', 'main']))).toEqual(['docs', 'rust']);
     });
 
     it('classifies NUL- or newline-separated paths from stdin', () => {
-      const r = run(HERE, ['--stdin', '--format', 'lines'], 'README.md\0justfile\n');
-      expect(r.stdout).toBe('docs\nall\n');
+      const r = run(HERE, ['--stdin'], 'README.md\0justfile\n');
+      expect(scopeLines(r)).toEqual(['docs', 'all']);
+      expect(r.stdout).toContain('justfile');
     });
 
     it('exits 2 on a usage error', () => {
       expect(run(HERE, ['--bogus']).status).toBe(2);
-      expect(run(HERE, ['--format', 'yaml']).status).toBe(2);
+      expect(run(HERE, ['--format', 'lines']).status).toBe(2);
       expect(run(HERE, ['--base']).status).toBe(2);
     });
+  });
+});
+
+// GATE_SCOPES decides which gates a change selects, and ci.yml has to select
+// the same ones. Nothing but these assertions keeps the two in step.
+describe('ci.yml', () => {
+  const workflow = readFileSync(join(HERE, '../.github/workflows/ci.yml'), 'utf8');
+  const envJson = (name) => JSON.parse(workflow.match(new RegExp(`^\\s*${name}: '(.*)'$`, 'm'))[1]);
+
+  // The CI-tier gates each job runs. verify.mjs runs the same ids locally.
+  const JOB_GATES = {
+    'rust-checks': ['fmt', 'clippy', 'mig-clippy', 'rust-test', 'mig-test', 'migration'],
+    'frontend-checks': ['dprint', 'lockfile', 'lint', 'fe-test'],
+    'typos-check': ['typos'],
+  };
+
+  it('runs every CI-tier gate in exactly one job', () => {
+    const ids = Object.values(JOB_GATES).flat();
+    expect(ids.sort()).toEqual(GATES.filter((g) => g.tier === 'ci').map((g) => g.id).sort());
+  });
+
+  it('publishes exactly the scopes the classifier defines', () => {
+    const outputs = [...workflow.matchAll(/^ {6}(\w+): \$\{\{ steps\.scopes\.outputs\.(\w+) \}\}$/gm)];
+    expect(outputs.map((m) => m[1])).toEqual([...SCOPES]);
+    for (const [, output, step] of outputs) expect(output).toBe(step);
+  });
+
+  it('names only known scopes in its conditions', () => {
+    for (const [, scope] of workflow.matchAll(/needs\.changes\.outputs\.(\w+)/g)) expect(SCOPES).toContain(scope);
+  });
+
+  it('gates each job on the scopes its own gates select', () => {
+    const gated = envJson('GATED');
+    for (const [job, scopes] of Object.entries(gated)) {
+      expect(new Set(scopes)).toEqual(new Set(JOB_GATES[job].flatMap((id) => GATE_SCOPES[id])));
+    }
+    const always = envJson('ALWAYS');
+    for (const job of always.filter((j) => JOB_GATES[j])) {
+      expect(JOB_GATES[job].flatMap((id) => GATE_SCOPES[id])).toContain('always');
+    }
+    // `changes` produces the scopes rather than consuming them, so it is the
+    // one job in ALWAYS that runs no gate.
+    expect([...Object.keys(gated), ...always].sort()).toEqual([...Object.keys(JOB_GATES), 'changes'].sort());
   });
 });

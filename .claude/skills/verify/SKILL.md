@@ -36,7 +36,7 @@ scopes. `.claude/rules/ci.md` has the full path rules.
 | ---------- | ---------------------------------------------------------- | ------------------------------------------------ |
 | `docs`     | markdown, `LICENSE*`, `.beads/`, JSON under `server/`      | `dprint`                                         |
 | `frontend` | `src/`, `public/`, `package.json`, `bun.lock`, the configs | `dprint`, `lockfile`, `lint`, `types`, `fe-test` |
-| `rust`     | `server/` except JS/TS, `Cargo.toml`, `Cargo.lock`         | `dprint`, the cargo gates, `smoke`, `migration`  |
+| `rust`     | `server/` except JS/TS, `Cargo.toml`, `Cargo.lock`         | the cargo gates, `smoke`, `migration`            |
 | `all`      | any path no rule matches, such as `justfile` or `scripts/` | every gate                                       |
 
 `typos` runs for any change. With no changes at all, verify prints
@@ -117,10 +117,11 @@ PASS
 
 - **A `git push` or `gh pr create` already triggers a gate.** The
   `PreToolUse` hook at `.claude/hooks/ci-before-push.sh` runs this script in
-  the tree the command targets, as `--ci-only --fast --skip lockfile` with the
-  scopes of the outgoing commits and the working tree, and blocks the push if
-  it fails. That is the _narrower_ set, so a run of this skill is not redundant
-  with it. A tree without `scripts/changed-scopes.mjs` gets `just ci` instead.
+  the tree the command targets, as `--ci-only --fast --skip lockfile --base
+  <ref>` against the outgoing commits and the working tree, and blocks the push
+  if it fails. That is the _narrower_ set, so a run of this skill is not
+  redundant with it. A tree without `scripts/changed-scopes.mjs` gets
+  `just ci` instead.
   Its timeout is **900 seconds**, and a timeout lets the push through ungated,
   which a slow cold `cargo clippy` can cause. Bypass one call with
   `SKIP_CI_HOOK=1 git push`.

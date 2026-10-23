@@ -3,9 +3,8 @@
 // ci.yml all select their gates from this one definition.
 //
 // Usage: node scripts/changed-scopes.mjs [--base <rev>] [--no-worktree]
-//                                        [--format text|lines|github] [--stdin]
+//                                        [--format text|github] [--stdin]
 //
-// `--format lines` prints one scope per line, or `none` when nothing changed.
 // Exit 0 whenever a scope set was printed, including the `all` fallback when
 // the changed files cannot be listed. Exit 2 on a usage error, and any crash
 // exits non-zero; callers treat a non-zero exit as `all`.
@@ -50,10 +49,11 @@ const RULES = [
 
 // Which scopes select each verify gate. `always` runs on any change. A gate
 // missing from this table runs whenever anything changed. ci.yml mirrors this
-// table in its job and step `if:` conditions.
+// table in its job and step `if:` conditions, which the `ci.yml` tests in
+// changed-scopes.test.mjs hold to it.
 export const GATE_SCOPES = {
   typos: ['always'],
-  dprint: ['docs', 'frontend', 'rust'],
+  dprint: ['docs', 'frontend'],
   lockfile: ['frontend'],
   lint: ['frontend'],
   types: ['frontend'],
@@ -114,11 +114,10 @@ const splitNul = (s) => s.split('\0').filter(Boolean);
 export function changedPaths({ base = 'origin/main', worktree = true, cwd = process.cwd() } = {}) {
   try {
     const root = git(['rev-parse', '--show-toplevel'], cwd).trim();
-    const mergeBase = git(['merge-base', 'HEAD', base], root).trim();
     // `--no-relative` and running from the root keep every path root-relative,
     // whatever `diff.relative` says and wherever the caller stands.
     const diff = ['diff', '-z', '--name-only', '--no-renames', '--no-relative'];
-    const paths = new Set(splitNul(git([...diff, mergeBase, 'HEAD'], root)));
+    const paths = new Set(splitNul(git([...diff, '--merge-base', base, 'HEAD'], root)));
     if (worktree) {
       for (const p of splitNul(git([...diff, 'HEAD'], root))) paths.add(p);
       for (const p of splitNul(git(['ls-files', '-z', '--others', '--exclude-standard'], root))) paths.add(p);
@@ -156,7 +155,7 @@ function parseArgs(argv) {
       opts[arg.slice(2)] = value;
     } else throw new Error(`unrecognized argument: ${arg}`);
   }
-  if (!['text', 'lines', 'github'].includes(opts.format)) throw new Error(`unknown --format ${opts.format}`);
+  if (!['text', 'github'].includes(opts.format)) throw new Error(`unknown --format ${opts.format}`);
   return opts;
 }
 
@@ -183,10 +182,7 @@ function main(argv) {
   }
 
   const summary = result.scopes.length === 0 ? ['  (no changed files)'] : describeScopes(result);
-  if (opts.format === 'lines') {
-    // An explicit `none` lets a caller tell an empty diff from missing output.
-    console.log(result.scopes.length === 0 ? 'none' : result.scopes.join('\n'));
-  } else if (opts.format === 'github') {
+  if (opts.format === 'github') {
     process.stdout.write(formatGithub(result.scopes));
     console.error(summary.join('\n'));
   } else {
@@ -195,14 +191,16 @@ function main(argv) {
   return 0;
 }
 
-// Compare real paths so a symlinked checkout still counts as a direct run, and
-// importing this module from verify.mjs or a test never runs the CLI.
-function invokedDirectly() {
+/**
+ * Whether the running process was started with `module` itself, rather than
+ * importing it. Compares real paths, so a symlinked checkout still counts.
+ */
+export function invokedDirectly(module) {
   try {
-    return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+    return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(module));
   } catch {
     return false;
   }
 }
 
-if (invokedDirectly()) process.exitCode = main(process.argv.slice(2));
+if (invokedDirectly(import.meta.url)) process.exitCode = main(process.argv.slice(2));

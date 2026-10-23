@@ -12,14 +12,14 @@ import { spawn } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { GATE_SCOPES, SCOPES, changedPaths, classifyPaths, describeScopes, gateApplies } from '../../../scripts/changed-scopes.mjs';
+import { GATE_SCOPES, SCOPES, changedPaths, classifyPaths, describeScopes, gateApplies, invokedDirectly } from '../../../scripts/changed-scopes.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 // `ci` gates block the merge. `extra` gates do not — they cover the two ways
 // this repo breaks after a green CI run: a type error that only `tsc` sees
 // (CI never runs the build) and a runtime break in the API/MCP surface.
-const GATES = [
+export const GATES = [
   { id: 'fmt', rust: true, label: 'cargo fmt', tier: 'ci', cmd: ['cargo', 'fmt', '--all', '--', '--check'] },
   { id: 'dprint', label: 'dprint check', tier: 'ci', cmd: ['dprint', 'check'] },
   { id: 'typos', label: 'typos', tier: 'ci', cmd: ['typos', '--config', '.typos.toml'] },
@@ -49,8 +49,8 @@ const FIXERS = [
 ];
 
 // Gates stay in cheapest-first order, so a formatting slip surfaces in a
-// second instead of after the release build. `scopes` is null for `--only`
-// and `--all`, which ignore the changed paths.
+// second instead of after the release build. `scopes` is null for `--only`,
+// which ignores the changed paths, and `['all']` keeps every gate.
 function selectGates({ fast, ciOnly, only, scopes, skip }) {
   let gates = GATES;
   if (only) gates = gates.filter((g) => g.id === only);
@@ -99,14 +99,10 @@ async function main() {
     'usage: verify.mjs [--fast] [--ci-only] [--fix] [--list]\n' +
     '                  [--only <id> | --all | --scope <scope>...] [--base <rev>] [--skip <id>...]';
 
-  for (const id of Object.keys(GATE_SCOPES)) {
-    if (!GATES.some((g) => g.id === id)) console.error(`warning: GATE_SCOPES names ${id}, which is not a gate`);
-  }
-
   // Walk the arguments rather than scanning for each flag. Anything
   // unrecognized has to be an error: an argument that is silently dropped runs
   // every gate and reports PASS, which reads as though it worked.
-  const opts = { fast: false, ciOnly: false, fix: false, list: false, all: false, only: null, scopes: [], skip: [], base: null };
+  const opts = { fast: false, ciOnly: false, fix: false, list: false, only: null, scopes: [], skip: [], base: null };
   const valueOf = (flag, i, what) => {
     const value = argv[i];
     if (!value || value.startsWith('-')) throw new Error(`${flag} needs ${what}; see --list`);
@@ -128,7 +124,7 @@ async function main() {
           opts.list = true;
           break;
         case '--all':
-          opts.all = true;
+          opts.scopes.push('all');
           break;
         case '--only':
           opts.only = valueOf('--only', ++i, 'a gate id');
@@ -165,7 +161,7 @@ async function main() {
     return 0;
   }
 
-  if ([opts.only, opts.all, opts.scopes.length > 0].filter(Boolean).length > 1) {
+  if (opts.only && opts.scopes.length) {
     console.error('--only, --all and --scope each choose the gates; pass one of them');
     return 1;
   }
@@ -175,7 +171,7 @@ async function main() {
     return 1;
   }
 
-  if (opts.base && (opts.only || opts.all || opts.scopes.length)) {
+  if (opts.base && (opts.only || opts.scopes.length)) {
     console.error('--base only applies when the changed paths choose the gates; drop --only, --all or --scope');
     return 1;
   }
@@ -185,8 +181,8 @@ async function main() {
   let scopes = null;
   if (opts.scopes.length) {
     scopes = opts.scopes;
-    console.log(`scopes: ${scopes.join(', ')} (from --scope)\n`);
-  } else if (!opts.only && !opts.all) {
+    console.log(`scopes: ${scopes.join(', ')}\n`);
+  } else if (!opts.only) {
     const base = opts.base ?? 'origin/main';
     const paths = changedPaths({ base, cwd: REPO });
     if (paths === null) {
@@ -255,4 +251,4 @@ async function main() {
   return 1;
 }
 
-process.exit(await main());
+if (invokedDirectly(import.meta.url)) process.exit(await main());
