@@ -163,8 +163,9 @@ pub fn is_known_unit(token: &str) -> bool {
 }
 
 /// Lookup table for Unicode vulgar fractions in the U+2150..U+215E block
-/// plus the legacy Latin-1 code points (¼ ½ ¾).
-fn unicode_fraction_value(c: char) -> Option<f64> {
+/// plus the legacy Latin-1 code points (¼ ½ ¾). This is the whole set of
+/// fractions the parser reads as a quantity.
+pub fn unicode_fraction_value(c: char) -> Option<f64> {
     match c {
         '¼' => Some(0.25),
         '½' => Some(0.5),

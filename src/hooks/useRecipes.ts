@@ -3,6 +3,7 @@ import { api } from '../lib/api'
 import type {
   AdaptRecipeDto,
   CreateRecipeDto,
+  EnhanceResult,
   ImportRecipeDto,
   Recipe,
   ScaleResult,
@@ -87,7 +88,7 @@ export function usePreviewScaleRecipe() {
 
 export function useEnhanceInstructions() {
   return useMutation({
-    mutationFn: (id: string) => api.post<string>('/recipes/' + id + '/enhance'),
+    mutationFn: (id: string) => api.post<EnhanceResult>('/recipes/' + id + '/enhance'),
   })
 }
 
@@ -100,7 +101,7 @@ export function useEnhanceInstructions() {
 export function useEnhancedInstructions(id: string, enabled: boolean) {
   return useQuery({
     queryKey: ['recipes', id, 'enhanced'],
-    queryFn: () => api.post<string>('/recipes/' + id + '/enhance'),
+    queryFn: () => api.post<EnhanceResult>('/recipes/' + id + '/enhance'),
     enabled: enabled && !!id,
     staleTime: Infinity,
     retry: false,

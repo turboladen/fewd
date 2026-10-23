@@ -4,7 +4,7 @@
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
 use axum::Router;
-use fewd_lib::dto::{CreateDrinkRecipeDto, CreateRecipeDto};
+use fewd_lib::dto::{CreateDrinkRecipeDto, CreateRecipeDto, IngredientAmountDto, IngredientDto};
 use fewd_lib::routes::api_routes;
 use fewd_lib::services::drink_recipe_service::DrinkRecipeService;
 use fewd_lib::services::recipe_service::RecipeService;
@@ -74,6 +74,39 @@ async fn send_json(
 
 fn message(body: &serde_json::Value) -> &str {
     body["message"].as_str().unwrap_or_default()
+}
+
+#[tokio::test]
+async fn enhance_recipe_answers_text_and_injection_count() {
+    let db = setup_db().await;
+    let mut dto = recipe_dto("Guacamole");
+    dto.instructions = "Mash the avocados with a fork.".into();
+    dto.ingredients = vec![IngredientDto {
+        name: "ripe avocados".into(),
+        prep: None,
+        amount: IngredientAmountDto::Single { value: 2.0 },
+        unit: String::new(),
+        notes: None,
+        or_alternative: None,
+    }];
+    let recipe = RecipeService::create(&db, dto).await.expect("seed recipe");
+
+    let (status, body) = send_json(
+        app(&db),
+        "POST",
+        &format!("/api/recipes/{}/enhance", recipe.id),
+        serde_json::json!({}),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "enhanced_text": "Mash the **2 avocados** with a fork.",
+            "injection_count": 1,
+        })
+    );
 }
 
 #[tokio::test]
