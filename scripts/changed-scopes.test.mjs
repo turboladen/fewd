@@ -90,6 +90,11 @@ describe('gate selection', () => {
   // dprint.jsonc includes only ts/tsx/js/jsx/json/md. Every such path under
   // server/ also takes the docs scope, or no scope at all, so a rust-only
   // change has nothing for dprint to check.
+  it('runs dprint over only the extensions the scope rules assume', () => {
+    const config = readFileSync(join(HERE, '../dprint.jsonc'), 'utf8');
+    expect(config).toContain('"**/*.{ts,tsx,js,jsx,json,md}"');
+  });
+
   it('skips dprint for a Cargo.toml-only change', () => {
     expect(scopesOf('Cargo.toml')).toEqual(['rust']);
     expect(gateApplies('dprint', ['rust'])).toBe(false);
@@ -119,9 +124,9 @@ describe('gate selection', () => {
   });
 
   it('formats GitHub outputs, with all setting every scope', () => {
-    expect(formatGithub(['docs'])).toBe('docs=true\nfrontend=false\nrust=false\nall=false\n');
-    expect(formatGithub(['docs', 'all'])).toBe('docs=true\nfrontend=true\nrust=true\nall=true\n');
-    expect(formatGithub([])).toBe('docs=false\nfrontend=false\nrust=false\nall=false\n');
+    expect(formatGithub(['docs'])).toBe('docs=true\nfrontend=false\nrust=false\n');
+    expect(formatGithub(['docs', 'all'])).toBe('docs=true\nfrontend=true\nrust=true\n');
+    expect(formatGithub([])).toBe('docs=false\nfrontend=false\nrust=false\n');
   });
 });
 
@@ -215,7 +220,7 @@ describe('changedPaths', () => {
       const repo = repoWithBranch();
       const r = run(repo, ['--base', 'no-such-ref', '--format', 'github']);
       expect(r.status).toBe(0);
-      expect(r.stdout).toBe('docs=true\nfrontend=true\nrust=true\nall=true\n');
+      expect(r.stdout).toBe('docs=true\nfrontend=true\nrust=true\n');
       expect(r.stderr).toContain('could not list changes');
     });
 

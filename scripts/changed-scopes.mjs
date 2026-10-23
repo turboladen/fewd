@@ -31,11 +31,15 @@ const FRONTEND_FILES = new Set([
 const SCRIPT_FILE = /\.[cm]?[jt]sx?$/;
 
 const RULES = [
-  { scope: 'docs', test: (p) => p.endsWith('.md') },
-  { scope: 'docs', test: (p) => p.startsWith('LICENSE') || p === '.git-blame-ignore-revs' || p.startsWith('.beads/') },
-  // dprint formats JSON. CI runs dprint only in Frontend Checks, which the
-  // rust scope does not start, so JSON under server/ takes the docs scope too.
-  { scope: 'docs', test: (p) => p.startsWith('server/') && p.endsWith('.json') },
+  // The docs scope is the one that runs dprint and typos, so a path dprint
+  // formats belongs here whatever directory it sits in. That is why JSON under
+  // server/ takes this scope as well as rust, which runs no dprint.
+  {
+    scope: 'docs',
+    test: (p) =>
+      p.endsWith('.md') || p.startsWith('LICENSE') || p === '.git-blame-ignore-revs' || p.startsWith('.beads/')
+      || (p.startsWith('server/') && p.endsWith('.json')),
+  },
   {
     scope: 'frontend',
     test: (p) =>
@@ -78,8 +82,9 @@ export function classifyPaths(paths) {
   for (const raw of paths) {
     const path = raw.replace(/^\.\//, '');
     if (!path) continue;
-    const matched = new Set(RULES.filter((r) => r.test(path)).map((r) => r.scope));
-    if (matched.size === 0) add('all', path);
+    // One rule per scope, so a path cannot take the same scope twice.
+    const matched = RULES.filter((r) => r.test(path)).map((r) => r.scope);
+    if (matched.length === 0) add('all', path);
     for (const scope of matched) add(scope, path);
   }
   const scopes = [...SCOPES, 'all'].filter((s) => triggers[s]);
@@ -140,7 +145,7 @@ export function describeScopes({ triggers, scopes }, limit = 3) {
 /** Formats scope booleans as `$GITHUB_OUTPUT` lines. `all` sets every scope true. */
 export function formatGithub(scopes) {
   const all = scopes.includes('all');
-  return [...SCOPES.map((s) => `${s}=${all || scopes.includes(s)}`), `all=${all}`].join('\n') + '\n';
+  return SCOPES.map((s) => `${s}=${all || scopes.includes(s)}`).join('\n') + '\n';
 }
 
 function parseArgs(argv) {
