@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # PreToolUse(Bash) hook: before a command that runs `git push` or `gh pr create`,
 # run a local gate in the tree that command targets, and block it (exit 2) when
-# the gate fails. The gate depends on the paths the outgoing commits and the
-# working tree change: nothing runs when there are none or the push only deletes
-# remote refs, `dprint check` and `typos` run when only markdown, LICENSE or
-# .beads/ files change, and `just ci` runs for everything else. A command whose
-# target tree or published ref the hook cannot check also exits 2. Any other
-# failure exits 1, which Claude Code treats as non-blocking, so the hook fails
-# open on its own errors. Bypass one call by prefixing each push segment with
-# `SKIP_CI_HOOK=1`.
+# the gate fails. It runs verify.mjs against the paths the outgoing commits and
+# the working tree change, so scripts/changed-scopes.mjs selects the gates;
+# nothing runs when nothing changed or the push only deletes remote refs. A tree
+# without that classifier runs `just ci`, and a command whose target tree or
+# published ref the hook cannot check exits 2. Any other failure exits 1, so the
+# hook fails open on its own errors. Bypass one call by prefixing each push
+# segment with `SKIP_CI_HOOK=1`.
 
 # This must run under macOS's bash 3.2, where `"${a[@]}"` on an empty array is
 # an unbound-variable error, so every array expansion is length guarded. Errors
@@ -45,33 +44,6 @@ trim() {
   s=${s#"${s%%[![:space:]]*}"}
   s=${s%"${s##*[![:space:]]}"}
   printf '%s' "$s"
-}
-
-# Reads changed paths on stdin and prints the gate tier: none, light or full.
-classify_changes() {
-  local tier=none f
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    case "$f" in
-      # dprint formats markdown and typos scans every tracked file, so even
-      # these paths need the light gate. A .gitignore change alters what
-      # eslint sees, so it is deliberately absent here and gets the full gate.
-      *.md | LICENSE* | .git-blame-ignore-revs | .beads/*) tier=light ;;
-      *)
-        printf 'full\n'
-        return 0
-        ;;
-    esac
-  done
-  printf '%s\n' "$tier"
-}
-
-run_gate() {
-  if [ "$1" = light ]; then
-    dprint check && typos --config .typos.toml
-  else
-    just ci
-  fi
 }
 
 # Applies a `cd` that runs before the first push, outside a pipeline.
@@ -485,38 +457,36 @@ if [ "$bare_push" -eq 1 ]; then
     block_unverifiable "push.default is matching, so a bare push publishes every matching branch"
 fi
 
-# The diff runs from the merge-base with the upstream, or with origin/main for
-# a first push. A PR's contents are everything since origin/main, even when the
-# branch is already pushed. Uncommitted and untracked paths count too: the gate
-# runs on the working tree, and a `git commit` earlier in the same command turns
-# them into outgoing commits the diff cannot see yet. Any unknown state gets the
-# full gate.
-tier=full
-base_ref=origin/main
-if [ "$creates_pr" -eq 0 ]; then
-  base_ref=$(git -C "$repo_root" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) || base_ref=origin/main
-fi
-base=$(git -C "$repo_root" merge-base HEAD "$base_ref" 2>/dev/null) || base=""
-if [ -n "$base" ] &&
-  committed=$(git -C "$repo_root" diff --name-only --no-renames "$base" HEAD 2>/dev/null) &&
-  uncommitted=$(git -C "$repo_root" diff --name-only --no-renames HEAD 2>/dev/null) &&
-  untracked=$(git -C "$repo_root" ls-files --others --exclude-standard 2>/dev/null); then
-  tier=$(printf '%s\n%s\n%s\n' "$committed" "$uncommitted" "$untracked" | classify_changes) || fail "could not classify the changed paths"
-fi
-
-[ "$tier" = none ] && exit 0
-
-gate_name="just ci"
-[ "$tier" = light ] && gate_name="dprint check and typos"
-
-if output=$(cd "$repo_root" && run_gate "$tier" </dev/null 2>&1); then
-  exit 0
+# The diff runs from the upstream when HEAD contains it. A first push, a PR, and
+# a force push that rewrites pushed commits diff from the merge-base with
+# origin/main instead: a PR's contents are everything since origin/main, and a
+# diff from a rewritten upstream misses the paths of the commits it drops.
+# Uncommitted and untracked paths count too, because a `git commit` earlier in
+# the same command pushes them. Any unknown state gets every gate.
+#
+# verify.mjs classifies the diff itself, using the target tree's own copy of the
+# classifier, and runs the gates those scopes select. It exits 0 on an empty
+# diff and runs every gate when it cannot list the changes. A tree without the
+# classifier predates it, and its verify.mjs rejects --base, so it gets
+# `just ci`; both paths need bun, so a machine without it fails either way.
+if [ ! -f "$repo_root/scripts/changed-scopes.mjs" ]; then
+  gate_name="just ci"
+  output=$(cd "$repo_root" && just ci </dev/null 2>&1) && exit 0
+else
+  base_ref=origin/main
+  if [ "$creates_pr" -eq 0 ] &&
+    upstream=$(git -C "$repo_root" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) &&
+    git -C "$repo_root" merge-base --is-ancestor "$upstream" HEAD 2>/dev/null; then
+    base_ref=$upstream
+  fi
+  gate_name="verify.mjs --base $base_ref"
+  output=$(cd "$repo_root" && bun .claude/skills/verify/verify.mjs --ci-only --fast --skip lockfile --base "$base_ref" </dev/null 2>&1) && exit 0
 fi
 
 {
   printf '%s failed in %s; refusing to run: %s\n' "$gate_name" "$repo_root" "$cmd"
-  printf '\n--- last 25 lines of gate output ---\n'
-  printf '%s\n' "$output" | tail -25
+  printf '\n--- last 60 lines of gate output ---\n'
+  printf '%s\n' "$output" | tail -60
   printf '\nA fresh worktree needs dist/ and node_modules/ symlinked from the main checkout.\n'
   printf 'To bypass for one call: prefix the push with SKIP_CI_HOOK=1\n'
 } >&2
