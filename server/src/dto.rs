@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 /// the entities (the lower layer that owns the column).
 pub use crate::entities::sea_orm_active_enums::MealType;
 
+use crate::services::unit_converter::ShoppingUnitClass;
+
 // ─── Shared helper ──────────────────────────────────────────────
 
 /// Deserialize an f64 that may be null (AI sometimes returns null for "to taste" amounts)
@@ -288,6 +290,28 @@ pub struct AggregatedIngredientDto {
     pub total_amount: Option<IngredientAmountDto>,
     pub total_unit: Option<String>,
     pub items: Vec<IngredientSourceDto>,
+}
+
+/// A shopping-list line with its total rounded up to a buyable amount.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ShoppingListItemDto {
+    /// The unrounded line: name, exact total, unit and per-meal sources.
+    pub aggregate: AggregatedIngredientDto,
+    /// The rounded total, or `None` when the sources could not be summed into
+    /// one total and unit.
+    pub shopping: Option<ShoppingAmountDto>,
+}
+
+/// A shopping-list total rounded up for buying. Its unit is the line's
+/// `aggregate.total_unit`.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ShoppingAmountDto {
+    /// The rounded total. A range stays a range, with each end rounded.
+    pub amount: IngredientAmountDto,
+    /// The rounding rule the unit selected.
+    pub class: ShoppingUnitClass,
+    /// True when rounding changed the total.
+    pub rounded: bool,
 }
 
 /// Shopping list partitioned by pantry-staple classification. The shape

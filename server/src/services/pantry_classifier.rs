@@ -27,7 +27,7 @@
 //! (false positive) hides in the verify section and may not get bought.
 
 use crate::dto::IngredientAmountDto;
-use crate::services::unit_converter::normalize_unit;
+use crate::services::unit_converter::is_small_measurement_unit;
 
 /// Returns `true` if the aggregated shopping-list line represents a
 /// pantry staple the user likely already has.
@@ -44,20 +44,13 @@ pub fn is_pantry_staple(
     _total_amount: Option<&IngredientAmountDto>,
 ) -> bool {
     if let Some(u) = unit {
+        // Units this small almost always measure a seasoning or spice, so the
+        // unit decides regardless of the ingredient's name.
         if is_small_measurement_unit(u) {
             return true;
         }
     }
     is_allowlisted_staple(name)
-}
-
-/// Units small enough that any ingredient measured in them is almost
-/// certainly a seasoning or spice — diagnostic regardless of name.
-fn is_small_measurement_unit(unit: &str) -> bool {
-    matches!(
-        normalize_unit(unit).as_str(),
-        "tsp" | "tbsp" | "pinch" | "dash" | "splash" | "drop" | "shake"
-    )
 }
 
 fn is_allowlisted_staple(name: &str) -> bool {
@@ -305,24 +298,18 @@ mod tests {
     }
 
     #[test]
-    fn small_unit_detector_normalizes_plurals() {
-        // `unit_converter::normalize_unit` strips a trailing 's' on simple
-        // plurals; "tsps" → "tsp" → small unit. Note: irregular plurals
-        // like "pinches" (which would need -es stripping) aren't handled —
-        // recipe text near-universally writes "1 pinch" or "a pinch", so
-        // the gap doesn't bite in practice.
-        assert!(is_small_measurement_unit("tsps"));
-        assert!(is_small_measurement_unit("tablespoons"));
-        assert!(is_small_measurement_unit("drops"));
-        assert!(is_small_measurement_unit("shakes"));
-    }
-
-    #[test]
-    fn ordinary_units_are_not_small() {
-        for unit in ["cup", "oz", "lb", "g", "ml", "whole", "clove"] {
+    fn es_plural_small_units_are_staples() {
+        // Each name is outside STAPLE_NAMES, so only the unit rule can match.
+        let amt = single(2.0);
+        let cases = [
+            ("chili crisp", "pinches"),
+            ("orange bitters", "dashes"),
+            ("lime juice", "splashes"),
+        ];
+        for (name, unit) in cases {
             assert!(
-                !is_small_measurement_unit(unit),
-                "{unit} should not be a small measurement",
+                is_pantry_staple(name, Some(unit), Some(&amt)),
+                "{name} ({unit}) should classify as a staple",
             );
         }
     }
