@@ -7,9 +7,9 @@
 //! crate keeps that single source of truth (the server depends on `migration`).
 
 /// Normalize a `(value, unit)` duration into whole minutes. Unit matching is
-/// case-insensitive and trims surrounding whitespace. The recognized units are a
-/// superset of what `recipe_parser::parse_time_value` canonicalizes to
-/// (`minutes`/`hours`/`days`), so anything the import parser can store is filterable.
+/// case-insensitive and trims surrounding whitespace. The markdown import parser
+/// canonicalizes its units through [`canonical_time_unit`] too, so any unit it keeps
+/// is filterable.
 ///
 /// Returns `None` for an unrecognized unit, or a negative value, so callers can
 /// distinguish "not time-filterable" from "0 minutes" — a recipe whose duration we

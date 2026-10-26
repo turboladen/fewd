@@ -118,8 +118,11 @@ pub async fn import_markdown(
     State(state): State<AppState>,
     Json(data): Json<ImportRecipeDto>,
 ) -> Result<(StatusCode, Json<recipe::Model>), AppError> {
-    let dto = RecipeParser::parse_markdown(&data.markdown)
+    let mut dto = RecipeParser::parse_markdown(&data.markdown)
         .map_err(|e| AppError::BadRequest(format!("Failed to parse markdown: {}", e)))?;
+    // The parser skips what it cannot read everywhere else in the document,
+    // so a time it cannot use is dropped rather than failing the import.
+    drop_unusable_import_times(&mut dto);
 
     RecipeService::create(&state.db, dto)
         .await

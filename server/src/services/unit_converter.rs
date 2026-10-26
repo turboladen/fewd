@@ -43,42 +43,9 @@ pub fn best_display_unit(base_value: f64, category: &str) -> (f64, String) {
     }
 }
 
-/// Normalize a unit string: lowercase, trim, strip trailing 's' for plurals.
-pub fn normalize_unit(unit: &str) -> String {
-    let s = unit.trim().to_lowercase();
-    // Handle multi-word units first
-    match s.as_str() {
-        "fl oz" | "fl. oz" | "fl. oz." | "fluid ounce" | "fluid ounces" => {
-            return "fl oz".to_string()
-        }
-        "to taste" => return "to taste".to_string(),
-        _ => {}
-    }
-    // Strip trailing 's' for simple plurals (cups→cup, grams→gram, tbsps→tbsp)
-    // But not for units that naturally end in 's'
-    let no_plural = if s.ends_with('s') && s != "to taste" && s != "fl oz" && s.len() > 2 {
-        &s[..s.len() - 1]
-    } else {
-        &s
-    };
-    // Normalize common aliases
-    match no_plural {
-        "gram" | "g" => "g".to_string(),
-        "kilogram" | "kg" => "kg".to_string(),
-        "milligram" | "mg" => "mg".to_string(),
-        "ounce" | "oz" => "oz".to_string(),
-        "pound" | "lb" => "lb".to_string(),
-        "milliliter" | "millilitre" | "ml" => "ml".to_string(),
-        "liter" | "litre" | "l" => "l".to_string(),
-        "cup" => "cup".to_string(),
-        "tablespoon" | "tbsp" | "tbs" | "tb" => "tbsp".to_string(),
-        "teaspoon" | "tsp" | "ts" => "tsp".to_string(),
-        "pint" | "pt" => "pint".to_string(),
-        "quart" | "qt" => "quart".to_string(),
-        "gallon" | "gal" => "gallon".to_string(),
-        other => other.to_string(),
-    }
-}
+// The markdown parser's unit predicate and these conversions share one
+// normalizer, so a unit the parser accepts is the unit the shopping list groups.
+pub use migration::normalize_unit;
 
 // --- Weight conversions (to grams) ---
 
@@ -156,20 +123,9 @@ pub enum ShoppingUnitClass {
 /// Returns true when the unit, after normalization, is a small measurement
 /// such as a teaspoon, pinch or dash.
 pub fn is_small_measurement_unit(unit: &str) -> bool {
-    // `normalize_unit` strips only a trailing "s", so "pinches", "dashes" and
-    // "splashes" arrive as "pinche", "dashe" and "splashe".
     matches!(
         normalize_unit(unit).as_str(),
-        "tsp"
-            | "tbsp"
-            | "pinch"
-            | "pinche"
-            | "dash"
-            | "dashe"
-            | "splash"
-            | "splashe"
-            | "drop"
-            | "shake"
+        "tsp" | "tbsp" | "pinch" | "dash" | "splash" | "drop" | "shake"
     )
 }
 
@@ -476,13 +432,11 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_unit() {
-        assert_eq!(normalize_unit("cups"), "cup");
-        assert_eq!(normalize_unit("Tbsp"), "tbsp");
-        assert_eq!(normalize_unit("GRAMS"), "g");
-        assert_eq!(normalize_unit("fl oz"), "fl oz");
-        assert_eq!(normalize_unit("to taste"), "to taste");
-        assert_eq!(normalize_unit("whole"), "whole");
+    fn es_plurals_normalize_to_their_singular() {
+        // The full plural and alias table is tested beside the shared
+        // normalizer in the migration crate.
+        assert_eq!(normalize_unit("bunches"), normalize_unit("bunch"));
+        assert_eq!(normalize_unit("Pinches"), "pinch");
     }
 
     #[test]

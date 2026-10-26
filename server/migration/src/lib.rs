@@ -26,7 +26,8 @@ pub mod slug;
 pub mod total_minutes;
 
 pub use ingredient_amount::{
-    is_known_unit, try_parse_amount, try_parse_amount_json, unicode_fraction_value, AmountKind,
+    is_known_unit, normalize_unit, try_parse_amount, try_parse_amount_json, unicode_fraction_value,
+    AmountKind, DISCRETE_UNITS, MEASURED_UNITS,
 };
 pub use ingredient_splitter::{first_top_level_or, split_name_and_prep};
 pub use paren_notes::peel_size_paren;

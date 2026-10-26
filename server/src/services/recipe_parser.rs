@@ -2,6 +2,7 @@ use crate::dto::{CreateRecipeDto, IngredientAmountDto, IngredientDto, TimeValueD
 use crate::services::ingredient_amount::{is_known_unit, try_parse_amount_dto};
 use crate::services::ingredient_splitter::{first_top_level_or, split_name_and_prep};
 use crate::services::paren_notes::peel_size_paren;
+use migration::total_minutes::canonical_time_unit;
 
 /// The servings a parsed recipe gets when its source states none.
 pub const DEFAULT_SERVINGS: i32 = 4;
@@ -129,26 +130,41 @@ fn parse_time_value(s: &str) -> Option<TimeValueDto> {
 
     let s = s.to_lowercase();
 
-    // Handle ranges like "35-40 minutes" → take first number
-    let parts: Vec<&str> = s.split_whitespace().collect();
-    if parts.is_empty() {
+    // The value is the leading integer. A range such as "35-40 minutes",
+    // "35–40 minutes" or "5 to 10 minutes" keeps its first number.
+    let digits_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    let value: i32 = s[..digits_end].parse().ok()?;
+    let rest = &s[digits_end..];
+    // A decimal or fraction ("1.5 hours", "1½ hours") is not a whole count of
+    // its unit, so the field is skipped like any other value it cannot read.
+    if rest
+        .chars()
+        .next()
+        .is_some_and(|c| !(c.is_whitespace() || c.is_alphabetic() || is_dash(c)))
+    {
         return None;
     }
 
-    let first_num = parts[0].split('-').next()?;
-    let value: i32 = first_num.parse().ok()?;
-
-    let unit = if parts.len() > 1 {
-        match parts[1] {
-            "hour" | "hours" | "hr" | "hrs" => "hours".to_string(),
-            "day" | "days" => "days".to_string(),
-            _ => "minutes".to_string(),
+    // The unit is the first word after the number, attached ("15min", "2h")
+    // or not, skipping the range connectors "to" and "or". A value with no
+    // unit word counts minutes.
+    let word = rest
+        .split(|c: char| !c.is_alphabetic())
+        .find(|word| !word.is_empty() && !matches!(*word, "to" | "or"));
+    let unit = match word {
+        None => "minutes".to_string(),
+        // An unrecognized word is kept as written. The import route drops a
+        // time whose unit it cannot read, rather than storing it as minutes.
+        Some(word) => {
+            canonical_time_unit(word).map_or_else(|| word.to_string(), |(unit, _)| unit.to_string())
         }
-    } else {
-        "minutes".to_string()
     };
 
     Some(TimeValueDto { value, unit })
+}
+
+fn is_dash(c: char) -> bool {
+    matches!(c, '-' | '–' | '—')
 }
 
 fn parse_servings(lines: &[&str]) -> Option<i32> {
@@ -492,6 +508,70 @@ dinner, quick, mexican";
         assert_eq!(total.unit, "minutes");
     }
 
+    fn time_of(line: &str) -> Option<(i32, String)> {
+        let recipe = parse(&format!("# Dish\n{line}\n\n## Instructions\nCook"));
+        recipe
+            .prep_time
+            .or(recipe.cook_time)
+            .or(recipe.total_time)
+            .map(|time| (time.value, time.unit))
+    }
+
+    #[test]
+    fn time_units_map_through_the_shared_time_unit_table() {
+        for (line, value, unit) in [
+            ("Cook time: 2 h", 2, "hours"),
+            ("Total time: 1 d", 1, "days"),
+            ("Prep time: 10 m", 10, "minutes"),
+            ("Prep time: 10 mins", 10, "minutes"),
+            ("Cook time: 3 Hours", 3, "hours"),
+            ("Prep time: 15min", 15, "minutes"),
+            ("Cook time: 2h", 2, "hours"),
+            ("Cook time: 1hr", 1, "hours"),
+        ] {
+            assert_eq!(time_of(line), Some((value, unit.to_string())), "{line}");
+        }
+    }
+
+    #[test]
+    fn time_ranges_keep_the_first_number_and_find_the_unit() {
+        for (line, value, unit) in [
+            ("Total time: 35–40 minutes", 35, "minutes"),
+            ("Total time: 35—40 minutes", 35, "minutes"),
+            ("Total time: 35 - 40 minutes", 35, "minutes"),
+            ("Total time: 2-3 hours", 2, "hours"),
+            ("Prep time: 5 to 10 minutes", 5, "minutes"),
+            ("Prep time: 5 or 10 minutes", 5, "minutes"),
+            ("Cook time: 1-2h", 1, "hours"),
+        ] {
+            assert_eq!(time_of(line), Some((value, unit.to_string())), "{line}");
+        }
+    }
+
+    #[test]
+    fn time_without_a_unit_word_counts_minutes() {
+        assert_eq!(time_of("Prep time: 15"), Some((15, "minutes".to_string())));
+        assert_eq!(
+            time_of("Prep time: 10 minutes."),
+            Some((10, "minutes".to_string()))
+        );
+    }
+
+    #[test]
+    fn unrecognized_time_unit_is_kept_as_written() {
+        assert_eq!(
+            time_of("Prep time: 2 fortnights"),
+            Some((2, "fortnights".to_string()))
+        );
+    }
+
+    #[test]
+    fn time_that_is_not_a_whole_number_is_skipped() {
+        assert_eq!(time_of("Cook time: 1.5 hours"), None);
+        assert_eq!(time_of("Cook time: 1½ hours"), None);
+        assert_eq!(time_of("Cook time: about 20 minutes"), None);
+    }
+
     #[test]
     fn test_time_parsing_parenthetical() {
         let md =
@@ -506,6 +586,42 @@ dinner, quick, mexican";
         let md = "# Wings\nServings: 12-15 pieces\n\n## Instructions\nFry";
         let recipe = parse(md);
         assert_eq!(recipe.servings, 12); // takes first number
+    }
+
+    fn only_ingredient(line: &str) -> IngredientDto {
+        let recipe = parse(&format!(
+            "# Dish\n\n## Ingredients\n{line}\n\n## Instructions\nMix"
+        ));
+        assert_eq!(recipe.ingredients.len(), 1, "{line}");
+        recipe.ingredients.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn es_plural_units_split_from_the_name() {
+        for (line, unit, name) in [
+            ("- 2 bunches kale", "bunches", "kale"),
+            ("- 3 pinches salt", "pinches", "salt"),
+            ("- 2 dashes bitters", "dashes", "bitters"),
+            ("- 4 leaves basil", "leaves", "basil"),
+        ] {
+            let ing = only_ingredient(line);
+            assert_eq!(
+                (ing.unit.as_str(), ing.name.as_str()),
+                (unit, name),
+                "{line}"
+            );
+        }
+        let kale = only_ingredient("- 2 bunches kale");
+        assert!(
+            matches!(kale.amount, IngredientAmountDto::Single { value } if (value - 2.0).abs() < 0.001)
+        );
+    }
+
+    #[test]
+    fn words_that_only_look_plural_stay_in_the_name() {
+        let ing = only_ingredient("- 2 glasses wine");
+        assert_eq!(ing.unit, "whole");
+        assert_eq!(ing.name, "glasses wine");
     }
 
     #[test]

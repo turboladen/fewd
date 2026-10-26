@@ -4,7 +4,10 @@
 //! Canonical implementation lives in `migration::ingredient_amount` so the
 //! runtime parser and the backfill migration share one source of truth.
 
-pub use migration::{is_known_unit, try_parse_amount, unicode_fraction_value, AmountKind};
+pub use migration::{
+    is_known_unit, try_parse_amount, unicode_fraction_value, AmountKind, DISCRETE_UNITS,
+    MEASURED_UNITS,
+};
 
 use crate::dto::IngredientAmountDto;
 
@@ -22,11 +25,26 @@ mod tests {
     use super::*;
     use crate::services::unit_converter;
 
-    /// Drift guard: every unit `unit_converter::normalize_unit` recognizes
-    /// as either a weight or a volume MUST also be accepted by
-    /// `is_known_unit`. The two modules independently maintain unit
-    /// knowledge — this test catches the case where someone adds a unit to
-    /// one and forgets the other.
+    // Drift guard: `is_known_unit` and `unit_converter` share one
+    // normalizer, but the converter keeps its own conversion tables. Every
+    // spelling the converter classifies as a weight or volume must be a
+    // known unit, and the unit lists must agree with those tables.
+    #[test]
+    fn unit_lists_match_unit_converter_categories() {
+        for unit in MEASURED_UNITS {
+            assert!(
+                unit_converter::unit_category(unit).is_some(),
+                "unit_converter must classify measured unit {unit:?}"
+            );
+        }
+        for unit in DISCRETE_UNITS {
+            assert!(
+                unit_converter::unit_category(unit).is_none(),
+                "unit_converter must not convert discrete unit {unit:?}"
+            );
+        }
+    }
+
     #[test]
     fn is_known_unit_covers_unit_converter_weight_and_volume() {
         let units = [
