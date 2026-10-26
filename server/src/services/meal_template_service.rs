@@ -4,7 +4,7 @@ use crate::dto::PersonServingDto;
 use crate::dto::{CreateMealTemplateDto, UpdateMealTemplateDto};
 use crate::entities::meal::Entity as Meal;
 use crate::entities::meal_template::{self, Entity as MealTemplate};
-use crate::services::service_error::{check_servings_counts, ServiceError};
+use crate::services::service_error::{check_servings_counts, ServiceError, ValidationError};
 use crate::services::to_json;
 
 pub struct MealTemplateService;
@@ -95,7 +95,15 @@ impl MealTemplateService {
             .map_err(|e| DbErr::Custom(format!("Failed to parse meal servings: {}", e)))?;
         // A stored meal can hold a count that meal writes reject, and a
         // template carrying it could not be applied.
-        check_servings_counts(&servings)?;
+        if let Err(ValidationError::NonPositiveServingsCount(count)) =
+            check_servings_counts(&servings)
+        {
+            return Err(ValidationError::StoredServingsCount {
+                meal_id: meal.id,
+                count,
+            }
+            .into());
+        }
 
         let now = chrono::Utc::now();
         let template = meal_template::ActiveModel {

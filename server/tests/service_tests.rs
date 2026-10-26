@@ -4315,7 +4315,7 @@ async fn shopping_list_scales_a_stored_zero_serving_recipe_as_one() {
         assert_eq!(total, expected, "{}", line.ingredient_name);
         assert_eq!(line.items.len(), 1);
         assert_eq!(amount_value(&line.items[0].amount), expected);
-        assert_eq!(line.items[0].recipe_servings, Some(0));
+        assert_eq!(line.items[0].recipe_servings, Some(1));
     }
 
     let rounded = ShoppingService::get_shopping_list_rounded(
@@ -4647,10 +4647,19 @@ async fn meal_template_from_meal_rejects_a_stored_nonpositive_servings_count() {
     row.servings = Set(serde_json::to_string(&[recipe_serving("alice", &recipe.id, 0.0)]).unwrap());
     row.update(&db).await.unwrap();
 
-    let err = MealTemplateService::create_from_meal(&db, meal.id, "Pasta Night".to_string())
-        .await
-        .unwrap_err();
-    assert!(is_nonpositive_servings_count(&err), "{err:?}");
+    let err =
+        MealTemplateService::create_from_meal(&db, meal.id.clone(), "Pasta Night".to_string())
+            .await
+            .unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            ServiceError::Validation(ValidationError::StoredServingsCount { meal_id, count })
+                if *meal_id == meal.id && *count == 0.0
+        ),
+        "{err:?}"
+    );
+    assert!(err.to_string().contains("Edit the meal"), "{err}");
     assert!(MealTemplateService::get_all(&db).await.unwrap().is_empty());
 }
 
@@ -4684,4 +4693,39 @@ async fn shopping_list_orders_meals_in_one_slot_by_creation() {
     assert_eq!(list[0].ingredient_name, "Flour");
     let meal_ids: Vec<&str> = list[0].items.iter().map(|s| s.meal_id.as_str()).collect();
     assert_eq!(meal_ids, [first.id.as_str(), second.id.as_str()]);
+}
+
+#[tokio::test]
+async fn shopping_list_converts_one_meals_items_in_different_units() {
+    let db = setup_db().await;
+    let adhoc = |person: &str, value: f64, unit: &str| PersonServingDto::Adhoc {
+        person_id: person.to_string(),
+        adhoc_items: vec![IngredientDto {
+            name: "flour".to_string(),
+            prep: None,
+            amount: IngredientAmountDto::Single { value },
+            unit: unit.to_string(),
+            notes: None,
+            or_alternative: None,
+        }],
+        notes: None,
+    };
+    MealService::create(
+        &db,
+        dinner(
+            "2025-06-10",
+            vec![adhoc("alice", 2.0, "cup"), adhoc("bob", 1.0, "tbsp")],
+        ),
+    )
+    .await
+    .unwrap();
+
+    let list =
+        ShoppingService::get_shopping_list(&db, "2025-06-09".to_string(), "2025-06-11".to_string())
+            .await
+            .unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].items.len(), 2);
+    assert_eq!(list[0].total_unit.as_deref(), Some("cup"));
+    assert_eq!(amount_value(list[0].total_amount.as_ref().unwrap()), 2.06);
 }

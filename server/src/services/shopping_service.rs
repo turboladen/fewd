@@ -78,7 +78,8 @@ impl ShoppingService {
 
                             // Writes reject a count below 1, but an older row may
                             // hold one. Dividing by it would make every amount
-                            // infinite, so it is read as one serving.
+                            // infinite, so it is read as one serving, and the
+                            // source reports the count the scale used.
                             let recipe_servings = if recipe.servings < 1 {
                                 if warned_recipes.insert(recipe.id.clone()) {
                                     tracing::warn!(
@@ -122,7 +123,7 @@ impl ShoppingService {
                                     meal_id: meal.id.clone(),
                                     meal_date: meal_date.clone(),
                                     meal_type: meal.meal_type.to_string(),
-                                    recipe_servings: Some(recipe.servings),
+                                    recipe_servings: Some(recipe_servings),
                                     person_servings: Some(*servings_count),
                                 };
 
@@ -306,8 +307,9 @@ fn scale_alt(alt: IngredientDto, scale: f64) -> IngredientDto {
 fn merge_same_meal_sources(items: Vec<IngredientWithSource>) -> Vec<IngredientWithSource> {
     // Groups keep first-seen order, so the output follows meal order: the
     // display name takes the first meal's casing and sums run in one order.
-    // Key: (ingredient_name_lower, meal_id, source_name)
-    let mut index: HashMap<(String, String, Option<String>), usize> = HashMap::new();
+    // Items in different units stay apart, so the aggregation can convert them.
+    // Key: (ingredient_name_lower, meal_id, source_name, normalized_unit)
+    let mut index: HashMap<(String, String, Option<String>, String), usize> = HashMap::new();
     let mut groups: Vec<Vec<IngredientWithSource>> = Vec::new();
 
     for item in items {
@@ -315,6 +317,7 @@ fn merge_same_meal_sources(items: Vec<IngredientWithSource>) -> Vec<IngredientWi
             item.ingredient.name.to_lowercase(),
             item.source.meal_id.clone(),
             item.source.source_name.clone(),
+            unit_converter::normalize_unit(&item.ingredient.unit),
         );
         let slot = *index.entry(key).or_insert_with(|| {
             groups.push(Vec::new());
