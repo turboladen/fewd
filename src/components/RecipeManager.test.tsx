@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RecipeDetailPage } from '../routes/RecipeDetailPage'
@@ -6,9 +6,9 @@ import { makeRecipe } from '../test/factories'
 import { installFetchMock, mockJson, resetFetchMock } from '../test/fetchMock'
 import { renderWithProviders } from '../test/renderWithProviders'
 import { installStreamMock, mockStream, resetStreamMock } from '../test/streamMock'
-import type { ParsedRecipe, Recipe, ScaleResult } from '../types/recipe'
+import type { Ingredient, ParsedRecipe, Recipe, ScaleResult } from '../types/recipe'
 import { parseRecipe } from '../types/recipe'
-import { RecipeManager, ScaleRecipePanel, ScalingPreviewAltRow } from './RecipeManager'
+import { RecipeForm, RecipeManager, ScaleRecipePanel, ScalingPreviewAltRow } from './RecipeManager'
 
 beforeEach(() => {
   installFetchMock()
@@ -610,5 +610,106 @@ describe('ScaleRecipePanel', () => {
     previewServings('4', '8')
 
     await waitFor(() => expect(screen.getByText('Rounded from 3.333')).toBeInTheDocument())
+  })
+})
+
+describe('RecipeForm', () => {
+  function row(name: string, overrides: Partial<Ingredient> = {}): Ingredient {
+    return { name, amount: { type: 'single', value: 1 }, unit: '', notes: undefined, ...overrides }
+  }
+
+  function renderForm(
+    ingredients: Ingredient[],
+    extra: Partial<Parameters<typeof RecipeForm>[0]> = {},
+  ) {
+    const onSubmit = vi.fn()
+    render(
+      <RecipeForm
+        initialData={{
+          name: 'Pesto',
+          description: '',
+          servings: 4,
+          instructions: 'Blend',
+          ingredients,
+          tags: [],
+          notes: '',
+          icon: '',
+        }}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+        submitLabel='Save'
+        {...extra}
+      />,
+    )
+    fireEvent.submit(screen.getByRole('button', { name: 'Save' }).closest('form')!)
+    return onSubmit
+  }
+
+  it('leaves entirely empty rows and alternatives out of the submitted recipe', () => {
+    const onSubmit = renderForm([
+      row('garlic', { unit: 'clove' }),
+      row('  '),
+      row('basil', { or_alternative: row(' ') }),
+      row('oil', { or_alternative: row('butter') }),
+    ])
+
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    const sent: Ingredient[] = onSubmit.mock.calls[0][0].ingredients
+    expect(sent.map((i) => [i.name, i.or_alternative?.name])).toEqual([
+      ['garlic', undefined],
+      ['basil', undefined],
+      ['oil', 'butter'],
+    ])
+  })
+
+  it('blocks the save and names a row that has data but no name', () => {
+    const onSubmit = renderForm([row('garlic'), row('', { amount: { type: 'single', value: 2 } })])
+
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(screen.getByText('Ingredient 2 has no name. Name it or remove the row.'))
+      .toBeInTheDocument()
+  })
+
+  it('blocks the save and names an alternative that has data but no name', () => {
+    const onSubmit = renderForm([row('garlic', { or_alternative: row(' ', { unit: 'cup' }) })])
+
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(
+      screen.getByText(
+        'The alternative for ingredient 1 has no name. Name it or remove the alternative.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('drops a row whose amount the user cleared and saves the rest', () => {
+    const onSubmit = renderForm([row('garlic'), row('', { amount: { type: 'single', value: 0 } })])
+
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    const sent: Ingredient[] = onSubmit.mock.calls[0][0].ingredients
+    expect(sent.map((i) => i.name)).toEqual(['garlic'])
+  })
+
+  it('does not warn about unrescaled ingredients when only an empty row was added', () => {
+    const garlic = row('garlic', { unit: 'clove' })
+    render(
+      <RecipeForm
+        initialData={{
+          name: 'Pesto',
+          description: '',
+          servings: 6,
+          instructions: 'Blend',
+          ingredients: [garlic, row('')],
+          tags: [],
+          notes: '',
+          icon: '',
+        }}
+        onSubmit={() => {}}
+        onCancel={() => {}}
+        submitLabel='Save'
+        rescaleBaseline={{ servings: 4, ingredients: [garlic] }}
+      />,
+    )
+
+    expect(screen.queryByText(/will not be rescaled/)).toBeNull()
   })
 })

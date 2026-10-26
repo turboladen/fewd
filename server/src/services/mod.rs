@@ -9,6 +9,7 @@ pub mod ingredient_splitter;
 pub mod mcp_token_service;
 pub mod meal_service;
 pub mod meal_template_service;
+pub mod normalize;
 pub mod pantry_classifier;
 pub mod paren_notes;
 pub mod person_service;

@@ -130,6 +130,8 @@ pub struct IngredientOut {
     /// Do NOT bundle preparation form here ("garlic, minced"). Put the prep
     /// clause in the dedicated `prep` field instead. A comma'd name fragments
     /// shopping aggregation across recipes.
+    ///
+    /// Must not be empty or whitespace-only.
     pub name: String,
     /// Optional preparation form (e.g. "minced", "thinly sliced", "cut into
     /// wedges for serving"). The shopping aggregator ignores this — prep is
@@ -275,19 +277,36 @@ pub(super) fn nutrition_out(n: NutritionDto) -> NutritionOut {
     }
 }
 
-pub(super) fn ingredient_in(ing: IngredientOut) -> IngredientDto {
+/// Convert an MCP ingredient, and any alternative it carries, to the DTO the
+/// services accept.
+///
+/// # Errors
+///
+/// Returns the dotted path of the first blank name, `name` or
+/// `or_alternative.name`, so the caller can number it in its message.
+pub(super) fn ingredient_in(ing: IngredientOut) -> Result<IngredientDto, String> {
     // Defensive: if a caller hands us `name = "garlic, minced", prep = None`
     // (or `prep = Some(""))`, normalize it through the splitter so the comma'd
     // prep ends up in the dedicated field. Idempotent on already-split inputs.
+    // The splitter never empties a name that has text, so checking after it
+    // is enough.
     let (name, prep) = crate::services::ingredient_splitter::normalize(ing.name, ing.prep);
-    IngredientDto {
+    if name.trim().is_empty() {
+        return Err("name".to_string());
+    }
+    let or_alternative = ing
+        .or_alternative
+        .map(|alt| ingredient_in(*alt).map(Box::new))
+        .transpose()
+        .map_err(|path| format!("or_alternative.{path}"))?;
+    Ok(IngredientDto {
         name,
         prep,
         amount: amount_in(ing.amount),
         unit: ing.unit,
         notes: ing.notes,
-        or_alternative: ing.or_alternative.map(|alt| Box::new(ingredient_in(*alt))),
-    }
+        or_alternative,
+    })
 }
 
 pub(super) fn amount_in(a: IngredientAmountOut) -> IngredientAmountDto {
@@ -338,7 +357,7 @@ mod tests {
 
     #[test]
     fn ingredient_in_splits_unsplit_name_at_boundary() {
-        let dto = ingredient_in(out("garlic, minced", None));
+        let dto = ingredient_in(out("garlic, minced", None)).expect("named ingredient");
         assert_eq!(dto.name, "garlic");
         assert_eq!(dto.prep.as_deref(), Some("minced"));
     }
@@ -348,14 +367,14 @@ mod tests {
         // LLM emitting "" instead of null for an unset optional. Without
         // normalization the comma'd name would slip through and fragment
         // shopping aggregation.
-        let dto = ingredient_in(out("garlic, minced", Some("")));
+        let dto = ingredient_in(out("garlic, minced", Some(""))).expect("named ingredient");
         assert_eq!(dto.name, "garlic");
         assert_eq!(dto.prep.as_deref(), Some("minced"));
     }
 
     #[test]
     fn ingredient_in_passes_through_already_split() {
-        let dto = ingredient_in(out("garlic", Some("minced")));
+        let dto = ingredient_in(out("garlic", Some("minced"))).expect("named ingredient");
         assert_eq!(dto.name, "garlic");
         assert_eq!(dto.prep.as_deref(), Some("minced"));
     }
@@ -365,7 +384,7 @@ mod tests {
         // If the caller is explicit about both name AND prep, we trust them
         // — even when the name has a comma. The defensive split only fires
         // when prep is genuinely absent.
-        let dto = ingredient_in(out("garlic, minced", Some("smashed")));
+        let dto = ingredient_in(out("garlic, minced", Some("smashed"))).expect("named ingredient");
         assert_eq!(dto.name, "garlic, minced");
         assert_eq!(dto.prep.as_deref(), Some("smashed"));
     }

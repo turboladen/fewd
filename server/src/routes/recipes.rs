@@ -20,7 +20,7 @@ use crate::services::recipe_enhancer;
 use crate::services::recipe_import_service::RecipeImportService;
 use crate::services::recipe_parser::RecipeParser;
 use crate::services::recipe_scaler;
-use crate::services::recipe_service::{default_unusable_import_servings, RecipeService};
+use crate::services::recipe_service::{sanitize_generated_recipe, RecipeService};
 use crate::services::recipe_times::drop_unusable_import_times;
 use crate::services::service_error::ServiceError;
 use crate::services::settings_service::SettingsService;
@@ -365,8 +365,7 @@ pub async fn import_url(
                         dto.source = "url_import".to_string();
                         dto.parent_recipe_id = None;
                         dto.source_url = Some(url);
-                        drop_unusable_import_times(&mut dto);
-                        default_unusable_import_servings(&mut dto);
+                        sanitize_generated_recipe(&mut dto);
 
                         match RecipeService::create(&db, dto).await {
                             Ok(recipe) => {
@@ -405,7 +404,7 @@ pub async fn import_url(
 /// Logs why an imported recipe failed to save and returns the message to
 /// show the client. A validation failure names the broken rule; a database
 /// failure returns only a label, so SQLite detail stays in the log.
-fn import_save_error_message(err: ServiceError) -> String {
+pub(super) fn import_save_error_message(err: ServiceError) -> String {
     match err {
         ServiceError::Validation(e) => {
             tracing::warn!("Imported recipe failed validation: {}", e);
@@ -454,8 +453,7 @@ pub async fn import_file(
         .await;
 
     let mut dto = result.recipe;
-    drop_unusable_import_times(&mut dto);
-    default_unusable_import_servings(&mut dto);
+    sanitize_generated_recipe(&mut dto);
     RecipeService::create(&state.db, dto)
         .await
         .map(|r| (StatusCode::CREATED, Json(r)))

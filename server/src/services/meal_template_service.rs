@@ -4,6 +4,7 @@ use crate::dto::PersonServingDto;
 use crate::dto::{CreateMealTemplateDto, UpdateMealTemplateDto};
 use crate::entities::meal::Entity as Meal;
 use crate::entities::meal_template::{self, Entity as MealTemplate};
+use crate::services::normalize::{required_name, trim_adhoc_item_names};
 use crate::services::service_error::{check_servings_counts, ServiceError, ValidationError};
 use crate::services::to_json;
 
@@ -27,14 +28,16 @@ impl MealTemplateService {
 
     pub async fn create(
         db: &DatabaseConnection,
-        data: CreateMealTemplateDto,
+        mut data: CreateMealTemplateDto,
     ) -> Result<meal_template::Model, ServiceError> {
+        let name = required_name("name", data.name)?;
         check_servings_counts(&data.servings)?;
+        trim_adhoc_item_names(&mut data.servings)?;
         let now = chrono::Utc::now();
 
         let template = meal_template::ActiveModel {
             id: Set(uuid::Uuid::new_v4().to_string()),
-            name: Set(data.name),
+            name: Set(name),
             meal_type: Set(data.meal_type),
             servings: Set(to_json(&data.servings)?),
             created_at: Set(now),
@@ -47,10 +50,12 @@ impl MealTemplateService {
     pub async fn update(
         db: &DatabaseConnection,
         id: String,
-        data: UpdateMealTemplateDto,
+        mut data: UpdateMealTemplateDto,
     ) -> Result<meal_template::Model, ServiceError> {
-        if let Some(servings) = &data.servings {
+        let name = data.name.map(|n| required_name("name", n)).transpose()?;
+        if let Some(servings) = &mut data.servings {
             check_servings_counts(servings)?;
+            trim_adhoc_item_names(servings)?;
         }
         let existing = MealTemplate::find_by_id(id)
             .one(db)
@@ -59,7 +64,7 @@ impl MealTemplateService {
 
         let mut template: meal_template::ActiveModel = existing.into();
 
-        if let Some(name) = data.name {
+        if let Some(name) = name {
             template.name = Set(name);
         }
         if let Some(meal_type) = data.meal_type {
@@ -85,13 +90,14 @@ impl MealTemplateService {
         meal_id: String,
         name: String,
     ) -> Result<meal_template::Model, ServiceError> {
+        let name = required_name("name", name)?;
         let meal = Meal::find_by_id(meal_id)
             .one(db)
             .await?
             .ok_or(DbErr::RecordNotFound("Meal not found".to_string()))?;
 
         // Parse servings from the meal to validate the JSON, then re-serialize
-        let servings: Vec<PersonServingDto> = serde_json::from_str(&meal.servings)
+        let mut servings: Vec<PersonServingDto> = serde_json::from_str(&meal.servings)
             .map_err(|e| DbErr::Custom(format!("Failed to parse meal servings: {}", e)))?;
         // A stored meal can hold a count that meal writes reject, and a
         // template carrying it could not be applied.
@@ -104,6 +110,7 @@ impl MealTemplateService {
             }
             .into());
         }
+        trim_adhoc_item_names(&mut servings)?;
 
         let now = chrono::Utc::now();
         let template = meal_template::ActiveModel {

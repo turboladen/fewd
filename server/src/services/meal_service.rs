@@ -6,6 +6,7 @@ use sea_orm::*;
 use crate::dto::{CreateMealDto, PersonServingDto, UpdateMealDto};
 use crate::entities::meal::{self, Entity as Meal};
 use crate::entities::recipe::{self, Entity as Recipe};
+use crate::services::normalize::trim_adhoc_item_names;
 use crate::services::service_error::{check_servings_counts, ServiceError, ValidationError};
 use crate::services::to_json;
 
@@ -50,9 +51,10 @@ impl MealService {
 
     pub async fn create(
         db: &DatabaseConnection,
-        data: CreateMealDto,
+        mut data: CreateMealDto,
     ) -> Result<meal::Model, ServiceError> {
         check_servings_counts(&data.servings)?;
+        trim_adhoc_item_names(&mut data.servings)?;
         let date = parse_meal_date(&data.date)?;
         let now = chrono::Utc::now();
 
@@ -77,11 +79,12 @@ impl MealService {
     pub async fn update(
         db: &DatabaseConnection,
         id: String,
-        data: UpdateMealDto,
+        mut data: UpdateMealDto,
     ) -> Result<meal::Model, ServiceError> {
         // Every check runs before the usage counters below are written.
-        if let Some(servings) = &data.servings {
+        if let Some(servings) = &mut data.servings {
             check_servings_counts(servings)?;
+            trim_adhoc_item_names(servings)?;
         }
         let date = data.date.as_deref().map(parse_meal_date).transpose()?;
         let existing = Meal::find_by_id(id)

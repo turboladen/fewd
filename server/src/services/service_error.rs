@@ -67,6 +67,12 @@ pub enum ValidationError {
     /// A meal `date` is not a calendar date in `YYYY-MM-DD` form. Carries
     /// the date as the caller sent it.
     InvalidDate(String),
+    /// A required name field is empty or whitespace-only.
+    EmptyName { field: &'static str },
+    /// An ingredient or ad-hoc item has an empty or whitespace-only name.
+    /// `field` locates it with positions counted from 1, such as
+    /// `ingredients[2].name` or `servings[1].adhoc_items[3].or_alternative.name`.
+    EmptyIngredientName { field: String },
 }
 
 impl std::fmt::Display for ValidationError {
@@ -104,6 +110,13 @@ impl std::fmt::Display for ValidationError {
             Self::InvalidDate(date) => write!(
                 f,
                 "date must be a calendar date in YYYY-MM-DD form (got '{date}')."
+            ),
+            Self::EmptyName { field } => {
+                write!(f, "{field} must not be empty or whitespace-only.")
+            }
+            Self::EmptyIngredientName { field } => write!(
+                f,
+                "{field} must not be empty or whitespace-only (positions count from 1). Name the ingredient or remove it."
             ),
         }
     }
@@ -175,7 +188,7 @@ mod tests {
         // The match in `field_of` is exhaustive, so a new variant fails to
         // compile here until it names the field it concerns. Add a sample of
         // it to `samples` at the same time.
-        fn field_of(err: &ValidationError) -> &'static str {
+        fn field_of(err: &ValidationError) -> &str {
             match err {
                 ValidationError::RatingOutOfRange(_) => "rating",
                 ValidationError::UnrecognizedTimeUnit { field, .. }
@@ -185,6 +198,8 @@ mod tests {
                 ValidationError::NonPositiveServingsCount(_)
                 | ValidationError::StoredServingsCount { .. } => "servings_count",
                 ValidationError::InvalidDate(_) => "date",
+                ValidationError::EmptyName { field } => field,
+                ValidationError::EmptyIngredientName { field } => field,
             }
         }
         let samples = [
@@ -207,6 +222,10 @@ mod tests {
                 count: 0.0,
             },
             ValidationError::InvalidDate("06/10/2025".into()),
+            ValidationError::EmptyName { field: "name" },
+            ValidationError::EmptyIngredientName {
+                field: "ingredients[2].name".into(),
+            },
         ];
         for err in samples {
             let message = err.to_string();
