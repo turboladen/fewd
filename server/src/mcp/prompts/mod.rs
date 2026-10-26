@@ -15,7 +15,7 @@
 pub mod weekly_dinner_plan;
 
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{GetPromptResult, PromptMessage, PromptMessageRole};
+use rmcp::model::{GetPromptResult, PromptMessage, Role};
 use rmcp::{prompt, prompt_router, ErrorData as McpError};
 
 use super::handler::FewdMcp;
@@ -74,7 +74,7 @@ impl FewdMcp {
         let body = weekly_dinner_plan::render(monday, sunday, &args);
 
         Ok(
-            GetPromptResult::new(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
+            GetPromptResult::new(vec![PromptMessage::new_text(Role::User, body)])
                 .with_description("Weekly family dinner-planning workflow"),
         )
     }
