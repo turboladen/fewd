@@ -6,16 +6,15 @@
 //! before or after the `total_minutes` column landed. Living in the migration
 //! crate keeps that single source of truth (the server depends on `migration`).
 
-/// Normalize a `(value, unit)` duration into whole minutes. Unit matching is
-/// case-insensitive and trims surrounding whitespace. The markdown import parser
-/// resolves units through [`canonical_time_unit`] too, but keeps a unit it does
-/// not recognize as written, and this function returns `None` for that unit.
+/// Normalize a `(value, unit)` duration into whole minutes, accepting the units
+/// [`canonical_time_unit`] recognizes. Unit matching is case-insensitive and trims
+/// surrounding whitespace.
 ///
-/// Returns `None` for an unrecognized unit, or a negative value, so callers can
-/// distinguish "not time-filterable" from "0 minutes" — a recipe whose duration we
-/// can't sensibly interpret is left out of time filters rather than silently compared
-/// on the wrong scale (the bug this replaces: `json_extract($.value)` assumed every
-/// unit was minutes, and would have happily compared a negative or hours value too).
+/// Returns `None` for an unrecognized unit, a negative value, or a total too large
+/// for `i32`, so callers can distinguish "not time-filterable" from "0 minutes".
+//
+// A duration that cannot be interpreted is left out of time filters rather than
+// compared on the wrong scale.
 pub fn total_time_to_minutes(value: i32, unit: &str) -> Option<i32> {
     if value < 0 {
         return None;

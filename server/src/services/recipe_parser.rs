@@ -144,23 +144,17 @@ fn parse_time_value(s: &str) -> Option<TimeValueDto> {
         return None;
     }
 
-    // Skip a range's upper bound so the unit word comes first. A value with
-    // no unit word counts minutes.
-    let mut tokens = time_tokens(rest);
-    if let [TimeToken::Word("to" | "or"), TimeToken::Number(_), ..] = tokens.as_slice() {
-        tokens.drain(..2);
-    } else if let [TimeToken::Number(_), ..] = tokens.as_slice() {
-        tokens.remove(0);
-    }
-    let word = match tokens.first() {
-        None => {
+    // A value with no unit word counts minutes.
+    let tokens = time_tokens(rest);
+    let (word, later) = match skip_range_tail(&tokens) {
+        [] => {
             return Some(TimeValueDto {
                 value,
                 unit: "minutes".to_string(),
             })
         }
-        Some(TimeToken::Word(word)) => *word,
-        Some(TimeToken::Number(_)) => return None,
+        [TimeToken::Word(word), later @ ..] => (*word, later),
+        _ => return None,
     };
     let Some((unit, minutes_per_unit)) = canonical_time_unit(word) else {
         // An unrecognized word is kept as written. The import route drops a
@@ -171,7 +165,7 @@ fn parse_time_value(s: &str) -> Option<TimeValueDto> {
         });
     };
 
-    let later_parts = later_part_minutes(&tokens[1..], unit);
+    let later_parts = later_part_minutes(later, unit);
     if later_parts.is_empty() {
         return Some(TimeValueDto {
             value,
@@ -193,14 +187,20 @@ fn parse_time_value(s: &str) -> Option<TimeValueDto> {
 enum TimeToken<'a> {
     Number(&'a str),
     Word(&'a str),
+    /// A dash, comma, semicolon or slash between two tokens, which ends a
+    /// range's first number or separates two durations.
+    Break,
 }
 
-/// Splits a time phrase into runs of ASCII digits and runs of letters,
-/// dropping everything between them.
+/// Splits a time phrase into runs of ASCII digits, runs of letters, and
+/// breaks. Other characters between tokens are dropped.
 fn time_tokens(s: &str) -> Vec<TimeToken<'_>> {
     let mut tokens = Vec::new();
     let mut rest = s;
     while let Some(start) = rest.find(|c: char| c.is_ascii_digit() || c.is_alphabetic()) {
+        if rest[..start].contains(|c: char| RANGE_DASHES.contains(&c) || ",;/".contains(c)) {
+            tokens.push(TimeToken::Break);
+        }
         rest = &rest[start..];
         let is_number = rest.starts_with(|c: char| c.is_ascii_digit());
         let end = rest
@@ -222,18 +222,24 @@ fn time_tokens(s: &str) -> Vec<TimeToken<'_>> {
     tokens
 }
 
+/// Skips the upper bound of a range ("-40", "to 40", "or 40") at the start of
+/// `tokens`, so a range keeps its first number.
+fn skip_range_tail<'t, 'a>(tokens: &'t [TimeToken<'a>]) -> &'t [TimeToken<'a>] {
+    match tokens {
+        [TimeToken::Break | TimeToken::Word("to" | "or"), TimeToken::Number(_), tail @ ..] => tail,
+        _ => tokens,
+    }
+}
+
 /// True when the text after a leading integer continues it as a decimal or
 /// fraction rather than starting a unit or a range.
 fn starts_with_fraction(rest: &str) -> bool {
     match rest.chars().next() {
         None => false,
         Some(c) if c.is_whitespace() => rest.split_whitespace().next().is_some_and(|token| {
-            token.contains('/')
-                || token
-                    .chars()
-                    .next()
-                    .and_then(unicode_fraction_value)
-                    .is_some()
+            let first = token.chars().next();
+            (first.is_some_and(|c| c.is_ascii_digit()) && token.contains('/'))
+                || first.and_then(unicode_fraction_value).is_some()
         }),
         Some(c) => !(c.is_alphabetic() || RANGE_DASHES.contains(&c)),
     }
@@ -241,8 +247,10 @@ fn starts_with_fraction(rest: &str) -> bool {
 
 /// Returns the minutes in each later part of a compound duration such as
 /// "1 hr 30 min", "1 hour and 30 minutes" or "1h30", where a bare number
-/// after hours counts minutes. A part whose minutes overflow is `None`. The
-/// list is empty when `tokens` holds no later part.
+/// after hours counts minutes and a ranged part keeps its first number. A
+/// break ends the duration, so "45 min–1 hr" has no later part. A part
+/// whose minutes overflow is `None`. The list is empty when `tokens` holds
+/// no later part.
 fn later_part_minutes(tokens: &[TimeToken], first_unit: &str) -> Vec<Option<i32>> {
     let mut parts = Vec::new();
     let mut rest = tokens;
@@ -251,21 +259,21 @@ fn later_part_minutes(tokens: &[TimeToken], first_unit: &str) -> Vec<Option<i32>
         if let [TimeToken::Word("and"), tail @ ..] = rest {
             rest = tail;
         }
-        match rest {
-            [TimeToken::Number(n), TimeToken::Word(word), tail @ ..] => {
+        let [TimeToken::Number(n), tail @ ..] = rest else {
+            break;
+        };
+        let n = n.parse::<i32>().ok();
+        match skip_range_tail(tail) {
+            [TimeToken::Word(word), tail @ ..] => {
                 let Some((unit, minutes_per_unit)) = canonical_time_unit(word) else {
                     break;
                 };
-                parts.push(
-                    n.parse::<i32>()
-                        .ok()
-                        .and_then(|n| n.checked_mul(minutes_per_unit)),
-                );
+                parts.push(n.and_then(|n| n.checked_mul(minutes_per_unit)));
                 previous_unit = unit;
                 rest = tail;
             }
-            [TimeToken::Number(n)] if previous_unit == "hours" => {
-                parts.push(n.parse::<i32>().ok());
+            [] if previous_unit == "hours" => {
+                parts.push(n);
                 break;
             }
             _ => break,
@@ -279,10 +287,10 @@ fn parse_servings(lines: &[&str]) -> Option<i32> {
         let lower = line.trim().to_lowercase();
         if lower.starts_with("servings:") {
             let value_str = line.trim()["servings:".len()..].trim();
-            // Handle "12-15 chicken pieces" → take first number
+            // A range such as "12-15 chicken pieces" or "4–6" keeps its
+            // first number.
             let first_token = value_str.split_whitespace().next()?;
-            // Handle range "12-15" → take first number
-            let first_num = first_token.split('-').next()?;
+            let first_num = first_token.split(RANGE_DASHES).next()?;
             return first_num.parse().ok();
         }
     }
@@ -699,6 +707,31 @@ dinner, quick, mexican";
     }
 
     #[test]
+    fn a_break_between_durations_keeps_the_first() {
+        for (line, value, unit) in [
+            ("Total time: 45 min–1 hr", 45, "minutes"),
+            ("Cook time: 20 minutes - 1 hour", 20, "minutes"),
+            ("Cook time: 8 hours, 4 hours on high", 8, "hours"),
+            ("Cook time: 10 minutes/side", 10, "minutes"),
+            ("Cook time: 20 min/lb", 20, "minutes"),
+        ] {
+            assert_eq!(time_of(line), Some((value, unit.to_string())), "{line}");
+        }
+    }
+
+    #[test]
+    fn ranged_later_part_keeps_its_first_number() {
+        assert_eq!(
+            time_of("Total time: 1 hr 30–45 min"),
+            Some((90, "minutes".to_string()))
+        );
+        assert_eq!(
+            time_of("Total time: 2 hours 15-20 minutes"),
+            Some((135, "minutes".to_string()))
+        );
+    }
+
+    #[test]
     fn compound_time_that_overflows_is_skipped() {
         assert_eq!(time_of("Total time: 2000000 days 5 hours"), None);
     }
@@ -715,6 +748,12 @@ dinner, quick, mexican";
         let recipe = parse(md);
         let prep = recipe.prep_time.unwrap();
         assert_eq!(prep.value, 15); // ignores parenthetical
+    }
+
+    #[test]
+    fn servings_range_with_an_en_dash_keeps_the_first_number() {
+        let recipe = parse("# Wings\nServings: 4–6\n\n## Instructions\nFry");
+        assert_eq!(recipe.servings, 4);
     }
 
     #[test]
