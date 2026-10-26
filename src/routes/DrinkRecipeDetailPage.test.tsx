@@ -58,7 +58,7 @@ beforeEach(() => installFetchMock())
 afterEach(() => resetFetchMock())
 
 describe('DrinkRecipeDetailPage', () => {
-  it('an edit that empties optional fields sends null so the server clears them', async () => {
+  it('an edit that empties fields set at load sends null so the server clears them', async () => {
     const drink = makeDrink()
     mockJson('GET', '/api/drink-recipes/d1', drink)
     renderPage()
@@ -73,6 +73,30 @@ describe('DrinkRecipeDetailPage', () => {
     const putBody = await sentPutBody()
     for (const field of ['description', 'technique', 'glassware', 'garnish', 'notes']) {
       expect(putBody, field).toHaveProperty(field, null)
+    }
+  })
+
+  it('a field empty at load is left out of the update', async () => {
+    const drink = makeDrink({
+      description: null,
+      technique: null,
+      glassware: null,
+      garnish: null,
+      notes: null,
+      icon: null,
+    })
+    mockJson('GET', '/api/drink-recipes/d1', drink)
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /Edit/ }))
+
+    fireEvent.change(screen.getByDisplayValue('Negroni'), { target: { value: 'Boulevardier' } })
+    mockJson('PUT', '/api/drink-recipes/d1', drink)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    const putBody = await sentPutBody()
+    expect(putBody.name).toBe('Boulevardier')
+    for (const field of ['description', 'technique', 'glassware', 'garnish', 'notes', 'icon']) {
+      expect(putBody, field).not.toHaveProperty(field)
     }
   })
 

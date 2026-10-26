@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useCreatePerson, useDeletePerson, usePeople, useUpdatePerson } from '../hooks/usePeople'
-import type { CreatePersonDto, UpdatePersonDto } from '../types/person'
+import type { CreatePersonDto, Person, UpdatePersonDto } from '../types/person'
 import { parsePerson } from '../types/person'
+import { clearableField } from '../utils/clearableField'
 import { EmptyState } from './EmptyState'
 import { IconEdit, IconPlus, IconTrash } from './Icon'
 import { RecipeMarkdown } from './RecipeMarkdown'
@@ -160,6 +161,8 @@ export function FamilyManager() {
 
   const [isAdding, setIsAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  // This holds the person as the edit form opened on them.
+  const [editingLoaded, setEditingLoaded] = useState<Person | null>(null)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -199,15 +202,18 @@ export function FamilyManager() {
     })
   }
 
-  const handleUpdate = (id: string, formData: PersonFormData) => {
+  const handleUpdate = (person: Person, formData: PersonFormData) => {
+    const id = person.id
+    const opened = editingLoaded?.id === id ? editingLoaded : person
     const dto: UpdatePersonDto = {
       name: formData.name,
       birthdate: formData.birthdate,
       dislikes: formData.dislikes,
       favorites: formData.favorites,
-      // An update sends null for an empty field, which clears it.
-      dietary_goals: formData.dietary_goals || null,
-      notes: formData.notes || null,
+      // An emptied field is sent as null only when it held a value when the
+      // form opened, so a value another client wrote meanwhile survives.
+      dietary_goals: clearableField(formData.dietary_goals, opened.dietary_goals),
+      notes: clearableField(formData.notes, opened.notes),
       drink_preferences: formData.drink_preferences,
       drink_dislikes: formData.drink_dislikes,
     }
@@ -307,7 +313,7 @@ export function FamilyManager() {
                     drink_preferences: parsed.drink_preferences,
                     drink_dislikes: parsed.drink_dislikes,
                   }}
-                  onSubmit={(data) => handleUpdate(person.id, data)}
+                  onSubmit={(data) => handleUpdate(person, data)}
                   onCancel={() => setEditingId(null)}
                   submitLabel='Save Changes'
                 />
@@ -329,7 +335,10 @@ export function FamilyManager() {
                 <h3 className='font-semibold text-lg'>{person.name}</h3>
                 <div className='flex gap-2'>
                   <button
-                    onClick={() => setEditingId(person.id)}
+                    onClick={() => {
+                      setEditingLoaded(person)
+                      setEditingId(person.id)
+                    }}
                     className='text-primary-600 text-sm hover:underline'
                     aria-label={`Edit ${person.name}`}
                   >

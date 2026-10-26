@@ -190,7 +190,7 @@ describe('RecipeDetailPage', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['recipes'] })
   })
 
-  it('an edit that empties optional fields sends null so the server clears them', async () => {
+  it('an edit that empties fields set at load sends null so the server clears them', async () => {
     const pasta = makeRecipe({
       id: 'r1',
       description: 'Quick dinner',
@@ -212,10 +212,37 @@ describe('RecipeDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
 
     const putBody = await sentPutBody()
-    for (
-      const field of ['description', 'notes', 'icon', 'total_time', 'prep_time', 'portion_size']
-    ) {
+    for (const field of ['description', 'notes', 'icon', 'total_time']) {
       expect(putBody, field).toHaveProperty(field, null)
+    }
+    // These were empty at load, so the save leaves them out.
+    for (const field of ['prep_time', 'cook_time', 'portion_size']) {
+      expect(putBody, field).not.toHaveProperty(field)
+    }
+  })
+
+  it('a field empty at load is left out, so a value written meanwhile survives', async () => {
+    const pasta = makeRecipe({ id: 'r1' })
+    mockJson('GET', '/api/recipes/r1', pasta)
+    const { client } = renderDetail()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Pasta' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Edit/ }))
+
+    // Another client sets notes and a prep time while the form is open.
+    mockJson('GET', '/api/recipes/r1', {
+      ...pasta,
+      notes: 'Added over MCP',
+      prep_time: JSON.stringify({ value: 10, unit: 'minutes' }),
+    })
+    await refetchAndRender(client, ['recipes', 'r1'])
+    fireEvent.change(screen.getByDisplayValue('Pasta'), { target: { value: 'Pasta v2' } })
+    mockJson('PUT', '/api/recipes/r1', pasta)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    const putBody = await sentPutBody()
+    expect(putBody.name).toBe('Pasta v2')
+    for (const field of ['description', 'notes', 'icon', 'prep_time', 'cook_time', 'total_time']) {
+      expect(putBody, field).not.toHaveProperty(field)
     }
   })
 
