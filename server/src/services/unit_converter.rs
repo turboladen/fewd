@@ -432,14 +432,6 @@ mod tests {
     }
 
     #[test]
-    fn es_plurals_normalize_to_their_singular() {
-        // The full plural and alias table is tested beside the shared
-        // normalizer in the migration crate.
-        assert_eq!(normalize_unit("bunches"), normalize_unit("bunch"));
-        assert_eq!(normalize_unit("Pinches"), "pinch");
-    }
-
-    #[test]
     fn test_unit_category() {
         assert_eq!(unit_category("cups"), Some("volume"));
         assert_eq!(unit_category("grams"), Some("weight"));

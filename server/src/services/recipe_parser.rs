@@ -137,49 +137,45 @@ fn parse_time_value(s: &str) -> Option<TimeValueDto> {
     let digits_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
     let value: i32 = s[..digits_end].parse().ok()?;
     let rest = &s[digits_end..];
-    // A decimal or fraction ("1.5 hours", "1½ hours", "1 1/2 hours") is not a
-    // whole count of its unit, so the field is skipped like any other value
-    // it cannot read.
-    if starts_with_fraction(rest) {
+    // A decimal or attached fraction ("1.5 hours", "1½ hours") is not a whole
+    // count of its unit, so the field is skipped like any other value it
+    // cannot read.
+    if rest
+        .chars()
+        .next()
+        .is_some_and(|c| !(c.is_whitespace() || c.is_alphabetic() || RANGE_DASHES.contains(&c)))
+    {
         return None;
     }
 
-    // A value with no unit word counts minutes.
     let tokens = time_tokens(rest);
-    let (word, later) = match skip_range_tail(&tokens) {
-        [] => {
-            return Some(TimeValueDto {
-                value,
-                unit: "minutes".to_string(),
-            })
-        }
-        [TimeToken::Word(word), later @ ..] => (*word, later),
+    let (value, unit) = match skip_range_tail(&tokens) {
+        // A value with no unit word counts minutes.
+        [] => (value, "minutes"),
+        [TimeToken::Word(word), later @ ..] => match canonical_time_unit(word) {
+            // An unrecognized word is kept as written. The import route drops a
+            // time whose unit it cannot read, rather than storing it as minutes.
+            None => (value, *word),
+            Some((unit, minutes_per_unit)) => {
+                let later = later_part_minutes(later, unit == "hours")?;
+                if later.is_empty() {
+                    (value, unit)
+                } else {
+                    let first = value.checked_mul(minutes_per_unit)?;
+                    (
+                        later.into_iter().try_fold(first, i32::checked_add)?,
+                        "minutes",
+                    )
+                }
+            }
+        },
+        // A separate fraction or number ("1 1/2 hours", "1 ½ hours") is not a
+        // whole count either.
         _ => return None,
     };
-    let Some((unit, minutes_per_unit)) = canonical_time_unit(word) else {
-        // An unrecognized word is kept as written. The import route drops a
-        // time whose unit it cannot read, rather than storing it as minutes.
-        return Some(TimeValueDto {
-            value,
-            unit: word.to_string(),
-        });
-    };
-
-    let later_parts = later_part_minutes(later, unit);
-    if later_parts.is_empty() {
-        return Some(TimeValueDto {
-            value,
-            unit: unit.to_string(),
-        });
-    }
-    let minutes = later_parts
-        .into_iter()
-        .try_fold(value.checked_mul(minutes_per_unit)?, |total, part| {
-            total.checked_add(part?)
-        })?;
     Some(TimeValueDto {
-        value: minutes,
-        unit: "minutes".to_string(),
+        value,
+        unit: unit.to_string(),
     })
 }
 
@@ -253,31 +249,17 @@ fn skip_range_tail<'t, 'a>(tokens: &'t [TimeToken<'a>]) -> &'t [TimeToken<'a>] {
     }
 }
 
-/// True when the text after a leading integer continues it as a decimal or
-/// fraction rather than starting a unit or a range.
-fn starts_with_fraction(rest: &str) -> bool {
-    match rest.chars().next() {
-        None => false,
-        Some(c) if c.is_whitespace() => rest.split_whitespace().next().is_some_and(|token| {
-            let first = token.chars().next();
-            (first.is_some_and(|c| c.is_ascii_digit()) && token.contains('/'))
-                || first.and_then(unicode_fraction_value).is_some()
-        }),
-        Some(c) => !(c.is_alphabetic() || RANGE_DASHES.contains(&c)),
-    }
-}
-
 /// Returns the minutes in each later part of a compound duration such as
 /// "1 hr 30 min", "1 hour and 30 minutes" or "1h30", where a bare number
 /// after hours counts minutes and a ranged part keeps its first number. Any
 /// token other than a number or "and" ends the duration, so "45 min–1 hr"
-/// has no later part. A part that is a fraction ("1 hr 1/2", "1 hour ½") or
-/// whose minutes overflow is `None`, which skips the whole value. The list
-/// is empty when `tokens` holds no later part.
-fn later_part_minutes(tokens: &[TimeToken], first_unit: &str) -> Vec<Option<i32>> {
+/// has no later part. Returns `None` when a part is a fraction ("1 hr 1/2",
+/// "1 hour ½") or its minutes overflow, and an empty list when `tokens`
+/// holds no later part.
+fn later_part_minutes(tokens: &[TimeToken], first_in_hours: bool) -> Option<Vec<i32>> {
     let mut parts = Vec::new();
     let mut rest = tokens;
-    let mut previous_unit = first_unit;
+    let mut after_hours = first_in_hours;
     loop {
         if let [TimeToken::Word("and"), tail @ ..] = rest {
             rest = tail;
@@ -285,30 +267,28 @@ fn later_part_minutes(tokens: &[TimeToken], first_unit: &str) -> Vec<Option<i32>
         if let [TimeToken::Fraction, ..]
         | [TimeToken::Number(_), TimeToken::Slash | TimeToken::Fraction, ..] = rest
         {
-            parts.push(None);
-            break;
+            return None;
         }
         let [TimeToken::Number(n), tail @ ..] = rest else {
             break;
         };
-        let n = n.parse::<i32>().ok();
         match skip_range_tail(tail) {
             [TimeToken::Word(word), tail @ ..] => {
                 let Some((unit, minutes_per_unit)) = canonical_time_unit(word) else {
                     break;
                 };
-                parts.push(n.and_then(|n| n.checked_mul(minutes_per_unit)));
-                previous_unit = unit;
+                parts.push(n.parse::<i32>().ok()?.checked_mul(minutes_per_unit)?);
+                after_hours = unit == "hours";
                 rest = tail;
             }
-            [] if previous_unit == "hours" => {
-                parts.push(n);
+            [] if after_hours => {
+                parts.push(n.parse().ok()?);
                 break;
             }
             _ => break,
         }
     }
-    parts
+    Some(parts)
 }
 
 fn parse_servings(lines: &[&str]) -> Option<i32> {

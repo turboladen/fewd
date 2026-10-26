@@ -214,11 +214,7 @@ fn singular_unit(s: &str) -> &str {
 /// [`normalize_unit`] and counts as a unit when the result is in
 /// [`MEASURED_UNITS`] or [`DISCRETE_UNITS`].
 pub fn is_known_unit(token: &str) -> bool {
-    let token = token.strip_suffix(',').unwrap_or(token);
-    if token.trim().is_empty() {
-        return false;
-    }
-    let unit = normalize_unit(token);
+    let unit = normalize_unit(token.strip_suffix(',').unwrap_or(token));
     MEASURED_UNITS.contains(&unit.as_str()) || DISCRETE_UNITS.contains(&unit.as_str())
 }
 

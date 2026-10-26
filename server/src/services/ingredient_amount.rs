@@ -5,8 +5,7 @@
 //! runtime parser and the backfill migration share one source of truth.
 
 pub use migration::{
-    is_known_unit, try_parse_amount, unicode_fraction_value, AmountKind, DISCRETE_UNITS,
-    MEASURED_UNITS, RANGE_DASHES,
+    is_known_unit, try_parse_amount, unicode_fraction_value, AmountKind, RANGE_DASHES,
 };
 
 use crate::dto::IngredientAmountDto;
@@ -24,6 +23,7 @@ pub fn try_parse_amount_dto(s: &str) -> Option<IngredientAmountDto> {
 mod tests {
     use super::*;
     use crate::services::unit_converter;
+    use migration::{DISCRETE_UNITS, MEASURED_UNITS};
 
     // Drift guard: `is_known_unit` and `unit_converter` share one
     // normalizer, but the converter keeps its own conversion tables, and the
