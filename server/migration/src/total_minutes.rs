@@ -8,8 +8,8 @@
 
 /// Normalize a `(value, unit)` duration into whole minutes. Unit matching is
 /// case-insensitive and trims surrounding whitespace. The markdown import parser
-/// canonicalizes its units through [`canonical_time_unit`] too, so any unit it keeps
-/// is filterable.
+/// resolves units through [`canonical_time_unit`] too, but keeps a unit it does
+/// not recognize as written, and this function returns `None` for that unit.
 ///
 /// Returns `None` for an unrecognized unit, or a negative value, so callers can
 /// distinguish "not time-filterable" from "0 minutes" — a recipe whose duration we

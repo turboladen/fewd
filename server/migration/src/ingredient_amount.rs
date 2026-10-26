@@ -18,6 +18,10 @@
 
 use serde_json::{json, Value};
 
+/// The dash characters that join the two ends of a range: ASCII `-`, en-dash
+/// `–` and em-dash `—`.
+pub const RANGE_DASHES: [char; 3] = ['-', '–', '—'];
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AmountKind {
     Single(f64),
@@ -54,7 +58,7 @@ pub fn try_parse_amount_json(s: &str) -> Option<Value> {
 }
 
 fn split_on_dash(s: &str) -> Option<(&str, &str)> {
-    let dash_idx = s.find(['-', '–', '—'])?;
+    let dash_idx = s.find(RANGE_DASHES)?;
     // Splitting at the byte index of the dash; multi-byte dashes are handled
     // because find returns a byte index and we slice with the dash's char
     // length.

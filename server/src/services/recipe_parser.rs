@@ -1,5 +1,7 @@
 use crate::dto::{CreateRecipeDto, IngredientAmountDto, IngredientDto, TimeValueDto};
-use crate::services::ingredient_amount::{is_known_unit, try_parse_amount_dto};
+use crate::services::ingredient_amount::{
+    is_known_unit, try_parse_amount_dto, unicode_fraction_value, RANGE_DASHES,
+};
 use crate::services::ingredient_splitter::{first_top_level_or, split_name_and_prep};
 use crate::services::paren_notes::peel_size_paren;
 use migration::total_minutes::canonical_time_unit;
@@ -135,36 +137,141 @@ fn parse_time_value(s: &str) -> Option<TimeValueDto> {
     let digits_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
     let value: i32 = s[..digits_end].parse().ok()?;
     let rest = &s[digits_end..];
-    // A decimal or fraction ("1.5 hours", "1½ hours") is not a whole count of
-    // its unit, so the field is skipped like any other value it cannot read.
-    if rest
-        .chars()
-        .next()
-        .is_some_and(|c| !(c.is_whitespace() || c.is_alphabetic() || is_dash(c)))
-    {
+    // A decimal or fraction ("1.5 hours", "1½ hours", "1 1/2 hours") is not a
+    // whole count of its unit, so the field is skipped like any other value
+    // it cannot read.
+    if starts_with_fraction(rest) {
         return None;
     }
 
-    // The unit is the first word after the number, attached ("15min", "2h")
-    // or not, skipping the range connectors "to" and "or". A value with no
-    // unit word counts minutes.
-    let word = rest
-        .split(|c: char| !c.is_alphabetic())
-        .find(|word| !word.is_empty() && !matches!(*word, "to" | "or"));
-    let unit = match word {
-        None => "minutes".to_string(),
+    // Skip a range's upper bound so the unit word comes first. A value with
+    // no unit word counts minutes.
+    let mut tokens = time_tokens(rest);
+    if let [TimeToken::Word("to" | "or"), TimeToken::Number(_), ..] = tokens.as_slice() {
+        tokens.drain(..2);
+    } else if let [TimeToken::Number(_), ..] = tokens.as_slice() {
+        tokens.remove(0);
+    }
+    let word = match tokens.first() {
+        None => {
+            return Some(TimeValueDto {
+                value,
+                unit: "minutes".to_string(),
+            })
+        }
+        Some(TimeToken::Word(word)) => *word,
+        Some(TimeToken::Number(_)) => return None,
+    };
+    let Some((unit, minutes_per_unit)) = canonical_time_unit(word) else {
         // An unrecognized word is kept as written. The import route drops a
         // time whose unit it cannot read, rather than storing it as minutes.
-        Some(word) => {
-            canonical_time_unit(word).map_or_else(|| word.to_string(), |(unit, _)| unit.to_string())
-        }
+        return Some(TimeValueDto {
+            value,
+            unit: word.to_string(),
+        });
     };
 
-    Some(TimeValueDto { value, unit })
+    let later_parts = later_part_minutes(&tokens[1..], unit);
+    if later_parts.is_empty() {
+        return Some(TimeValueDto {
+            value,
+            unit: unit.to_string(),
+        });
+    }
+    let minutes = later_parts
+        .into_iter()
+        .try_fold(value.checked_mul(minutes_per_unit)?, |total, part| {
+            total.checked_add(part?)
+        })?;
+    Some(TimeValueDto {
+        value: minutes,
+        unit: "minutes".to_string(),
+    })
 }
 
-fn is_dash(c: char) -> bool {
-    matches!(c, '-' | '–' | '—')
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TimeToken<'a> {
+    Number(&'a str),
+    Word(&'a str),
+}
+
+/// Splits a time phrase into runs of ASCII digits and runs of letters,
+/// dropping everything between them.
+fn time_tokens(s: &str) -> Vec<TimeToken<'_>> {
+    let mut tokens = Vec::new();
+    let mut rest = s;
+    while let Some(start) = rest.find(|c: char| c.is_ascii_digit() || c.is_alphabetic()) {
+        rest = &rest[start..];
+        let is_number = rest.starts_with(|c: char| c.is_ascii_digit());
+        let end = rest
+            .find(|c: char| {
+                if is_number {
+                    !c.is_ascii_digit()
+                } else {
+                    !c.is_alphabetic()
+                }
+            })
+            .unwrap_or(rest.len());
+        tokens.push(if is_number {
+            TimeToken::Number(&rest[..end])
+        } else {
+            TimeToken::Word(&rest[..end])
+        });
+        rest = &rest[end..];
+    }
+    tokens
+}
+
+/// True when the text after a leading integer continues it as a decimal or
+/// fraction rather than starting a unit or a range.
+fn starts_with_fraction(rest: &str) -> bool {
+    match rest.chars().next() {
+        None => false,
+        Some(c) if c.is_whitespace() => rest.split_whitespace().next().is_some_and(|token| {
+            token.contains('/')
+                || token
+                    .chars()
+                    .next()
+                    .and_then(unicode_fraction_value)
+                    .is_some()
+        }),
+        Some(c) => !(c.is_alphabetic() || RANGE_DASHES.contains(&c)),
+    }
+}
+
+/// Returns the minutes in each later part of a compound duration such as
+/// "1 hr 30 min", "1 hour and 30 minutes" or "1h30", where a bare number
+/// after hours counts minutes. A part whose minutes overflow is `None`. The
+/// list is empty when `tokens` holds no later part.
+fn later_part_minutes(tokens: &[TimeToken], first_unit: &str) -> Vec<Option<i32>> {
+    let mut parts = Vec::new();
+    let mut rest = tokens;
+    let mut previous_unit = first_unit;
+    loop {
+        if let [TimeToken::Word("and"), tail @ ..] = rest {
+            rest = tail;
+        }
+        match rest {
+            [TimeToken::Number(n), TimeToken::Word(word), tail @ ..] => {
+                let Some((unit, minutes_per_unit)) = canonical_time_unit(word) else {
+                    break;
+                };
+                parts.push(
+                    n.parse::<i32>()
+                        .ok()
+                        .and_then(|n| n.checked_mul(minutes_per_unit)),
+                );
+                previous_unit = unit;
+                rest = tail;
+            }
+            [TimeToken::Number(n)] if previous_unit == "hours" => {
+                parts.push(n.parse::<i32>().ok());
+                break;
+            }
+            _ => break,
+        }
+    }
+    parts
 }
 
 fn parse_servings(lines: &[&str]) -> Option<i32> {
@@ -569,7 +676,36 @@ dinner, quick, mexican";
     fn time_that_is_not_a_whole_number_is_skipped() {
         assert_eq!(time_of("Cook time: 1.5 hours"), None);
         assert_eq!(time_of("Cook time: 1½ hours"), None);
+        assert_eq!(time_of("Cook time: 1 1/2 hours"), None);
+        assert_eq!(time_of("Cook time: 1 ½ hours"), None);
         assert_eq!(time_of("Cook time: about 20 minutes"), None);
+    }
+
+    #[test]
+    fn compound_time_adds_its_parts_in_minutes() {
+        for (line, minutes) in [
+            ("Total time: 1 hr 30 min", 90),
+            ("Total time: 1 hour and 30 minutes", 90),
+            ("Total time: 1h30", 90),
+            ("Total time: 1h 30m", 90),
+            ("Total time: 1 day 2 hours", 1560),
+        ] {
+            assert_eq!(
+                time_of(line),
+                Some((minutes, "minutes".to_string())),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn compound_time_that_overflows_is_skipped() {
+        assert_eq!(time_of("Total time: 2000000 days 5 hours"), None);
+    }
+
+    #[test]
+    fn time_followed_by_an_unreadable_number_is_skipped() {
+        assert_eq!(time_of("Cook time: 1 to 1 1/2 hours"), None);
     }
 
     #[test]
