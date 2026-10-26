@@ -205,8 +205,9 @@ export function FamilyManager() {
       birthdate: formData.birthdate,
       dislikes: formData.dislikes,
       favorites: formData.favorites,
-      dietary_goals: formData.dietary_goals || undefined,
-      notes: formData.notes || undefined,
+      // An update sends null for an empty field, which clears it.
+      dietary_goals: formData.dietary_goals || null,
+      notes: formData.notes || null,
       drink_preferences: formData.drink_preferences,
       drink_dislikes: formData.drink_dislikes,
     }

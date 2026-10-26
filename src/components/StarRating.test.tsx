@@ -1,4 +1,4 @@
-import { fireEvent, render } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { StarRating } from './StarRating'
 
@@ -81,5 +81,36 @@ describe('StarRating', () => {
   it('applies medium size class by default', () => {
     const { container } = render(<StarRating value={5} />)
     expect(container.querySelectorAll('svg.w-5.h-5')).toHaveLength(5)
+  })
+
+  it('shows a clear button that calls onClear when a rating is set', () => {
+    const onClear = vi.fn()
+    const onChange = vi.fn()
+    render(<StarRating value={3} onChange={onChange} onClear={onClear} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear rating' }))
+    expect(onClear).toHaveBeenCalledTimes(1)
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('drops the hover preview when the rating is cleared', () => {
+    const { container, rerender } = render(
+      <StarRating value={3} onChange={() => {}} onClear={() => {}} />,
+    )
+    fireEvent.mouseEnter(interactiveStars(container)[4])
+    fireEvent.click(screen.getByRole('button', { name: 'Clear rating' }))
+    rerender(<StarRating value={null} onChange={() => {}} onClear={() => {}} />)
+    expect(filledStars(container)).toHaveLength(0)
+  })
+
+  it('hides the clear button with no rating, no onClear, or in read-only mode', () => {
+    const { rerender } = render(<StarRating value={null} onChange={() => {}} onClear={() => {}} />)
+    expect(screen.queryByRole('button', { name: 'Clear rating' })).toBeNull()
+    rerender(<StarRating value={0} onChange={() => {}} onClear={() => {}} />)
+    expect(screen.queryByRole('button', { name: 'Clear rating' })).toBeNull()
+    rerender(<StarRating value={3} onChange={() => {}} />)
+    expect(screen.queryByRole('button', { name: 'Clear rating' })).toBeNull()
+    rerender(<StarRating value={3} onClear={() => {}} />)
+    expect(screen.queryByRole('button', { name: 'Clear rating' })).toBeNull()
   })
 })

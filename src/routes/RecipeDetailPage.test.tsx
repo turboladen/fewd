@@ -190,6 +190,62 @@ describe('RecipeDetailPage', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['recipes'] })
   })
 
+  it('an edit that empties optional fields sends null so the server clears them', async () => {
+    const pasta = makeRecipe({
+      id: 'r1',
+      description: 'Quick dinner',
+      notes: 'Use bronze-cut pasta',
+      icon: '🍝',
+      total_time: JSON.stringify({ value: 30, unit: 'minutes' }),
+      total_minutes: 30,
+    })
+    mockJson('GET', '/api/recipes/r1', pasta)
+    renderDetail()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Pasta' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Edit/ }))
+
+    fireEvent.change(screen.getByDisplayValue('Quick dinner'), { target: { value: '' } })
+    fireEvent.change(screen.getByDisplayValue('Use bronze-cut pasta'), { target: { value: '' } })
+    fireEvent.change(screen.getByDisplayValue('🍝'), { target: { value: '' } })
+    fireEvent.change(screen.getByDisplayValue('30'), { target: { value: '' } })
+    mockJson('PUT', '/api/recipes/r1', pasta)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    const putBody = await sentPutBody()
+    for (
+      const field of ['description', 'notes', 'icon', 'total_time', 'prep_time', 'portion_size']
+    ) {
+      expect(putBody, field).toHaveProperty(field, null)
+    }
+  })
+
+  it('submitting the form trims prep it was never blurred out of', async () => {
+    mockJson('GET', '/api/recipes/r1', makeRecipe({ id: 'r1' }))
+    renderDetail()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Pasta' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Edit/ }))
+
+    fireEvent.change(screen.getByPlaceholderText('Prep (optional)'), {
+      target: { value: '  thinly sliced  ' },
+    })
+    mockJson('PUT', '/api/recipes/r1', makeRecipe({ id: 'r1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    const putBody = await sentPutBody()
+    expect(putBody.ingredients[0].prep).toBe('thinly sliced')
+  })
+
+  it('the clear-rating button sends a null rating', async () => {
+    const rated = makeRecipe({ id: 'r1', rating: 4 })
+    mockJson('GET', '/api/recipes/r1', rated)
+    renderDetail()
+
+    mockJson('PUT', '/api/recipes/r1', { ...rated, rating: null })
+    fireEvent.click(await screen.findByRole('button', { name: 'Clear rating' }))
+
+    expect(await sentPutBody()).toEqual({ rating: null })
+  })
+
   describe('edit form ingredients payload', () => {
     // A Tomato amount of 2 keeps its input distinct from the servings input,
     // which shows 4.

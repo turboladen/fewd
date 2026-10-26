@@ -40,21 +40,22 @@ export interface CreateDrinkRecipeDto {
   is_non_alcoholic?: boolean
 }
 
+/** A field set to `null` clears it; an absent field is left unchanged. */
 export interface UpdateDrinkRecipeDto {
   name?: string
-  description?: string
+  description?: string | null
   servings?: number
   instructions?: string
   ingredients?: Ingredient[]
-  technique?: string
-  glassware?: string
-  garnish?: string
+  technique?: string | null
+  glassware?: string | null
+  garnish?: string | null
   tags?: string[]
-  notes?: string
-  icon?: string
+  notes?: string | null
+  icon?: string | null
   is_favorite?: boolean
   is_non_alcoholic?: boolean
-  rating?: number
+  rating?: number | null
 }
 
 export interface ParsedDrinkRecipe extends Omit<DrinkRecipe, 'ingredients' | 'tags'> {

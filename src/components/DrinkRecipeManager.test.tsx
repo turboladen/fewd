@@ -127,4 +127,21 @@ describe('DrinkRecipeManager', () => {
     // No network request triggered by filtering.
     expect(vi.mocked(fetch).mock.calls.length).toBe(callsBefore)
   })
+
+  it('the list view clear-rating button sends a null rating', async () => {
+    const rated = makeDrink({ id: 'd2', name: 'Daiquiri', rating: 3 })
+    mockJson('GET', '/api/drink-recipes', [rated])
+    renderWithProviders(<DrinkRecipeManager />)
+    await waitFor(() => expect(screen.getByText('Daiquiri')).toBeInTheDocument())
+
+    mockJson('PUT', '/api/drink-recipes/d2', { ...rated, rating: null })
+    fireEvent.click(screen.getByRole('button', { name: 'Clear rating' }))
+
+    await waitFor(() =>
+      expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true)
+    )
+    const putCall = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'PUT')
+    expect(putCall![0]).toBe('/api/drink-recipes/d2')
+    expect(JSON.parse((putCall![1] as RequestInit).body as string)).toEqual({ rating: null })
+  })
 })

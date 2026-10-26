@@ -152,16 +152,17 @@ export function RecipeDetailPage() {
     const dto: UpdateRecipeDto = {
       name: formData.name,
       servings: servingsEdited || ingredientsEdited ? formData.servings : undefined,
-      portion_size: formData.portion_size,
+      // An update sends null for an empty field, which clears it.
+      portion_size: formData.portion_size ?? null,
       instructions: formData.instructions,
       ingredients: ingredientsEdited ? formData.ingredients : undefined,
       tags: formData.tags,
-      description: formData.description || undefined,
-      prep_time: formData.prep_time,
-      cook_time: formData.cook_time,
-      total_time: formData.total_time,
-      notes: formData.notes || undefined,
-      icon: formData.icon || undefined,
+      description: formData.description || null,
+      prep_time: formData.prep_time ?? null,
+      cook_time: formData.cook_time ?? null,
+      total_time: formData.total_time ?? null,
+      notes: formData.notes || null,
+      icon: formData.icon || null,
     }
     updateMutation.mutate({ id: recipe.id, data: dto }, {
       onSuccess: () => {
@@ -394,6 +395,7 @@ export function RecipeDetailPage() {
           onDelete={() => setConfirmingDelete(true)}
           onToggleFavorite={() => toggleFavoriteMutation.mutate(recipe.id)}
           onRatingChange={(rating) => updateMutation.mutate({ id: recipe.id, data: { rating } })}
+          onRatingClear={() => updateMutation.mutate({ id: recipe.id, data: { rating: null } })}
           onClose={() => navigate('/recipes')}
           confirmingDelete={confirmingDelete}
           onConfirmDelete={handleDelete}

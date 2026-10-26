@@ -9,6 +9,7 @@ interface Props {
   onEdit: () => void
   onToggleFavorite: () => void
   onRatingChange: (rating: number) => void
+  onRatingClear?: () => void
   onDelete: () => void
   confirmingDelete: boolean
   onConfirmDelete: () => void
@@ -21,6 +22,7 @@ export function DrinkRecipeDetail({
   onEdit,
   onToggleFavorite,
   onRatingChange,
+  onRatingClear,
   onDelete,
   confirmingDelete,
   onConfirmDelete,
@@ -63,6 +65,7 @@ export function DrinkRecipeDetail({
         <StarRating
           value={recipe.rating ?? 0}
           onChange={onRatingChange}
+          onClear={onRatingClear}
           size='md'
         />
       </div>

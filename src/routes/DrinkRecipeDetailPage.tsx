@@ -87,13 +87,14 @@ export function DrinkRecipeDetailPage() {
       servings: formData.servings,
       instructions: formData.instructions,
       ingredients: formData.ingredients,
-      technique: formData.technique || undefined,
-      glassware: formData.glassware || undefined,
-      garnish: formData.garnish || undefined,
+      // An update sends null for an empty field, which clears it.
+      technique: formData.technique || null,
+      glassware: formData.glassware || null,
+      garnish: formData.garnish || null,
       tags: formData.tags,
-      description: formData.description || undefined,
-      notes: formData.notes || undefined,
-      icon: formData.icon || undefined,
+      description: formData.description || null,
+      notes: formData.notes || null,
+      icon: formData.icon || null,
       is_non_alcoholic: formData.is_non_alcoholic,
     }
     updateMutation.mutate({ id: recipe.id, data: dto }, {
@@ -163,6 +164,7 @@ export function DrinkRecipeDetailPage() {
         onEdit={() => setIsEditing(true)}
         onToggleFavorite={() => toggleFavoriteMutation.mutate(recipe.id)}
         onRatingChange={(rating) => updateMutation.mutate({ id: recipe.id, data: { rating } })}
+        onRatingClear={() => updateMutation.mutate({ id: recipe.id, data: { rating: null } })}
         onDelete={() => setConfirmingDelete(true)}
         confirmingDelete={confirmingDelete}
         onConfirmDelete={handleDelete}

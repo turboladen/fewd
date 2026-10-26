@@ -28,6 +28,7 @@ import {
   formatTime,
   ingredientRatio,
   ingredientsEqual,
+  normalizeIngredientsPrep,
   parseRecipe,
 } from '../types/recipe'
 import {
@@ -172,7 +173,7 @@ export function RecipeForm({
       return
     }
     setValidationError(null)
-    onSubmit(form)
+    onSubmit({ ...form, ingredients: normalizeIngredientsPrep(form.ingredients) })
   }
 
   return (
@@ -850,6 +851,7 @@ export function RecipeDetail({
   onDelete,
   onToggleFavorite,
   onRatingChange,
+  onRatingClear,
   onClose,
   confirmingDelete,
   onConfirmDelete,
@@ -864,6 +866,7 @@ export function RecipeDetail({
   onDelete: () => void
   onToggleFavorite: () => void
   onRatingChange: (rating: number) => void
+  onRatingClear?: () => void
   onClose: () => void
   confirmingDelete: boolean
   onConfirmDelete: () => void
@@ -913,7 +916,12 @@ export function RecipeDetail({
             </button>
           </div>
           <div className='flex items-center gap-2 mt-1 print:hidden'>
-            <StarRating value={parsed.rating} onChange={onRatingChange} size='md' />
+            <StarRating
+              value={parsed.rating}
+              onChange={onRatingChange}
+              onClear={onRatingClear}
+              size='md'
+            />
           </div>
           {parsed.description && <p className='text-stone-600 mt-1'>{parsed.description}</p>}
         </div>

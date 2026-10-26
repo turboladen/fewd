@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { DrinkRecipeFormData } from '../types/drinkRecipe'
+import { normalizeIngredientsPrep } from '../types/recipe'
 import { IngredientInput } from './IngredientInput'
 import { NumberInput } from './NumberInput'
 import { TagInput } from './TagInput'
@@ -25,7 +26,7 @@ export function DrinkRecipeForm({
       return
     }
     setValidationError(null)
-    onSubmit(form)
+    onSubmit({ ...form, ingredients: normalizeIngredientsPrep(form.ingredients) })
   }
 
   return (

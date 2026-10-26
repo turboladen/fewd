@@ -132,6 +132,32 @@ describe('FamilyManager', () => {
     expect(putBody.name).toBe('Alicia')
   })
 
+  it('an edit that empties notes and dietary goals sends null so the server clears them', async () => {
+    const alice = makePerson({
+      id: 'p1',
+      name: 'Alice',
+      dietary_goals: 'More protein',
+      notes: 'Prefers mild food',
+    })
+    mockJson('GET', '/api/people', [alice])
+    renderWithProviders(<FamilyManager />)
+    await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Alice' }))
+
+    fireEvent.change(screen.getByDisplayValue('More protein'), { target: { value: '' } })
+    fireEvent.change(screen.getByDisplayValue('Prefers mild food'), { target: { value: '' } })
+    mockJson('PUT', '/api/people/p1', alice)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() =>
+      expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true)
+    )
+    const putCall = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'PUT')
+    const putBody = JSON.parse((putCall![1] as RequestInit).body as string)
+    expect(putBody).toHaveProperty('notes', null)
+    expect(putBody).toHaveProperty('dietary_goals', null)
+  })
+
   it('deletes a person: confirm Yes → DELETE → empty state returns', async () => {
     mockJson('GET', '/api/people', [makePerson({ id: 'p1', name: 'Alice' })])
 
