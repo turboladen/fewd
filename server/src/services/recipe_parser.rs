@@ -187,46 +187,68 @@ fn parse_time_value(s: &str) -> Option<TimeValueDto> {
 enum TimeToken<'a> {
     Number(&'a str),
     Word(&'a str),
-    /// A dash, comma, semicolon or slash between two tokens, which ends a
-    /// range's first number or separates two durations.
+    /// A range dash, which opens a range's upper bound ("35-40") or joins a
+    /// unit to its number ("30-minutes").
+    Dash,
+    /// A slash, as in a fraction ("1/2") or a rate ("10 minutes/side").
+    Slash,
+    /// A Unicode vulgar fraction such as `½`.
+    Fraction,
+    /// A comma or semicolon, which separates two durations.
     Break,
 }
 
 /// Splits a time phrase into runs of ASCII digits, runs of letters, and
-/// breaks. Other characters between tokens are dropped.
+/// punctuation tokens. Other characters are dropped.
 fn time_tokens(s: &str) -> Vec<TimeToken<'_>> {
     let mut tokens = Vec::new();
-    let mut rest = s;
-    while let Some(start) = rest.find(|c: char| c.is_ascii_digit() || c.is_alphabetic()) {
-        if rest[..start].contains(|c: char| RANGE_DASHES.contains(&c) || ",;/".contains(c)) {
-            tokens.push(TimeToken::Break);
-        }
-        rest = &rest[start..];
-        let is_number = rest.starts_with(|c: char| c.is_ascii_digit());
-        let end = rest
-            .find(|c: char| {
+    let mut chars = s.char_indices().peekable();
+    while let Some((start, c)) = chars.next() {
+        let token = if c.is_ascii_digit() || c.is_alphabetic() {
+            let is_number = c.is_ascii_digit();
+            let same_run = |next: char| {
                 if is_number {
-                    !c.is_ascii_digit()
+                    next.is_ascii_digit()
                 } else {
-                    !c.is_alphabetic()
+                    next.is_alphabetic()
                 }
-            })
-            .unwrap_or(rest.len());
-        tokens.push(if is_number {
-            TimeToken::Number(&rest[..end])
+            };
+            let mut end = start + c.len_utf8();
+            while let Some(&(index, next)) = chars.peek() {
+                if !same_run(next) {
+                    break;
+                }
+                end = index + next.len_utf8();
+                chars.next();
+            }
+            if is_number {
+                TimeToken::Number(&s[start..end])
+            } else {
+                TimeToken::Word(&s[start..end])
+            }
+        } else if RANGE_DASHES.contains(&c) {
+            TimeToken::Dash
+        } else if c == '/' {
+            TimeToken::Slash
+        } else if unicode_fraction_value(c).is_some() {
+            TimeToken::Fraction
+        } else if c == ',' || c == ';' {
+            TimeToken::Break
         } else {
-            TimeToken::Word(&rest[..end])
-        });
-        rest = &rest[end..];
+            continue;
+        };
+        tokens.push(token);
     }
     tokens
 }
 
 /// Skips the upper bound of a range ("-40", "to 40", "or 40") at the start of
-/// `tokens`, so a range keeps its first number.
+/// `tokens`, so a range keeps its first number, and skips a dash that joins
+/// a unit word to its number ("-minutes").
 fn skip_range_tail<'t, 'a>(tokens: &'t [TimeToken<'a>]) -> &'t [TimeToken<'a>] {
     match tokens {
-        [TimeToken::Break | TimeToken::Word("to" | "or"), TimeToken::Number(_), tail @ ..] => tail,
+        [TimeToken::Dash | TimeToken::Word("to" | "or"), TimeToken::Number(_), tail @ ..] => tail,
+        [TimeToken::Dash, tail @ ..] if matches!(tail.first(), Some(TimeToken::Word(_))) => tail,
         _ => tokens,
     }
 }
@@ -247,10 +269,11 @@ fn starts_with_fraction(rest: &str) -> bool {
 
 /// Returns the minutes in each later part of a compound duration such as
 /// "1 hr 30 min", "1 hour and 30 minutes" or "1h30", where a bare number
-/// after hours counts minutes and a ranged part keeps its first number. A
-/// break ends the duration, so "45 min–1 hr" has no later part. A part
-/// whose minutes overflow is `None`. The list is empty when `tokens` holds
-/// no later part.
+/// after hours counts minutes and a ranged part keeps its first number. Any
+/// token other than a number or "and" ends the duration, so "45 min–1 hr"
+/// has no later part. A part that is a fraction ("1 hr 1/2", "1 hour ½") or
+/// whose minutes overflow is `None`, which skips the whole value. The list
+/// is empty when `tokens` holds no later part.
 fn later_part_minutes(tokens: &[TimeToken], first_unit: &str) -> Vec<Option<i32>> {
     let mut parts = Vec::new();
     let mut rest = tokens;
@@ -258,6 +281,12 @@ fn later_part_minutes(tokens: &[TimeToken], first_unit: &str) -> Vec<Option<i32>
     loop {
         if let [TimeToken::Word("and"), tail @ ..] = rest {
             rest = tail;
+        }
+        if let [TimeToken::Fraction, ..]
+        | [TimeToken::Number(_), TimeToken::Slash | TimeToken::Fraction, ..] = rest
+        {
+            parts.push(None);
+            break;
         }
         let [TimeToken::Number(n), tail @ ..] = rest else {
             break;
@@ -721,6 +750,27 @@ dinner, quick, mexican";
             time_of("Total time: 2 hours 15-20 minutes"),
             Some((135, "minutes".to_string()))
         );
+    }
+
+    #[test]
+    fn compound_time_with_a_fractional_part_is_skipped() {
+        for line in [
+            "Total time: 1hr 1/2",
+            "Total time: 1 hour 1/2 hour",
+            "Total time: 1 hour and 1/2 hour",
+            "Total time: 1 hour ½",
+        ] {
+            assert_eq!(time_of(line), None, "{line}");
+        }
+    }
+
+    #[test]
+    fn unit_joined_by_a_dash_reads_as_attached() {
+        assert_eq!(
+            time_of("Prep time: 30-minutes"),
+            Some((30, "minutes".to_string()))
+        );
+        assert_eq!(time_of("Cook time: 1-hour"), Some((1, "hours".to_string())));
     }
 
     #[test]
