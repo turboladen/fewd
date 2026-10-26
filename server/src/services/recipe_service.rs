@@ -5,6 +5,7 @@ use sea_orm::*;
 
 use crate::dto::{CreateRecipeDto, IngredientDto, UpdateRecipeDto};
 use crate::entities::recipe::{self, Entity as Recipe};
+use crate::services::recipe_parser::DEFAULT_SERVINGS;
 use crate::services::recipe_scaler::scale_amounts;
 use crate::services::recipe_times::{resolve_times, SentTimes, StoredTimes};
 use crate::services::service_error::{whole_star_rating, ServiceError, ValidationError};
@@ -42,6 +43,27 @@ fn rescale_stored_ingredients(
     // Recipe" send the whole-number amounts the user reviewed, including a
     // range that collapsed to a single amount.
     Ok(Some(scale_amounts(&stored, ratio)))
+}
+
+/// Replaces an AI-generated recipe's `servings` below 1 with
+/// [`DEFAULT_SERVINGS`], logging a warning that names the recipe and the
+/// value it replaced. Call it on every recipe the model produces, whether it
+/// is saved at once (import) or handed back as a draft the client saves later
+/// (adapt, suggest).
+//
+// This follows `drop_unusable_import_times`: the tokens are already spent,
+// so a guessed count the person can edit beats losing the recipe. Direct
+// create calls still reject the same values.
+pub fn default_unusable_import_servings(dto: &mut CreateRecipeDto) {
+    if dto.servings < 1 {
+        tracing::warn!(
+            recipe = %dto.name,
+            servings = dto.servings,
+            default = DEFAULT_SERVINGS,
+            "replacing unusable servings in imported recipe"
+        );
+        dto.servings = DEFAULT_SERVINGS;
+    }
 }
 
 /// Trim each tag and drop the ones left empty.
@@ -138,6 +160,10 @@ impl RecipeService {
         db: &DatabaseConnection,
         data: CreateRecipeDto,
     ) -> Result<recipe::Model, ServiceError> {
+        // The shopping list and the scale preview divide by this count.
+        if data.servings < 1 {
+            return Err(ValidationError::NonPositiveServings(data.servings).into());
+        }
         let now = chrono::Utc::now();
         let base_slug = migration::slugify(&data.name);
 
@@ -524,4 +550,48 @@ fn is_slug_conflict(err: &DbErr) -> bool {
         err.sql_err(),
         Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dto_with_servings(servings: i32) -> CreateRecipeDto {
+        CreateRecipeDto {
+            name: "Imported".to_string(),
+            description: None,
+            source: "url_import".to_string(),
+            source_url: None,
+            parent_recipe_id: None,
+            prep_time: None,
+            cook_time: None,
+            total_time: None,
+            servings,
+            portion_size: None,
+            instructions: String::new(),
+            ingredients: vec![],
+            nutrition_per_serving: None,
+            tags: vec![],
+            notes: None,
+            icon: None,
+        }
+    }
+
+    #[test]
+    fn default_unusable_import_servings_replaces_nonpositive_with_the_default() {
+        for servings in [0, -2] {
+            let mut dto = dto_with_servings(servings);
+            default_unusable_import_servings(&mut dto);
+            assert_eq!(dto.servings, DEFAULT_SERVINGS);
+        }
+    }
+
+    #[test]
+    fn default_unusable_import_servings_leaves_a_valid_count_alone() {
+        for servings in [1, 6] {
+            let mut dto = dto_with_servings(servings);
+            default_unusable_import_servings(&mut dto);
+            assert_eq!(dto.servings, servings);
+        }
+    }
 }

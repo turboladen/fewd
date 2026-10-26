@@ -4224,3 +4224,350 @@ mod recipe_discovery {
         assert_eq!(names(&out), vec!["Apple", "Banana"]);
     }
 }
+
+// --- Shopping guards: non-positive servings and deterministic output ---
+
+fn recipe_serving(person_id: &str, recipe_id: &str, servings_count: f64) -> PersonServingDto {
+    PersonServingDto::Recipe {
+        person_id: person_id.to_string(),
+        recipe_id: recipe_id.to_string(),
+        servings_count,
+        notes: None,
+    }
+}
+
+fn dinner(date: &str, servings: Vec<PersonServingDto>) -> CreateMealDto {
+    CreateMealDto {
+        date: date.to_string(),
+        meal_type: MealType::Dinner,
+        order_index: 2,
+        servings,
+    }
+}
+
+fn amount_value(amount: &IngredientAmountDto) -> f64 {
+    match amount {
+        IngredientAmountDto::Single { value } => *value,
+        IngredientAmountDto::Range { .. } => panic!("expected a single amount"),
+    }
+}
+
+fn is_nonpositive_servings_count(err: &ServiceError) -> bool {
+    matches!(
+        err,
+        ServiceError::Validation(ValidationError::NonPositiveServingsCount(_))
+    )
+}
+
+// Writes the recipe row directly, so the test does not depend on whether
+// `create` accepts the count.
+async fn force_recipe_servings(db: &DatabaseConnection, recipe_id: &str, servings: i32) {
+    use sea_orm::ActiveModelTrait;
+    let recipe = RecipeService::get_by_id(db, recipe_id.to_string())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut row = recipe.into_active_model();
+    row.servings = Set(servings);
+    row.update(db).await.unwrap();
+}
+
+#[tokio::test]
+async fn recipe_create_rejects_nonpositive_servings_and_inserts_nothing() {
+    let db = setup_db().await;
+    for servings in [0, -1] {
+        let mut dto = test_recipe_dto("Pasta");
+        dto.servings = servings;
+        let err = RecipeService::create(&db, dto).await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ServiceError::Validation(ValidationError::NonPositiveServings(n)) if n == servings
+            ),
+            "{err:?}"
+        );
+    }
+    assert!(RecipeService::get_all(&db).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn shopping_list_scales_a_stored_zero_serving_recipe_as_one() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Broken Pasta"))
+        .await
+        .unwrap();
+    force_recipe_servings(&db, &recipe.id, 0).await;
+    MealService::create(
+        &db,
+        dinner("2025-06-10", vec![recipe_serving("p1", &recipe.id, 1.0)]),
+    )
+    .await
+    .unwrap();
+
+    let list =
+        ShoppingService::get_shopping_list(&db, "2025-06-09".to_string(), "2025-06-11".to_string())
+            .await
+            .unwrap();
+
+    assert_eq!(list.len(), 2);
+    for (line, expected) in list.iter().zip([3.0, 2.0]) {
+        let total = amount_value(line.total_amount.as_ref().unwrap());
+        assert_eq!(total, expected, "{}", line.ingredient_name);
+        assert_eq!(line.items.len(), 1);
+        assert_eq!(amount_value(&line.items[0].amount), expected);
+        assert_eq!(line.items[0].recipe_servings, Some(0));
+    }
+
+    let rounded = ShoppingService::get_shopping_list_rounded(
+        &db,
+        "2025-06-09".to_string(),
+        "2025-06-11".to_string(),
+    )
+    .await
+    .unwrap();
+    for item in &rounded {
+        let shopping = item.shopping.as_ref().unwrap();
+        assert!(amount_value(&shopping.amount).is_finite());
+    }
+}
+
+#[tokio::test]
+async fn shopping_list_skips_a_stored_nonpositive_servings_count() {
+    use sea_orm::ActiveModelTrait;
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let meal = MealService::create(
+        &db,
+        dinner(
+            "2025-06-10",
+            vec![
+                recipe_serving("alice", &recipe.id, 1.0),
+                recipe_serving("bob", &recipe.id, 1.0),
+                recipe_serving("carol", &recipe.id, 1.0),
+            ],
+        ),
+    )
+    .await
+    .unwrap();
+
+    // A legacy row may hold counts the write guard rejects today.
+    let bad = vec![
+        recipe_serving("alice", &recipe.id, 1.0),
+        recipe_serving("bob", &recipe.id, 0.0),
+        recipe_serving("carol", &recipe.id, -1.0),
+    ];
+    let mut row = meal.clone().into_active_model();
+    row.servings = Set(serde_json::to_string(&bad).unwrap());
+    row.update(&db).await.unwrap();
+
+    let list =
+        ShoppingService::get_shopping_list(&db, "2025-06-09".to_string(), "2025-06-11".to_string())
+            .await
+            .unwrap();
+    assert_eq!(list.len(), 2);
+    for (line, expected) in list.iter().zip([0.75, 0.5]) {
+        assert_eq!(line.items.len(), 1, "{}", line.ingredient_name);
+        assert_eq!(line.items[0].person_servings, Some(1.0));
+        assert_eq!(amount_value(&line.items[0].amount), expected);
+        assert_eq!(amount_value(line.total_amount.as_ref().unwrap()), expected);
+    }
+
+    let all_bad = vec![
+        recipe_serving("bob", &recipe.id, 0.0),
+        recipe_serving("carol", &recipe.id, -1.0),
+    ];
+    let mut row = meal.into_active_model();
+    row.servings = Set(serde_json::to_string(&all_bad).unwrap());
+    row.update(&db).await.unwrap();
+
+    let list =
+        ShoppingService::get_shopping_list(&db, "2025-06-09".to_string(), "2025-06-11".to_string())
+            .await
+            .unwrap();
+    assert!(list.is_empty(), "{list:?}");
+}
+
+#[tokio::test]
+async fn shopping_list_sources_and_name_follow_meal_order() {
+    let db = setup_db().await;
+    let adhoc = |name: &str, value: f64, unit: &str| PersonServingDto::Adhoc {
+        person_id: "p1".to_string(),
+        adhoc_items: vec![IngredientDto {
+            name: name.to_string(),
+            prep: None,
+            amount: IngredientAmountDto::Single { value },
+            unit: unit.to_string(),
+            notes: None,
+            or_alternative: None,
+        }],
+        notes: None,
+    };
+    // The later meal is created first, so creation order differs from
+    // meal order.
+    MealService::create(&db, dinner("2025-06-11", vec![adhoc("flour", 1.0, "tbsp")]))
+        .await
+        .unwrap();
+    MealService::create(&db, dinner("2025-06-10", vec![adhoc("Flour", 2.0, "cup")]))
+        .await
+        .unwrap();
+
+    // Each call groups through fresh HashMaps with random hash keys, so
+    // repeating it makes an order that only holds by chance fail.
+    for _ in 0..32 {
+        let list = ShoppingService::get_shopping_list(
+            &db,
+            "2025-06-09".to_string(),
+            "2025-06-12".to_string(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(list.len(), 1);
+        let line = &list[0];
+        assert_eq!(line.ingredient_name, "Flour");
+        let sources: Vec<(&str, f64, &str)> = line
+            .items
+            .iter()
+            .map(|s| {
+                (
+                    s.meal_date.as_str(),
+                    amount_value(&s.amount),
+                    s.unit.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            sources,
+            [("2025-06-10", 2.0, "cup"), ("2025-06-11", 1.0, "tbsp")]
+        );
+        assert_eq!(line.total_unit.as_deref(), Some("cup"));
+        assert_eq!(amount_value(line.total_amount.as_ref().unwrap()), 2.06);
+    }
+}
+
+#[tokio::test]
+async fn meal_create_rejects_nonpositive_servings_count_and_inserts_nothing() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    for count in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let dto = dinner(
+            "2025-06-10",
+            vec![
+                recipe_serving("alice", &recipe.id, 1.0),
+                recipe_serving("bob", &recipe.id, count),
+            ],
+        );
+        let err = MealService::create(&db, dto).await.unwrap_err();
+        assert!(is_nonpositive_servings_count(&err), "{count}: {err:?}");
+    }
+
+    let meals = MealService::get_all_for_date_range(
+        &db,
+        "2025-06-01".to_string(),
+        "2025-06-30".to_string(),
+    )
+    .await
+    .unwrap();
+    assert!(meals.is_empty());
+    let recipe = RecipeService::get_by_id(&db, recipe.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(recipe.times_planned, 0);
+}
+
+#[tokio::test]
+async fn meal_create_accepts_a_half_portion() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let meal = MealService::create(
+        &db,
+        dinner("2025-06-10", vec![recipe_serving("alice", &recipe.id, 0.5)]),
+    )
+    .await
+    .unwrap();
+    let stored: Vec<PersonServingDto> = serde_json::from_str(&meal.servings).unwrap();
+    assert!(matches!(
+        stored[0],
+        PersonServingDto::Recipe { servings_count, .. } if servings_count == 0.5
+    ));
+}
+
+#[tokio::test]
+async fn meal_update_rejects_nonpositive_servings_count_and_leaves_row_unchanged() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let meal = MealService::create(
+        &db,
+        dinner("2025-06-10", vec![recipe_serving("alice", &recipe.id, 1.0)]),
+    )
+    .await
+    .unwrap();
+
+    for count in [0.0, -1.0] {
+        let update = fewd_lib::dto::UpdateMealDto {
+            date: Some("2025-06-12".to_string()),
+            meal_type: None,
+            order_index: None,
+            servings: Some(vec![recipe_serving("alice", &recipe.id, count)]),
+        };
+        let err = MealService::update(&db, meal.id.clone(), update)
+            .await
+            .unwrap_err();
+        assert!(is_nonpositive_servings_count(&err), "{count}: {err:?}");
+    }
+
+    let stored = MealService::get_by_id(&db, meal.id.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.servings, meal.servings);
+    assert_eq!(stored.date, meal.date);
+}
+
+#[tokio::test]
+async fn meal_template_writes_reject_nonpositive_servings_count() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let template_dto = |count: f64| CreateMealTemplateDto {
+        name: "Weeknight Pasta".to_string(),
+        meal_type: MealType::Dinner,
+        servings: vec![recipe_serving("alice", &recipe.id, count)],
+    };
+
+    for count in [0.0, -1.0] {
+        let err = MealTemplateService::create(&db, template_dto(count))
+            .await
+            .unwrap_err();
+        assert!(is_nonpositive_servings_count(&err), "{count}: {err:?}");
+    }
+    assert!(MealTemplateService::get_all(&db).await.unwrap().is_empty());
+
+    let template = MealTemplateService::create(&db, template_dto(0.5))
+        .await
+        .unwrap();
+    for count in [0.0, -1.0] {
+        let update = fewd_lib::dto::UpdateMealTemplateDto {
+            name: Some("Renamed".to_string()),
+            meal_type: None,
+            servings: Some(vec![recipe_serving("alice", &recipe.id, count)]),
+        };
+        let err = MealTemplateService::update(&db, template.id.clone(), update)
+            .await
+            .unwrap_err();
+        assert!(is_nonpositive_servings_count(&err), "{count}: {err:?}");
+    }
+    let all = MealTemplateService::get_all(&db).await.unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].name, "Weeknight Pasta");
+    assert_eq!(all[0].servings, template.servings);
+}

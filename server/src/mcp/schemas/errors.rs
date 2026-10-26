@@ -102,10 +102,9 @@ impl std::fmt::Display for InputError {
             Self::NonPositiveServings(n) => {
                 write!(f, "{}", ValidationError::NonPositiveServings(*n))
             }
-            Self::NonPositiveServingsCount(n) => write!(
-                f,
-                "servings_count must be > 0 (got {n}). Use 0.5 for a half portion; negative or zero values would corrupt the shopping list."
-            ),
+            Self::NonPositiveServingsCount(n) => {
+                write!(f, "{}", ValidationError::NonPositiveServingsCount(*n))
+            }
             Self::UnknownMealType(mt) => write!(
                 f,
                 "meal_type must be one of Breakfast, Lunch, Dinner, or Snack (case-insensitive; got '{mt}')."

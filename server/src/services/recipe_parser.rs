@@ -3,6 +3,9 @@ use crate::services::ingredient_amount::{is_known_unit, try_parse_amount_dto};
 use crate::services::ingredient_splitter::{first_top_level_or, split_name_and_prep};
 use crate::services::paren_notes::peel_size_paren;
 
+/// The servings a parsed recipe gets when its source states none.
+pub const DEFAULT_SERVINGS: i32 = 4;
+
 pub struct RecipeParser;
 
 impl RecipeParser {
@@ -17,7 +20,7 @@ impl RecipeParser {
         let prep_time = parse_time_field(&lines, "prep time");
         let cook_time = parse_time_field(&lines, "cook time");
         let total_time = parse_time_field(&lines, "total time");
-        let servings = parse_servings(&lines).unwrap_or(4);
+        let servings = parse_servings(&lines).unwrap_or(DEFAULT_SERVINGS);
         let ingredients = parse_ingredients(&lines);
         let instructions = parse_section(&lines, "instructions");
         let tags = parse_tags(&lines);

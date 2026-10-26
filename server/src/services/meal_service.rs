@@ -6,6 +6,7 @@ use sea_orm::*;
 use crate::dto::{CreateMealDto, PersonServingDto, UpdateMealDto};
 use crate::entities::meal::{self, Entity as Meal};
 use crate::entities::recipe::{self, Entity as Recipe};
+use crate::services::service_error::{check_servings_counts, ServiceError};
 use crate::services::to_json;
 
 pub struct MealService;
@@ -40,7 +41,8 @@ impl MealService {
     pub async fn create(
         db: &DatabaseConnection,
         data: CreateMealDto,
-    ) -> Result<meal::Model, DbErr> {
+    ) -> Result<meal::Model, ServiceError> {
+        check_servings_counts(&data.servings)?;
         let now = chrono::Utc::now();
         let date = NaiveDate::parse_from_str(&data.date, "%Y-%m-%d")
             .map_err(|e| DbErr::Custom(format!("Invalid date format: {}", e)))?;
@@ -67,7 +69,10 @@ impl MealService {
         db: &DatabaseConnection,
         id: String,
         data: UpdateMealDto,
-    ) -> Result<meal::Model, DbErr> {
+    ) -> Result<meal::Model, ServiceError> {
+        if let Some(servings) = &data.servings {
+            check_servings_counts(servings)?;
+        }
         let existing = Meal::find_by_id(id)
             .one(db)
             .await?
@@ -108,7 +113,7 @@ impl MealService {
 
         meal.updated_at = Set(chrono::Utc::now());
 
-        meal.update(db).await
+        Ok(meal.update(db).await?)
     }
 
     pub async fn delete(db: &DatabaseConnection, id: String) -> Result<(), DbErr> {

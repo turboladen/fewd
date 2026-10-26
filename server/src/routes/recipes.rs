@@ -20,7 +20,7 @@ use crate::services::recipe_enhancer;
 use crate::services::recipe_import_service::RecipeImportService;
 use crate::services::recipe_parser::RecipeParser;
 use crate::services::recipe_scaler;
-use crate::services::recipe_service::RecipeService;
+use crate::services::recipe_service::{default_unusable_import_servings, RecipeService};
 use crate::services::recipe_times::drop_unusable_import_times;
 use crate::services::service_error::ServiceError;
 use crate::services::settings_service::SettingsService;
@@ -145,6 +145,15 @@ pub async fn preview_scale(
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound("Recipe not found".into()))?;
+
+    // A stored count below 1 gives no ratio to scale by, and the user could
+    // save the preview's amounts as real ones.
+    if recipe.servings < 1 {
+        return Err(AppError::BadRequest(
+            "Recipe has no serving count to scale from. Set its servings to 1 or more first."
+                .into(),
+        ));
+    }
 
     let ingredients: Vec<IngredientDto> = serde_json::from_str(&recipe.ingredients)
         .map_err(|e| AppError::Internal(format!("Could not parse ingredients: {}", e)))?;
@@ -354,6 +363,7 @@ pub async fn import_url(
                         dto.parent_recipe_id = None;
                         dto.source_url = Some(url);
                         drop_unusable_import_times(&mut dto);
+                        default_unusable_import_servings(&mut dto);
 
                         match RecipeService::create(&db, dto).await {
                             Ok(recipe) => {
@@ -442,6 +452,7 @@ pub async fn import_file(
 
     let mut dto = result.recipe;
     drop_unusable_import_times(&mut dto);
+    default_unusable_import_servings(&mut dto);
     RecipeService::create(&state.db, dto)
         .await
         .map(|r| (StatusCode::CREATED, Json(r)))

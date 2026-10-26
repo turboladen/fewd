@@ -4,6 +4,7 @@ use crate::dto::PersonServingDto;
 use crate::dto::{CreateMealTemplateDto, UpdateMealTemplateDto};
 use crate::entities::meal::Entity as Meal;
 use crate::entities::meal_template::{self, Entity as MealTemplate};
+use crate::services::service_error::{check_servings_counts, ServiceError};
 use crate::services::to_json;
 
 pub struct MealTemplateService;
@@ -27,7 +28,8 @@ impl MealTemplateService {
     pub async fn create(
         db: &DatabaseConnection,
         data: CreateMealTemplateDto,
-    ) -> Result<meal_template::Model, DbErr> {
+    ) -> Result<meal_template::Model, ServiceError> {
+        check_servings_counts(&data.servings)?;
         let now = chrono::Utc::now();
 
         let template = meal_template::ActiveModel {
@@ -39,14 +41,17 @@ impl MealTemplateService {
             updated_at: Set(now),
         };
 
-        template.insert(db).await
+        Ok(template.insert(db).await?)
     }
 
     pub async fn update(
         db: &DatabaseConnection,
         id: String,
         data: UpdateMealTemplateDto,
-    ) -> Result<meal_template::Model, DbErr> {
+    ) -> Result<meal_template::Model, ServiceError> {
+        if let Some(servings) = &data.servings {
+            check_servings_counts(servings)?;
+        }
         let existing = MealTemplate::find_by_id(id)
             .one(db)
             .await?
@@ -66,7 +71,7 @@ impl MealTemplateService {
 
         template.updated_at = Set(chrono::Utc::now());
 
-        template.update(db).await
+        Ok(template.update(db).await?)
     }
 
     pub async fn delete(db: &DatabaseConnection, id: String) -> Result<(), DbErr> {
