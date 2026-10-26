@@ -6,10 +6,16 @@ use sea_orm::*;
 use crate::dto::{CreateMealDto, PersonServingDto, UpdateMealDto};
 use crate::entities::meal::{self, Entity as Meal};
 use crate::entities::recipe::{self, Entity as Recipe};
-use crate::services::service_error::{check_servings_counts, ServiceError};
+use crate::services::service_error::{check_servings_counts, ServiceError, ValidationError};
 use crate::services::to_json;
 
 pub struct MealService;
+
+/// Parse a meal date sent as `YYYY-MM-DD`.
+fn parse_meal_date(date: &str) -> Result<NaiveDate, ValidationError> {
+    NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map_err(|_| ValidationError::InvalidDate(date.to_string()))
+}
 
 impl MealService {
     pub async fn get_all_for_date_range(
@@ -27,6 +33,10 @@ impl MealService {
             .filter(meal::Column::Date.lte(end))
             .order_by_asc(meal::Column::Date)
             .order_by_asc(meal::Column::OrderIndex)
+            // Two meals may share a date and slot, and the shopping list
+            // takes its display names and source order from this order.
+            .order_by_asc(meal::Column::CreatedAt)
+            .order_by_asc(meal::Column::Id)
             .all(db)
             .await
     }
@@ -43,9 +53,8 @@ impl MealService {
         data: CreateMealDto,
     ) -> Result<meal::Model, ServiceError> {
         check_servings_counts(&data.servings)?;
+        let date = parse_meal_date(&data.date)?;
         let now = chrono::Utc::now();
-        let date = NaiveDate::parse_from_str(&data.date, "%Y-%m-%d")
-            .map_err(|e| DbErr::Custom(format!("Invalid date format: {}", e)))?;
 
         let meal = meal::ActiveModel {
             id: Set(uuid::Uuid::new_v4().to_string()),
@@ -70,9 +79,11 @@ impl MealService {
         id: String,
         data: UpdateMealDto,
     ) -> Result<meal::Model, ServiceError> {
+        // Every check runs before the usage counters below are written.
         if let Some(servings) = &data.servings {
             check_servings_counts(servings)?;
         }
+        let date = data.date.as_deref().map(parse_meal_date).transpose()?;
         let existing = Meal::find_by_id(id)
             .one(db)
             .await?
@@ -96,10 +107,8 @@ impl MealService {
 
         let mut meal: meal::ActiveModel = existing.into();
 
-        if let Some(date) = data.date {
-            let parsed = NaiveDate::parse_from_str(&date, "%Y-%m-%d")
-                .map_err(|e| DbErr::Custom(format!("Invalid date format: {}", e)))?;
-            meal.date = Set(parsed);
+        if let Some(date) = date {
+            meal.date = Set(date);
         }
         if let Some(meal_type) = data.meal_type {
             meal.meal_type = Set(meal_type);

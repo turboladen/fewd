@@ -61,6 +61,9 @@ pub enum ValidationError {
     /// A meal serving's `servings_count` is not a finite number above 0.
     /// Carries the count as the caller sent it.
     NonPositiveServingsCount(f64),
+    /// A meal `date` is not a calendar date in `YYYY-MM-DD` form. Carries
+    /// the date as the caller sent it.
+    InvalidDate(String),
 }
 
 impl std::fmt::Display for ValidationError {
@@ -90,6 +93,10 @@ impl std::fmt::Display for ValidationError {
             Self::NonPositiveServingsCount(n) => write!(
                 f,
                 "servings_count must be > 0 (got {n}). Use 0.5 for a half portion; negative or zero values would corrupt the shopping list."
+            ),
+            Self::InvalidDate(date) => write!(
+                f,
+                "date must be a calendar date in YYYY-MM-DD form (got '{date}')."
             ),
         }
     }
@@ -169,6 +176,7 @@ mod tests {
                 | ValidationError::TimeTooLarge { field } => field,
                 ValidationError::NonPositiveServings(_) => "servings",
                 ValidationError::NonPositiveServingsCount(_) => "servings_count",
+                ValidationError::InvalidDate(_) => "date",
             }
         }
         let samples = [
@@ -186,6 +194,7 @@ mod tests {
             },
             ValidationError::NonPositiveServings(0),
             ValidationError::NonPositiveServingsCount(0.0),
+            ValidationError::InvalidDate("06/10/2025".into()),
         ];
         for err in samples {
             let message = err.to_string();

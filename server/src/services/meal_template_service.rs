@@ -84,7 +84,7 @@ impl MealTemplateService {
         db: &DatabaseConnection,
         meal_id: String,
         name: String,
-    ) -> Result<meal_template::Model, DbErr> {
+    ) -> Result<meal_template::Model, ServiceError> {
         let meal = Meal::find_by_id(meal_id)
             .one(db)
             .await?
@@ -93,6 +93,9 @@ impl MealTemplateService {
         // Parse servings from the meal to validate the JSON, then re-serialize
         let servings: Vec<PersonServingDto> = serde_json::from_str(&meal.servings)
             .map_err(|e| DbErr::Custom(format!("Failed to parse meal servings: {}", e)))?;
+        // A stored meal can hold a count that meal writes reject, and a
+        // template carrying it could not be applied.
+        check_servings_counts(&servings)?;
 
         let now = chrono::Utc::now();
         let template = meal_template::ActiveModel {
@@ -104,6 +107,6 @@ impl MealTemplateService {
             updated_at: Set(now),
         };
 
-        template.insert(db).await
+        Ok(template.insert(db).await?)
     }
 }

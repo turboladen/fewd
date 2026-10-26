@@ -404,3 +404,27 @@ async fn meal_template_writes_with_nonpositive_servings_count_answer_400() {
         }
     }
 }
+
+#[tokio::test]
+async fn meal_writes_with_a_malformed_date_answer_400() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, recipe_dto("Pasta"))
+        .await
+        .expect("seed recipe");
+    let (status, created) =
+        send_json(app(&db), "POST", "/api/meals", meal_body(&recipe.id, 1.0)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let meal_uri = format!("/api/meals/{}", created["id"].as_str().expect("meal id"));
+
+    for (method, uri) in [("POST", "/api/meals"), ("PUT", meal_uri.as_str())] {
+        let mut body = meal_body(&recipe.id, 1.0);
+        body["date"] = serde_json::json!("06/10/2025");
+        let (status, response) = send_json(app(&db), method, uri, body).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{method}: {response}");
+        assert!(
+            message(&response).starts_with("date"),
+            "{method}: {response}"
+        );
+    }
+}

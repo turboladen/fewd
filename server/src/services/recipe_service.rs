@@ -45,22 +45,24 @@ fn rescale_stored_ingredients(
     Ok(Some(scale_amounts(&stored, ratio)))
 }
 
-/// Replaces an AI-generated recipe's `servings` below 1 with
+/// Replaces a generated recipe's `servings` below 1 with
 /// [`DEFAULT_SERVINGS`], logging a warning that names the recipe and the
 /// value it replaced. Call it on every recipe the model produces, whether it
 /// is saved at once (import) or handed back as a draft the client saves later
-/// (adapt, suggest).
+/// (adapt, suggest), and on a variant that copies its count from a stored
+/// parent.
 //
 // This follows `drop_unusable_import_times`: the tokens are already spent,
-// so a guessed count the person can edit beats losing the recipe. Direct
-// create calls still reject the same values.
+// so a guessed count the person can edit beats losing the recipe. A variant
+// spec has no servings field, so its caller could not fix the copied count.
+// Direct create calls still reject the same values.
 pub fn default_unusable_import_servings(dto: &mut CreateRecipeDto) {
     if dto.servings < 1 {
         tracing::warn!(
             recipe = %dto.name,
             servings = dto.servings,
             default = DEFAULT_SERVINGS,
-            "replacing unusable servings in imported recipe"
+            "replacing unusable servings in generated recipe"
         );
         dto.servings = DEFAULT_SERVINGS;
     }
