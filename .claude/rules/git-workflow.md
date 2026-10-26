@@ -19,3 +19,9 @@ The Dolt DB under `.beads/` is the source of truth: `bd dolt push` syncs it to `
 ## Worktrees
 
 Parallel work runs in git worktrees under `.claude/worktrees/`. A fresh worktree has no `dist/` or `node_modules/`; symlink both from the main checkout before building. Run `bd` commands against the main checkout's `.beads/`.
+
+Give `/code-review` the worktree path as its target (`xhigh --fix <worktree>`). With no target, its subagent starts in the main checkout and reviews and edits every worktree that has uncommitted changes.
+
+Drive a worktree from another session with `git -C <worktree>` or a subshell `( cd <worktree> && … )`. A bare `cd` in the Bash tool moves the session's working directory, and teammates see it move.
+
+When several agents commit in parallel, each writes its commit message to a file named for its unit, such as `commit-msg-<unit>.txt`. With a shared filename, one agent's message can land on another agent's commit.

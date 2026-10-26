@@ -20,6 +20,7 @@ Rust + Axum + SeaORM + SQLite. Route handlers in `server/src/routes/` stay thin 
 - Unit tests use `#[cfg(test)]` modules with in-memory SQLite; integration tests live in `server/tests/`.
 - **Fields that must never leave the server** (e.g. `Person.mcp_token_hash` behind `#[serde(skip_serializing)]`): pin them with `serde_json::to_string(&model)` and assert the output contains neither the field name nor the value. See `mcp_token_service::tests::person_serialization_omits_mcp_token_hash`.
 - Default verification for ordinary route, service, and handler changes is `cargo test -p fewd-server`. A change under `server/migration/` also needs `cargo test -p migration`. Bare `cargo test` from the repo root selects both packages, which the section below rules out. The release-build requirement for schema and feature changes is in the migrations rule.
+- `cargo test` takes one name filter before `--`; pass several as `cargo test -p fewd-server --all-features --lib -- a b c`. Name filters match test names, not integration-test file names, so run one file with `--test <file_stem>` (e.g. `--test mcp_session_reattach_test`).
 
 ## Formatting and lint
 
