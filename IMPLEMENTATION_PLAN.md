@@ -419,39 +419,6 @@
 
 ---
 
-## Phase 14: Database Configuration
-
-**Goal:** Allow configuring the database location via the Settings UI.
-
-### Tasks:
-
-**14.1: Configurable Database Location**
-
-- Add `GET /settings/db-location` and `PUT /settings/db-location` routes
-- Read current `DATABASE_PATH` from environment/config, expose via API
-- Support setting a new path, validate it's writable, copy existing data if needed
-- Server restart required after changing location
-
-**14.2: Database Location Settings UI**
-
-- Add "Database Location" section to `SettingsPanel.tsx`
-- Text input showing current path with a "Browse" or manual edit option
-- Validation feedback (writable, existing DB detection)
-- "Copy data to new location" option when changing paths
-- Restart notice after changing location
-
-**Verify Phase 14:**
-
-- [x] Default DB location unchanged when no config exists
-- [x] Can view current DB location in Settings
-- [ ] Can change DB location via Settings
-- [ ] Data is copied to new location when requested
-- [ ] CI passes (fmt, clippy, test, dprint, lint, bun test)
-
-**Deliverable:** Configurable database location via Settings UI
-
----
-
 ## Phase 15: Favicon & Branding
 
 **Goal:** Add a custom favicon and browser tab icon for the web app.
@@ -576,10 +543,9 @@ Give these tasks to Claude Code in order:
 6. **Phase 11** — AI infrastructure (API key, client, prompt builder, DraftReview pattern)
 7. **Phase 12** — AI recipe adaptation (first AI feature, uses all Phase 11 infra)
 8. **Phase 13** — AI meal suggestions (builds on Phases 10, 11, and 12)
-9. **Phase 14** — Database configuration (configurable DB location via Settings UI)
-10. **Phase 15** — Favicon & branding (custom favicon for the web app)
-11. **Phase 16** — AI recipe import from URL and PDF (extends import system)
-12. **Phase 17** — Styling facelift (warm color palette, heading font, polish)
+9. **Phase 15** — Favicon & branding (custom favicon for the web app)
+10. **Phase 16** — AI recipe import from URL and PDF (extends import system)
+11. **Phase 17** — Styling facelift (warm color palette, heading font, polish)
 
 ---
 
