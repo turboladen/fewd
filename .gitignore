@@ -72,6 +72,10 @@ dist-ssr
 
 # Beads / Dolt files (added by bd init)
 .beads-credential-key
+# bd creates this lock beside `.beads/` rather than inside it, so
+# `.beads/.gitignore` cannot cover it, and an untracked file here fails a
+# dirty-tree deploy gate.
+.beads.gate.lock
 
 # Beads issue export mirror — local only; the Dolt DB is the source of truth
 .beads/issues.jsonl
