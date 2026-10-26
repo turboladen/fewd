@@ -6,6 +6,7 @@ use crate::dto::CreateRecipeDto;
 use crate::entities::{person, recipe};
 use crate::services::claude_client::{ClaudeClient, ClaudeError, SendMessageResponse};
 use crate::services::prompt_builder::PromptBuilder;
+use crate::services::recipe_service::default_unusable_import_servings;
 use crate::services::recipe_times::drop_unusable_import_times;
 use crate::services::recipe_variant::VARIANT_SOURCE;
 
@@ -178,6 +179,7 @@ Rules:
         dto.source = VARIANT_SOURCE.to_string();
         dto.parent_recipe_id = Some(original_recipe_id.to_string());
         drop_unusable_import_times(&mut dto);
+        default_unusable_import_servings(&mut dto);
 
         Ok(dto)
     }

@@ -270,3 +270,161 @@ async fn update_drink_recipe_with_out_of_range_rating_answers_400() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert!(message(&body).contains("1 to 5"), "{body}");
 }
+
+#[tokio::test]
+async fn create_recipe_with_nonpositive_servings_answers_400() {
+    let db = setup_db().await;
+    for servings in [0, -1] {
+        let mut body = serde_json::to_value(recipe_dto("Pasta")).expect("dto serializes");
+        body["servings"] = serde_json::json!(servings);
+
+        let (status, response) = send_json(app(&db), "POST", "/api/recipes", body).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+        assert!(message(&response).contains("servings"), "{response}");
+    }
+    let all = RecipeService::get_all(&db).await.expect("list recipes");
+    assert!(all.is_empty(), "nothing may be created");
+}
+
+#[tokio::test]
+async fn scale_preview_of_a_stored_zero_serving_recipe_answers_400() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, recipe_dto("Pasta"))
+        .await
+        .expect("seed recipe");
+    // The row is written directly, because create rejects a count below 1.
+    let mut row = recipe.into_active_model();
+    row.servings = Set(0);
+    let recipe = row.update(&db).await.expect("force servings to 0");
+
+    let (status, body) = send_json(
+        app(&db),
+        "POST",
+        &format!("/api/recipes/{}/scale", recipe.id),
+        serde_json::json!({ "new_servings": 4 }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(message(&body).contains("servings"), "{body}");
+}
+
+#[tokio::test]
+async fn scale_preview_to_nonpositive_servings_answers_400() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, recipe_dto("Pasta"))
+        .await
+        .expect("seed recipe");
+
+    for new_servings in [0, -1] {
+        let (status, body) = send_json(
+            app(&db),
+            "POST",
+            &format!("/api/recipes/{}/scale", recipe.id),
+            serde_json::json!({ "new_servings": new_servings }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    }
+}
+
+fn meal_body(recipe_id: &str, servings_count: f64) -> serde_json::Value {
+    serde_json::json!({
+        "date": "2025-06-10",
+        "meal_type": "Dinner",
+        "order_index": 2,
+        "servings": [{
+            "food_type": "recipe",
+            "person_id": "p1",
+            "recipe_id": recipe_id,
+            "servings_count": servings_count,
+            "notes": null,
+        }],
+    })
+}
+
+#[tokio::test]
+async fn meal_writes_with_nonpositive_servings_count_answer_400() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, recipe_dto("Pasta"))
+        .await
+        .expect("seed recipe");
+    let (status, created) =
+        send_json(app(&db), "POST", "/api/meals", meal_body(&recipe.id, 1.0)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let meal_uri = format!("/api/meals/{}", created["id"].as_str().expect("meal id"));
+
+    for count in [0.0, -1.0] {
+        for (method, uri) in [("POST", "/api/meals"), ("PUT", meal_uri.as_str())] {
+            let (status, body) =
+                send_json(app(&db), method, uri, meal_body(&recipe.id, count)).await;
+
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{method} {count}: {body}");
+            assert!(
+                message(&body).starts_with("servings_count"),
+                "{method} {count}: {body}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn meal_template_writes_with_nonpositive_servings_count_answer_400() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, recipe_dto("Pasta"))
+        .await
+        .expect("seed recipe");
+    let template_body = |count: f64| {
+        let mut body = meal_body(&recipe.id, count);
+        body["name"] = serde_json::json!("Weeknight Pasta");
+        body
+    };
+    let (status, created) =
+        send_json(app(&db), "POST", "/api/meal-templates", template_body(1.0)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let template_uri = format!(
+        "/api/meal-templates/{}",
+        created["id"].as_str().expect("template id")
+    );
+
+    for count in [0.0, -1.0] {
+        for (method, uri) in [
+            ("POST", "/api/meal-templates"),
+            ("PUT", template_uri.as_str()),
+        ] {
+            let (status, body) = send_json(app(&db), method, uri, template_body(count)).await;
+
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{method} {count}: {body}");
+            assert!(
+                message(&body).starts_with("servings_count"),
+                "{method} {count}: {body}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn meal_writes_with_a_malformed_date_answer_400() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, recipe_dto("Pasta"))
+        .await
+        .expect("seed recipe");
+    let (status, created) =
+        send_json(app(&db), "POST", "/api/meals", meal_body(&recipe.id, 1.0)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let meal_uri = format!("/api/meals/{}", created["id"].as_str().expect("meal id"));
+
+    for (method, uri) in [("POST", "/api/meals"), ("PUT", meal_uri.as_str())] {
+        let mut body = meal_body(&recipe.id, 1.0);
+        body["date"] = serde_json::json!("06/10/2025");
+        let (status, response) = send_json(app(&db), method, uri, body).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{method}: {response}");
+        assert!(
+            message(&response).starts_with("date"),
+            "{method}: {response}"
+        );
+    }
+}

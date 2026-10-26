@@ -4,6 +4,7 @@ use crate::dto::PersonServingDto;
 use crate::dto::{CreateMealTemplateDto, UpdateMealTemplateDto};
 use crate::entities::meal::Entity as Meal;
 use crate::entities::meal_template::{self, Entity as MealTemplate};
+use crate::services::service_error::{check_servings_counts, ServiceError, ValidationError};
 use crate::services::to_json;
 
 pub struct MealTemplateService;
@@ -27,7 +28,8 @@ impl MealTemplateService {
     pub async fn create(
         db: &DatabaseConnection,
         data: CreateMealTemplateDto,
-    ) -> Result<meal_template::Model, DbErr> {
+    ) -> Result<meal_template::Model, ServiceError> {
+        check_servings_counts(&data.servings)?;
         let now = chrono::Utc::now();
 
         let template = meal_template::ActiveModel {
@@ -39,14 +41,17 @@ impl MealTemplateService {
             updated_at: Set(now),
         };
 
-        template.insert(db).await
+        Ok(template.insert(db).await?)
     }
 
     pub async fn update(
         db: &DatabaseConnection,
         id: String,
         data: UpdateMealTemplateDto,
-    ) -> Result<meal_template::Model, DbErr> {
+    ) -> Result<meal_template::Model, ServiceError> {
+        if let Some(servings) = &data.servings {
+            check_servings_counts(servings)?;
+        }
         let existing = MealTemplate::find_by_id(id)
             .one(db)
             .await?
@@ -66,7 +71,7 @@ impl MealTemplateService {
 
         template.updated_at = Set(chrono::Utc::now());
 
-        template.update(db).await
+        Ok(template.update(db).await?)
     }
 
     pub async fn delete(db: &DatabaseConnection, id: String) -> Result<(), DbErr> {
@@ -79,7 +84,7 @@ impl MealTemplateService {
         db: &DatabaseConnection,
         meal_id: String,
         name: String,
-    ) -> Result<meal_template::Model, DbErr> {
+    ) -> Result<meal_template::Model, ServiceError> {
         let meal = Meal::find_by_id(meal_id)
             .one(db)
             .await?
@@ -88,6 +93,17 @@ impl MealTemplateService {
         // Parse servings from the meal to validate the JSON, then re-serialize
         let servings: Vec<PersonServingDto> = serde_json::from_str(&meal.servings)
             .map_err(|e| DbErr::Custom(format!("Failed to parse meal servings: {}", e)))?;
+        // A stored meal can hold a count that meal writes reject, and a
+        // template carrying it could not be applied.
+        if let Err(ValidationError::NonPositiveServingsCount(count)) =
+            check_servings_counts(&servings)
+        {
+            return Err(ValidationError::StoredServingsCount {
+                meal_id: meal.id,
+                count,
+            }
+            .into());
+        }
 
         let now = chrono::Utc::now();
         let template = meal_template::ActiveModel {
@@ -99,6 +115,6 @@ impl MealTemplateService {
             updated_at: Set(now),
         };
 
-        template.insert(db).await
+        Ok(template.insert(db).await?)
     }
 }

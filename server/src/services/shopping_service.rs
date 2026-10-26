@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use sea_orm::*;
 
@@ -30,6 +30,9 @@ impl ShoppingService {
 
         // 2. Collect all ingredients with source info
         let mut all_items: Vec<IngredientWithSource> = Vec::new();
+        // Each bad stored row is logged once per list, not once per serving.
+        let mut warned_meals: HashSet<&str> = HashSet::new();
+        let mut warned_recipes: HashSet<String> = HashSet::new();
 
         for meal in &meals {
             let servings: Vec<PersonServingDto> =
@@ -49,6 +52,19 @@ impl ShoppingService {
                         servings_count,
                         ..
                     } => {
+                        // Writes reject such a count, but an older row may hold
+                        // one. It asks for no food, so the serving is skipped.
+                        if !servings_count.is_finite() || *servings_count <= 0.0 {
+                            if warned_meals.insert(&meal.id) {
+                                tracing::warn!(
+                                    meal_id = %meal.id,
+                                    servings_count,
+                                    "skipping a stored meal serving with a non-positive servings_count"
+                                );
+                            }
+                            continue;
+                        }
+
                         let recipe = Recipe::find_by_id(recipe_id).one(db).await?;
 
                         if let Some(recipe) = recipe {
@@ -60,7 +76,23 @@ impl ShoppingService {
                                     ))
                                 })?;
 
-                            let scale = servings_count / recipe.servings as f64;
+                            // Writes reject a count below 1, but an older row may
+                            // hold one. Dividing by it would make every amount
+                            // infinite, so it is read as one serving, and the
+                            // source reports the count the scale used.
+                            let recipe_servings = if recipe.servings < 1 {
+                                if warned_recipes.insert(recipe.id.clone()) {
+                                    tracing::warn!(
+                                        recipe_id = %recipe.id,
+                                        servings = recipe.servings,
+                                        "scaling a recipe with non-positive stored servings as one serving"
+                                    );
+                                }
+                                1
+                            } else {
+                                recipe.servings
+                            };
+                            let scale = servings_count / f64::from(recipe_servings);
 
                             for ing in ingredients {
                                 let scaled_amount = scale_amount(&ing.amount, scale);
@@ -91,7 +123,7 @@ impl ShoppingService {
                                     meal_id: meal.id.clone(),
                                     meal_date: meal_date.clone(),
                                     meal_type: meal.meal_type.to_string(),
-                                    recipe_servings: Some(recipe.servings),
+                                    recipe_servings: Some(recipe_servings),
                                     person_servings: Some(*servings_count),
                                 };
 
@@ -273,21 +305,29 @@ fn scale_alt(alt: IngredientDto, scale: f64) -> IngredientDto {
 /// Merge sources that share the same meal + recipe + ingredient into a single line.
 /// E.g., two people eating the same recipe in one meal → one combined source row.
 fn merge_same_meal_sources(items: Vec<IngredientWithSource>) -> Vec<IngredientWithSource> {
-    // Key: (ingredient_name_lower, meal_id, source_name)
-    let mut groups: HashMap<(String, String, Option<String>), Vec<IngredientWithSource>> =
-        HashMap::new();
+    // Groups keep first-seen order, so the output follows meal order: the
+    // display name takes the first meal's casing and sums run in one order.
+    // Items in different units stay apart, so the aggregation can convert them.
+    // Key: (ingredient_name_lower, meal_id, source_name, normalized_unit)
+    let mut index: HashMap<(String, String, Option<String>, String), usize> = HashMap::new();
+    let mut groups: Vec<Vec<IngredientWithSource>> = Vec::new();
 
     for item in items {
         let key = (
             item.ingredient.name.to_lowercase(),
             item.source.meal_id.clone(),
             item.source.source_name.clone(),
+            unit_converter::normalize_unit(&item.ingredient.unit),
         );
-        groups.entry(key).or_default().push(item);
+        let slot = *index.entry(key).or_insert_with(|| {
+            groups.push(Vec::new());
+            groups.len() - 1
+        });
+        groups[slot].push(item);
     }
 
     let mut merged = Vec::new();
-    for (_, group) in groups {
+    for group in groups {
         if group.len() <= 1 {
             merged.extend(group);
             continue;
@@ -445,16 +485,26 @@ fn try_sum_amounts(
     }
 }
 
-/// Find the most common normalized unit among the items.
+/// Find the most common normalized unit among the items. A tie goes to the
+/// larger unit, then to the alphabetically first one.
 fn most_common_unit(items: &[IngredientWithSource]) -> String {
     let mut counts: HashMap<String, usize> = HashMap::new();
     for item in items {
         let normalized = unit_converter::normalize_unit(&item.ingredient.unit);
         *counts.entry(normalized).or_default() += 1;
     }
+    // The larger unit shows the smaller number. Within a category no two
+    // units share a base factor, and callers only pass items of one category.
+    // A unit with no factor ranks smallest.
+    let factor = |unit: &str| unit_converter::to_base(1.0, unit).unwrap_or(0.0);
     counts
         .into_iter()
-        .max_by_key(|(_, count)| *count)
+        .max_by(|(a_unit, a_count), (b_unit, b_count)| {
+            a_count
+                .cmp(b_count)
+                .then_with(|| factor(a_unit).total_cmp(&factor(b_unit)))
+                .then_with(|| b_unit.cmp(a_unit))
+        })
         .map(|(unit, _)| unit)
         .unwrap_or_default()
 }
@@ -710,6 +760,79 @@ mod tests {
             let item = shopping_item_from_aggregate(input.clone());
             assert!(item.shopping.is_none());
             assert_aggregate_unchanged(&item, &input);
+        }
+    }
+
+    fn item(name: &str, value: f64, unit: &str) -> IngredientWithSource {
+        let amount = IngredientAmountDto::Single { value };
+        IngredientWithSource {
+            ingredient: IngredientDto {
+                name: name.to_string(),
+                prep: None,
+                amount: amount.clone(),
+                unit: unit.to_string(),
+                notes: None,
+                or_alternative: None,
+            },
+            source: source(amount, unit, name),
+        }
+    }
+
+    // Every call builds a fresh HashMap with its own random hash keys, so a
+    // tie broken by iteration order picks either unit about half the time.
+    // Repeating each order 64 times makes a lucky pass vanishingly unlikely.
+    #[test]
+    fn most_common_unit_tie_prefers_the_larger_unit() {
+        for _ in 0..64 {
+            let forward = [item("flour", 1.0, "cup"), item("flour", 1.0, "tbsp")];
+            let reverse = [item("flour", 1.0, "tbsp"), item("flour", 1.0, "cup")];
+            assert_eq!(most_common_unit(&forward), "cup");
+            assert_eq!(most_common_unit(&reverse), "cup");
+        }
+        let three_way = [
+            item("flour", 1.0, "cup"),
+            item("flour", 1.0, "tbsp"),
+            item("flour", 1.0, "tsp"),
+        ];
+        assert_eq!(most_common_unit(&three_way), "cup");
+    }
+
+    #[test]
+    fn most_common_unit_count_beats_size() {
+        let items = [
+            item("flour", 2.0, "tbsp"),
+            item("flour", 1.0, "cup"),
+            item("flour", 1.0, "tbsp"),
+        ];
+        assert_eq!(most_common_unit(&items), "tbsp");
+    }
+
+    #[test]
+    fn tied_units_total_in_the_larger_unit() {
+        for _ in 0..64 {
+            let items = [item("flour", 1.0, "tbsp"), item("flour", 1.0, "cup")];
+            let (total, unit) = sum_singles_with_conversion(&items, "volume");
+            assert_eq!(unit.as_deref(), Some("cup"));
+            assert!(
+                matches!(total, Some(IngredientAmountDto::Single { value }) if value == 1.06),
+                "{total:?}"
+            );
+        }
+    }
+
+    // Two sources from different meals form two merge groups, and their
+    // output order must follow the input, which is meal order.
+    #[test]
+    fn merge_same_meal_sources_keeps_input_order() {
+        for _ in 0..64 {
+            let mut first = item("Flour", 2.0, "cup");
+            first.source.meal_id = "meal-a".to_string();
+            let mut second = item("flour", 1.0, "tbsp");
+            second.source.meal_id = "meal-b".to_string();
+            let merged = merge_same_meal_sources(vec![first, second]);
+            let meals: Vec<&str> = merged.iter().map(|i| i.source.meal_id.as_str()).collect();
+            assert_eq!(meals, ["meal-a", "meal-b"]);
+            assert_eq!(merged[0].ingredient.name, "Flour");
         }
     }
 }

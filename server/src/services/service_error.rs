@@ -1,6 +1,8 @@
 use migration::total_minutes::ACCEPTED_TIME_UNITS;
 use sea_orm::DbErr;
 
+use crate::dto::PersonServingDto;
+
 /// Describes how a service write that validates its input can fail.
 #[derive(Debug)]
 pub enum ServiceError {
@@ -56,6 +58,15 @@ pub enum ValidationError {
     TimeTooLarge { field: &'static str },
     /// `servings` is below 1. Carries the count as the caller sent it.
     NonPositiveServings(i32),
+    /// A meal serving's `servings_count` is not a finite number above 0.
+    /// Carries the count as the caller sent it.
+    NonPositiveServingsCount(f64),
+    /// A stored meal holds a `servings_count` that is not a finite number
+    /// above 0, so it cannot be copied into a template.
+    StoredServingsCount { meal_id: String, count: f64 },
+    /// A meal `date` is not a calendar date in `YYYY-MM-DD` form. Carries
+    /// the date as the caller sent it.
+    InvalidDate(String),
 }
 
 impl std::fmt::Display for ValidationError {
@@ -82,8 +93,38 @@ impl std::fmt::Display for ValidationError {
                 f,
                 "servings must be >= 1 (got {n}). Recipes need at least one serving so shopping-list scaling works."
             ),
+            Self::NonPositiveServingsCount(n) => write!(
+                f,
+                "servings_count must be > 0 (got {n}). Use 0.5 for a half portion; negative or zero values would corrupt the shopping list."
+            ),
+            Self::StoredServingsCount { meal_id, count } => write!(
+                f,
+                "servings_count {count} on meal {meal_id} is not above 0. Edit the meal so every servings_count is above 0, then save it as a template."
+            ),
+            Self::InvalidDate(date) => write!(
+                f,
+                "date must be a calendar date in YYYY-MM-DD form (got '{date}')."
+            ),
         }
     }
+}
+
+/// Check that every recipe serving in a meal or template asks for a finite
+/// `servings_count` above 0. Ad-hoc servings carry no count and always pass.
+///
+/// # Errors
+///
+/// Returns [`ValidationError::NonPositiveServingsCount`] for the first count
+/// that fails.
+pub fn check_servings_counts(servings: &[PersonServingDto]) -> Result<(), ValidationError> {
+    for serving in servings {
+        if let PersonServingDto::Recipe { servings_count, .. } = serving {
+            if !servings_count.is_finite() || *servings_count <= 0.0 {
+                return Err(ValidationError::NonPositiveServingsCount(*servings_count));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Round `rating` to a whole star, rejecting a value that does not round
@@ -141,6 +182,9 @@ mod tests {
                 | ValidationError::NegativeTime { field, .. }
                 | ValidationError::TimeTooLarge { field } => field,
                 ValidationError::NonPositiveServings(_) => "servings",
+                ValidationError::NonPositiveServingsCount(_)
+                | ValidationError::StoredServingsCount { .. } => "servings_count",
+                ValidationError::InvalidDate(_) => "date",
             }
         }
         let samples = [
@@ -157,6 +201,12 @@ mod tests {
                 field: "total_time",
             },
             ValidationError::NonPositiveServings(0),
+            ValidationError::NonPositiveServingsCount(0.0),
+            ValidationError::StoredServingsCount {
+                meal_id: "meal-1".into(),
+                count: 0.0,
+            },
+            ValidationError::InvalidDate("06/10/2025".into()),
         ];
         for err in samples {
             let message = err.to_string();

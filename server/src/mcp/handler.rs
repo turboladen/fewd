@@ -22,7 +22,9 @@ use crate::services::meal_service::MealService;
 use crate::services::person_service::PersonService;
 use crate::services::printable_service::{self, PersonNameMap};
 use crate::services::recipe_import_service::{ImportError, RecipeImportService};
-use crate::services::recipe_service::{RecipeService, SearchFilters};
+use crate::services::recipe_service::{
+    default_unusable_import_servings, RecipeService, SearchFilters,
+};
 use crate::services::recipe_times::drop_unusable_import_times;
 use crate::services::recipe_variant::{build_variant_dto, VariantError};
 use crate::services::service_error::ServiceError;
@@ -831,6 +833,7 @@ impl FewdMcp {
         let mut dto = result.recipe;
         dto.source_url = Some(url.to_string());
         drop_unusable_import_times(&mut dto);
+        default_unusable_import_servings(&mut dto);
 
         // Match the HTTP-route token meter so MCP imports show up in usage stats.
         SettingsService::increment_token_usage(&self.db, result.input_tokens, result.output_tokens)
@@ -868,7 +871,10 @@ impl FewdMcp {
             Err(CreateMealError::Resolve(e)) => return Ok(tool_user_error(e.to_string())),
         };
 
-        let created = MealService::create(&self.db, dto).await.map_err(db_error)?;
+        let created = match MealService::create(&self.db, dto).await {
+            Ok(meal) => meal,
+            Err(e) => return service_error(e),
+        };
         let brief = meal_to_brief(&created, &lookups).map_err(internal_error)?;
         tool_json_result(&brief)
     }

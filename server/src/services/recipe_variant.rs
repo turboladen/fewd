@@ -7,6 +7,7 @@ use serde::de::DeserializeOwned;
 use crate::dto::{CreateRecipeDto, IngredientAmountDto, IngredientDto, TimeValueDto};
 use crate::entities::recipe;
 use crate::services::ingredient_splitter;
+use crate::services::recipe_service::default_unusable_import_servings;
 use crate::services::recipe_times::drop_unusable_import_times;
 
 /// The `source` every variant is stored with. The web UI labels a recipe with
@@ -300,6 +301,7 @@ pub fn build_variant_dto(
         icon: parent.icon.clone(),
     };
     drop_unusable_import_times(&mut dto);
+    default_unusable_import_servings(&mut dto);
     Ok(dto)
 }
 
