@@ -382,23 +382,15 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
                 )
             }
         }
-        // 3 parts: dispatch on whether parts[1] is a known unit.
-        //
-        //   - "2 cups flour" → parts[1]="cups" IS a unit → name="flour",
-        //     unit="cups". Standard case.
-        //   - "6 cloves garlic, minced" → parts[1]="cloves" IS a unit →
-        //     name="garlic, minced" → splitter peels prep.
-        //   - "1 zucchini, sliced into half-moons" → parts[1]="zucchini,"
-        //     is NOT a unit (compound name with prep clause). Treat the
-        //     whole `parts[1] + parts[2]` as the raw name (preserving the
-        //     comma so the splitter peels prep), set unit="whole".
-        //   - "4 medium red onions" → parts[1]="medium" is NOT a unit
-        //     (size modifier). Same compound-name treatment.
-        //
-        // The is_known_unit dispatch was added for fewd-4i3; before that
-        // the parser unconditionally treated parts[1] as the unit, which
-        // produced `name="sliced into half-moons", unit="zucchini,"` and
-        // similar misparses in prod data.
+        // 3 parts: whether parts[1] is a known unit decides the split.
+        //   - "2 cups flour": "cups" is a unit, so name="flour", unit="cups".
+        //   - "6 cloves garlic, minced": "cloves" is a unit, and the splitter
+        //     peels "minced" from name="garlic, minced".
+        //   - "1 zucchini, sliced into half-moons": "zucchini," is not a unit,
+        //     so parts[1] and parts[2] form the raw name, comma kept for the
+        //     splitter, with unit="whole". A size modifier ("4 medium red
+        //     onions") takes the same path. Reading every parts[1] as a unit
+        //     would store name="sliced into half-moons", unit="zucchini,".
         _ => {
             if let Some(amount) = try_parse_amount(parts[0]) {
                 let token = parts[1];
@@ -1017,17 +1009,12 @@ dinner, quick, mexican";
 
     #[test]
     fn test_ingredient_with_paren_alternative_and_prep() {
-        // End-to-end: a markdown line where the parenthetical is NOT trailing
-        // notes but a varietal alternative, followed by a prep clause. The
-        // parser should preserve the parens in `name` and put `grated` in
-        // `prep`.
-        //
-        // Pre-fewd-xez this dropped `, grated` and produced name="pear",
-        // notes=Some("or Fuji apple"). Pre-fewd-4i3 the 3-part branch put
-        // "Asian" in `unit`, leaving name="pear (or Fuji apple)" — wrong
-        // because "Asian" is a varietal modifier, not a unit. After
-        // fewd-4i3's is_known_unit dispatch, the full varietal stays in
-        // `name`: "Asian pear (or Fuji apple)".
+        // The parenthetical here is a varietal alternative, not trailing
+        // notes, and a prep clause follows it. The parser keeps the parens in
+        // `name` and puts `grated` in `prep`. "Asian" is a varietal modifier,
+        // not a unit, so it stays in `name` too: "Asian pear (or Fuji apple)".
+        // Reading the parens as notes would drop `, grated`, and reading
+        // "Asian" as the unit would leave name="pear (or Fuji apple)".
         let md = "# Test\n\n## Ingredients\n- 1 Asian pear (or Fuji apple), grated\n\n## Instructions\nMix";
         let recipe = parse(md);
         let ing = &recipe.ingredients[0];
@@ -1053,17 +1040,13 @@ dinner, quick, mexican";
 
     #[test]
     fn test_ingredient_with_mid_string_size_parens() {
-        // The fewd-i47 hero case: parens carry per-can size info, the noun
-        // ("crushed San Marzano tomatoes") trails after `)` with no comma.
-        // Pre-fix: extract_notes left the line untouched, splitn(3, ' ')
-        // sliced off "cans" as the unit, and the entire `(28 oz each)
-        // crushed San Marzano tomatoes` substring landed in `name` —
-        // dropping the noun in the rendered UI.
-        //
-        // Post-fix: peel_size_paren rewrites the line to `2 cans crushed
-        // San Marzano tomatoes` with notes="28 oz each" before
-        // tokenization, so the standard known-unit dispatch produces the
-        // expected DTO.
+        // The parens carry per-can size info, and the noun ("crushed San
+        // Marzano tomatoes") trails after `)` with no comma. peel_size_paren
+        // rewrites the line to `2 cans crushed San Marzano tomatoes` with
+        // notes="28 oz each" before tokenization, so the known-unit dispatch
+        // reads "cans" as the unit. Without the peel, the whole `(28 oz each)
+        // crushed San Marzano tomatoes` substring would land in `name`, and
+        // the rendered UI would lose the noun.
         let md = "# Test\n\n## Ingredients\n- 2 cans (28 oz each) crushed San Marzano tomatoes\n\n## Instructions\nMix";
         let recipe = parse(md);
         let ing = &recipe.ingredients[0];
