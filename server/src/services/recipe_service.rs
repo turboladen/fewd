@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use sea_orm::sea_query::Expr;
 use sea_orm::*;
 
-use crate::dto::{CreateRecipeDto, IngredientDto, UpdateRecipeDto};
+use crate::dto::{CreateRecipeDto, IngredientDto, TimeValueDto, UpdateRecipeDto};
 use crate::entities::recipe::{self, Entity as Recipe};
 use crate::services::recipe_parser::DEFAULT_SERVINGS;
 use crate::services::recipe_scaler::scale_amounts;
@@ -251,18 +251,32 @@ impl RecipeService {
             .await?
             .ok_or(DbErr::RecordNotFound("Recipe not found".to_string()))?;
 
-        let times = resolve_times(
+        // A null time clears its column, and clearing a column that is
+        // already NULL is no change. A clear never moves the total: the
+        // cleared column reaches `resolve_times` as missing, so only a phase
+        // sent as a value re-derives the total. An explicit total clear wins
+        // over that derivation in the same write.
+        let cleared = |sent: &Option<Option<TimeValueDto>>, stored: &Option<String>| {
+            matches!(sent, Some(None)) && stored.is_some()
+        };
+        let clear_prep = cleared(&data.prep_time, &existing.prep_time);
+        let clear_cook = cleared(&data.cook_time, &existing.cook_time);
+        let clear_total = cleared(&data.total_time, &existing.total_time);
+        let mut times = resolve_times(
             StoredTimes {
-                prep_time: existing.prep_time.as_deref(),
-                cook_time: existing.cook_time.as_deref(),
-                total_time: existing.total_time.as_deref(),
+                prep_time: existing.prep_time.as_deref().filter(|_| !clear_prep),
+                cook_time: existing.cook_time.as_deref().filter(|_| !clear_cook),
+                total_time: existing.total_time.as_deref().filter(|_| !clear_total),
             },
             &SentTimes {
-                prep_time: data.prep_time,
-                cook_time: data.cook_time,
-                total_time: data.total_time,
+                prep_time: data.prep_time.flatten(),
+                cook_time: data.cook_time.flatten(),
+                total_time: data.total_time.flatten(),
             },
         )?;
+        if clear_total {
+            times.total_time = None;
+        }
 
         // Ingredients sent alongside a new count are taken as already sized
         // for it.
@@ -277,13 +291,23 @@ impl RecipeService {
             recipe.name = Set(name);
         }
         if let Some(description) = data.description {
-            recipe.description = Set(Some(description));
+            recipe.description = Set(description);
+        }
+        if clear_prep {
+            recipe.prep_time = Set(None);
         }
         if let Some(prep_time) = times.prep_time {
             recipe.prep_time = Set(Some(to_json(&prep_time.to_dto())?));
         }
+        if clear_cook {
+            recipe.cook_time = Set(None);
+        }
         if let Some(cook_time) = times.cook_time {
             recipe.cook_time = Set(Some(to_json(&cook_time.to_dto())?));
+        }
+        if clear_total {
+            recipe.total_minutes = Set(None);
+            recipe.total_time = Set(None);
         }
         if let Some(total_time) = times.total_time {
             recipe.total_minutes = Set(Some(total_time.minutes));
@@ -293,7 +317,7 @@ impl RecipeService {
             recipe.servings = Set(servings);
         }
         if let Some(portion_size) = data.portion_size {
-            recipe.portion_size = Set(Some(to_json(&portion_size)?));
+            recipe.portion_size = Set(portion_size.map(|p| to_json(&p)).transpose()?);
         }
         if let Some(instructions) = data.instructions {
             recipe.instructions = Set(instructions);
@@ -308,16 +332,16 @@ impl RecipeService {
             recipe.tags = Set(to_json(&normalize_tags(tags))?);
         }
         if let Some(notes) = data.notes {
-            recipe.notes = Set(Some(notes));
+            recipe.notes = Set(notes);
         }
         if let Some(icon) = data.icon {
-            recipe.icon = Set(Some(icon));
+            recipe.icon = Set(icon);
         }
         if let Some(is_favorite) = data.is_favorite {
             recipe.is_favorite = Set(is_favorite);
         }
         if let Some(rating) = data.rating {
-            recipe.rating = Set(Some(whole_star_rating(rating)?));
+            recipe.rating = Set(rating.map(whole_star_rating).transpose()?);
         }
 
         recipe.updated_at = Set(chrono::Utc::now());
@@ -503,13 +527,12 @@ impl RecipeService {
     /// Remove a recipe's star rating. Takes the loaded row, which every
     /// caller already holds from resolving the recipe.
     //
-    // Not expressible through `update`: `UpdateRecipeDto.rating` is
-    // `Option<f64>` and `update` gates on `if let Some(rating)`, so no
-    // inhabitant of that type writes NULL. Clearing has to exist because
+    // `update` with `rating: Some(None)` writes the same NULL, but it looks
+    // the row up by id again; MCP's `unrate_recipe` already holds the row
+    // from resolving its slug. Clearing has to exist because
     // `search_filtered`'s `min_rating` compares `rating >= n` and NULL
-    // fails that comparison — an unrated recipe and a 1-star recipe answer
-    // different searches, so a rating recorded wrong is otherwise
-    // permanent.
+    // fails that comparison, so an unrated recipe and a 1-star recipe
+    // answer different searches.
     pub async fn clear_rating(
         db: &DatabaseConnection,
         existing: recipe::Model,

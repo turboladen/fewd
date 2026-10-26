@@ -51,14 +51,12 @@ pub fn person_to_prefs(person: &person::Model) -> Result<PersonWithPrefs, String
 
 /// Input for the `update_person` MCP tool.
 //
-// The tool description carries the caller-facing contract. `notes` has no
-// clear-to-NULL path anywhere in fewd, and the web UI cannot clear it
-// either, so `update_person_input_to_dto` turns a blank `notes` into `None`
-// rather than letting `Some("")` act as a back-door clear; a real clear
-// affordance has to land in `UpdatePersonDto`, the service, and the UI
-// together. An empty list passes through as a real write that replaces the
-// stored list, which is how bad data gets cleaned up, so it is never
-// coalesced to "no change".
+// The tool description carries the caller-facing contract. This tool offers
+// no clear for `notes` (the web UI clears it with an explicit null over
+// HTTP), so `update_person_input_to_dto` turns a blank `notes` into "no
+// change" rather than letting `Some("")` act as a back-door clear. An empty
+// list passes through as a real write that replaces the stored list, which is
+// how bad data gets cleaned up, so it is never coalesced to "no change".
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdatePersonInput {
@@ -81,16 +79,15 @@ pub struct UpdatePersonInput {
 /// `None` because renames touch other tables that reference person.name and
 /// belong in a separate, more deliberate tool.
 ///
-/// `notes` gets one normalization step: empty / whitespace-only input is
-/// coerced to `None` so the codebase invariant "no clear-to-NULL path for
-/// notes" holds at the MCP boundary.
+/// `notes` gets one normalization step: empty or whitespace-only input
+/// leaves the stored notes unchanged, because this tool cannot clear them.
 pub fn update_person_input_to_dto(input: UpdatePersonInput) -> UpdatePersonDto {
     UpdatePersonDto {
         name: None,
         birthdate: None,
         dietary_goals: None,
         is_active: None,
-        notes: blank_to_none(input.notes),
+        notes: blank_to_none(input.notes).map(Some),
         dislikes: input.dislikes,
         favorites: input.favorites,
         drink_preferences: input.drink_preferences,
@@ -317,7 +314,7 @@ mod tests {
         assert!(dto.dietary_goals.is_none());
         assert!(dto.is_active.is_none());
         // Writable fields forward verbatim.
-        assert_eq!(dto.notes.as_deref(), Some("needs smaller portion"));
+        assert_eq!(dto.notes, Some(Some("needs smaller portion".to_string())));
         assert_eq!(dto.favorites.unwrap(), vec!["mac and cheese".to_string()]);
         assert!(dto.dislikes.is_none());
         assert!(dto.drink_preferences.is_none());
@@ -325,12 +322,26 @@ mod tests {
     }
 
     #[test]
+    fn update_person_input_to_dto_omitting_notes_leaves_them_unchanged() {
+        // An omitted `notes` must stay "leave unchanged", never a clear.
+        let dto = update_person_input_to_dto(UpdatePersonInput {
+            name: "Alice".into(),
+            notes: None,
+            dislikes: Some(vec!["olives".into()]),
+            favorites: None,
+            drink_preferences: None,
+            drink_dislikes: None,
+        });
+        assert_eq!(dto.notes, None);
+        assert_eq!(dto.dietary_goals, None);
+    }
+
+    #[test]
     fn update_person_input_to_dto_normalizes_empty_notes_to_none() {
-        // Empty and whitespace-only `notes` inputs must collapse to None
-        // at this boundary — otherwise the caller could persist
-        // `Some("")` as a back-door clear (the family-overview renderer
-        // collapses it to `_none_`), silently forking the codebase
-        // invariant that `notes` has no clear-to-NULL path. The four
+        // Empty and whitespace-only `notes` inputs must mean "no change"
+        // at this boundary, because this tool offers no clear; otherwise
+        // the caller could persist `Some("")` as a back-door clear (the
+        // family-overview renderer collapses it to `_none_`). The four
         // list fields don't get the same treatment: `Some(vec![])` is
         // documented as a legitimate "replace with empty" write.
         for raw in ["", " ", "  \t\n  "] {
@@ -359,6 +370,9 @@ mod tests {
             drink_preferences: None,
             drink_dislikes: None,
         });
-        assert_eq!(dto.notes.as_deref(), Some("  needs smaller portion  "));
+        assert_eq!(
+            dto.notes,
+            Some(Some("  needs smaller portion  ".to_string()))
+        );
     }
 }

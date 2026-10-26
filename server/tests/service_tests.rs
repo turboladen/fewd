@@ -154,7 +154,7 @@ async fn person_update_partial_fields() {
     let update = fewd_lib::dto::UpdatePersonDto {
         name: Some("Alice Updated".to_string()),
         birthdate: None,
-        dietary_goals: Some("more protein".to_string()),
+        dietary_goals: Some(Some("more protein".to_string())),
         dislikes: None,
         favorites: None,
         notes: None,
@@ -368,7 +368,7 @@ async fn recipe_clear_rating_sets_column_to_null() {
         &db,
         recipe.id.clone(),
         UpdateRecipeDto {
-            rating: Some(4.0),
+            rating: Some(Some(4.0)),
             is_favorite: Some(true),
             ..Default::default()
         },
@@ -917,7 +917,7 @@ async fn recipe_set_rating() {
         notes: None,
         icon: None,
         is_favorite: None,
-        rating: Some(4.0),
+        rating: Some(Some(4.0)),
     };
     let updated = RecipeService::update(&db, recipe.id.clone(), update)
         .await
@@ -955,7 +955,7 @@ async fn recipe_rating_rejects_invalid_values() {
         notes: None,
         icon: None,
         is_favorite: None,
-        rating: Some(0.0),
+        rating: Some(Some(0.0)),
     };
     assert!(matches!(
         RecipeService::update(&db, recipe.id.clone(), update).await,
@@ -980,7 +980,7 @@ async fn recipe_rating_rejects_invalid_values() {
         notes: None,
         icon: None,
         is_favorite: None,
-        rating: Some(5.5),
+        rating: Some(Some(5.5)),
     };
     assert!(matches!(
         RecipeService::update(&db, recipe.id.clone(), update).await,
@@ -1005,7 +1005,7 @@ async fn recipe_rating_rejects_invalid_values() {
         notes: None,
         icon: None,
         is_favorite: None,
-        rating: Some(0.4),
+        rating: Some(Some(0.4)),
     };
     assert!(matches!(
         RecipeService::update(&db, recipe.id, update).await,
@@ -1070,10 +1070,10 @@ async fn recipe_update_rejects_changed_bad_unit_and_leaves_row_unchanged() {
         recipe.id.clone(),
         UpdateRecipeDto {
             name: Some("Renamed".to_string()),
-            cook_time: Some(TimeValueDto {
+            cook_time: Some(Some(TimeValueDto {
                 value: 4,
                 unit: "sols".to_string(),
-            }),
+            })),
             ..Default::default()
         },
     )
@@ -1145,10 +1145,10 @@ async fn recipe_update_resending_a_legacy_unit_unchanged_succeeds() {
         recipe.id,
         UpdateRecipeDto {
             name: Some("Pasta Night".to_string()),
-            total_time: Some(TimeValueDto {
+            total_time: Some(Some(TimeValueDto {
                 value: 3,
                 unit: "fortnights".to_string(),
-            }),
+            })),
             ..Default::default()
         },
     )
@@ -1210,9 +1210,9 @@ async fn recipe_update_cook_time_moves_total_and_time_filtered_search() {
             &db,
             recipe.id,
             UpdateRecipeDto {
-                prep_time: resend_stale_total.then(|| minutes(10)),
-                cook_time: Some(minutes(90)),
-                total_time: resend_stale_total.then(|| minutes(30)),
+                prep_time: resend_stale_total.then(|| Some(minutes(10))),
+                cook_time: Some(Some(minutes(90))),
+                total_time: resend_stale_total.then(|| Some(minutes(30))),
                 ..Default::default()
             },
         )
@@ -1852,7 +1852,7 @@ async fn suggestion_forgotten_hits() {
         notes: None,
         icon: None,
         is_favorite: None,
-        rating: Some(5.0),
+        rating: Some(Some(5.0)),
     };
     RecipeService::update(&db, recipe.id.clone(), update)
         .await

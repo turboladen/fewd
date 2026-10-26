@@ -18,6 +18,7 @@ import type { ParsedMealTemplate } from '../types/mealTemplate'
 import { parseMealTemplate } from '../types/mealTemplate'
 import type { Person } from '../types/person'
 import type { Ingredient, RecipePickerOption } from '../types/recipe'
+import { normalizeIngredientsPrep } from '../types/recipe'
 import {
   addDays,
   formatDateDisplay,
@@ -617,7 +618,7 @@ function MealEditor({
             setValidationError('Ad-hoc items must have at least one ingredient with a name')
             return
           }
-          servings.push({ ...serving, adhoc_items: validItems })
+          servings.push({ ...serving, adhoc_items: normalizeIngredientsPrep(validItems) })
         } else {
           if (serving.recipe_id === '') {
             setValidationError('Select a recipe for each added recipe row')

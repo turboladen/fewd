@@ -37,15 +37,31 @@ export interface Ingredient {
 }
 
 /**
- * Trim a prep value and coerce empty / whitespace-only strings to undefined.
- * Mirrors the backend's `deserialize_optional_string_empty_as_none` rule so
- * the frontend's notion of "absent prep" matches what the server stores and
- * what the shopping aggregator keys on.
+ * Trim a prep value and coerce null, empty, or whitespace-only values to
+ * undefined. Mirrors the backend's `deserialize_prep` rule so the frontend's
+ * notion of "absent prep" matches what the server stores and what the
+ * shopping aggregator keys on.
  */
-export function normalizeIngredientPrep(prep?: string): string | undefined {
-  if (prep === undefined) return undefined
+export function normalizeIngredientPrep(prep?: string | null): string | undefined {
+  if (prep == null) return undefined
   const trimmed = prep.trim()
   return trimmed.length > 0 ? trimmed : undefined
+}
+
+/**
+ * Apply {@link normalizeIngredientPrep} to every ingredient and its
+ * alternatives, for a form to call before it saves the list.
+ */
+export function normalizeIngredientsPrep(ingredients: Ingredient[]): Ingredient[] {
+  return ingredients.map(normalizeOnePrep)
+}
+
+function normalizeOnePrep(ingredient: Ingredient): Ingredient {
+  return {
+    ...ingredient,
+    prep: normalizeIngredientPrep(ingredient.prep),
+    or_alternative: ingredient.or_alternative && normalizeOnePrep(ingredient.or_alternative),
+  }
 }
 
 /**
@@ -163,22 +179,23 @@ export interface CreateRecipeDto {
   icon?: string
 }
 
+/** A field set to `null` clears it; an absent field is left unchanged. */
 export interface UpdateRecipeDto {
   name?: string
-  description?: string
-  prep_time?: TimeValue
-  cook_time?: TimeValue
-  total_time?: TimeValue
+  description?: string | null
+  prep_time?: TimeValue | null
+  cook_time?: TimeValue | null
+  total_time?: TimeValue | null
   servings?: number
-  portion_size?: PortionSize
+  portion_size?: PortionSize | null
   instructions?: string
   ingredients?: Ingredient[]
   nutrition_per_serving?: Nutrition
   tags?: string[]
-  notes?: string
-  icon?: string
+  notes?: string | null
+  icon?: string | null
   is_favorite?: boolean
-  rating?: number
+  rating?: number | null
 }
 
 export interface ImportRecipeDto {

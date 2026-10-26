@@ -114,7 +114,7 @@ impl PersonService {
             person.birthdate = Set(parsed);
         }
         if let Some(dietary_goals) = data.dietary_goals {
-            person.dietary_goals = Set(Some(dietary_goals));
+            person.dietary_goals = Set(dietary_goals);
         }
         if let Some(dislikes) = data.dislikes {
             person.dislikes = Set(to_json(&dislikes)?);
@@ -123,7 +123,7 @@ impl PersonService {
             person.favorites = Set(to_json(&favorites)?);
         }
         if let Some(notes) = data.notes {
-            person.notes = Set(Some(notes));
+            person.notes = Set(notes);
         }
         if let Some(is_active) = data.is_active {
             person.is_active = Set(is_active);

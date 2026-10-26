@@ -1,13 +1,15 @@
 import { useState } from 'react'
-import { IconStar, IconStarFilled } from './Icon'
+import { IconStar, IconStarFilled, IconX } from './Icon'
 
 interface StarRatingProps {
   value: number | null
   onChange?: (rating: number) => void
+  /** Called by the "Clear rating" button, which shows only when the stars are interactive and a rating is set. */
+  onClear?: () => void
   size?: 'sm' | 'md'
 }
 
-export function StarRating({ value, onChange, size = 'md' }: StarRatingProps) {
+export function StarRating({ value, onChange, onClear, size = 'md' }: StarRatingProps) {
   const [hoverValue, setHoverValue] = useState<number | null>(null)
   const interactive = !!onChange
   const displayValue = hoverValue ?? value ?? 0
@@ -39,6 +41,22 @@ export function StarRating({ value, onChange, size = 'md' }: StarRatingProps) {
           </span>
         )
       })}
+      {interactive && onClear && (value ?? 0) > 0 && (
+        <button
+          type='button'
+          onClick={() => {
+            // The pointer reached this button across the stars, so their
+            // hover preview would otherwise outlive the rating it previewed.
+            setHoverValue(null)
+            onClear()
+          }}
+          aria-label='Clear rating'
+          title='Clear rating'
+          className='ml-1 text-stone-400 hover:text-stone-600'
+        >
+          <IconX className={sizeClass} />
+        </button>
+      )}
     </span>
   )
 }

@@ -19,8 +19,9 @@ import {
   useToggleFavorite,
   useUpdateRecipe,
 } from '../hooks/useRecipes'
-import type { CreateRecipeDto, Ingredient, UpdateRecipeDto } from '../types/recipe'
+import type { CreateRecipeDto, Ingredient, Recipe, UpdateRecipeDto } from '../types/recipe'
 import { ingredientsEqual, parseRecipe } from '../types/recipe'
+import { clearableField } from '../utils/clearableField'
 
 type Mode = 'view' | 'edit' | 'scale' | 'adapt' | 'adapt-edit'
 
@@ -42,12 +43,12 @@ export function RecipeDetailPage() {
     { recipeId: string; draft: CreateRecipeDto } | null
   >(null)
   const [scaleError, setScaleError] = useState<string | null>(null)
-  // This holds the servings and ingredients the edit form opened with, and
-  // the id of the recipe they came from. A refetch during editing changes the
+  // This holds the servings and ingredients the edit form opened with, the
+  // recipe they came from, and that recipe's id. A refetch during editing changes the
   // recipe but not this snapshot, so the refetched list cannot pass for an
   // edit, and a remounted form still pairs the count with the list sized for it.
   const [editSnapshot, setEditSnapshot] = useState<
-    { recipeId: string; servings: number; ingredients: Ingredient[] } | null
+    { recipeId: string; servings: number; ingredients: Ingredient[]; loaded: Recipe } | null
   >(null)
 
   const isCooking = searchParams.get('mode') === 'cook'
@@ -128,6 +129,7 @@ export function RecipeDetailPage() {
       recipeId: recipe.id,
       servings: recipe.servings,
       ingredients: parsed.ingredients,
+      loaded: recipe,
     })
   }
   const snapshot = editSnapshot?.recipeId === recipe.id ? editSnapshot : null
@@ -149,19 +151,22 @@ export function RecipeDetailPage() {
     // never rescales a list it is sent, so the form warns when both change.
     const ingredientsEdited = !ingredientsEqual(formData.ingredients, editIngredients)
     const servingsEdited = formData.servings !== editServings
+    const loaded = snapshot?.loaded ?? recipe
     const dto: UpdateRecipeDto = {
       name: formData.name,
       servings: servingsEdited || ingredientsEdited ? formData.servings : undefined,
-      portion_size: formData.portion_size,
+      // An emptied field is sent as null only when it held a value when the
+      // form opened, so a value another client wrote meanwhile survives.
+      portion_size: clearableField(formData.portion_size, loaded.portion_size),
       instructions: formData.instructions,
       ingredients: ingredientsEdited ? formData.ingredients : undefined,
       tags: formData.tags,
-      description: formData.description || undefined,
-      prep_time: formData.prep_time,
-      cook_time: formData.cook_time,
-      total_time: formData.total_time,
-      notes: formData.notes || undefined,
-      icon: formData.icon || undefined,
+      description: clearableField(formData.description, loaded.description),
+      prep_time: clearableField(formData.prep_time, loaded.prep_time),
+      cook_time: clearableField(formData.cook_time, loaded.cook_time),
+      total_time: clearableField(formData.total_time, loaded.total_time),
+      notes: clearableField(formData.notes, loaded.notes),
+      icon: clearableField(formData.icon, loaded.icon),
     }
     updateMutation.mutate({ id: recipe.id, data: dto }, {
       onSuccess: () => {
@@ -394,6 +399,7 @@ export function RecipeDetailPage() {
           onDelete={() => setConfirmingDelete(true)}
           onToggleFavorite={() => toggleFavoriteMutation.mutate(recipe.id)}
           onRatingChange={(rating) => updateMutation.mutate({ id: recipe.id, data: { rating } })}
+          onRatingClear={() => updateMutation.mutate({ id: recipe.id, data: { rating: null } })}
           onClose={() => navigate('/recipes')}
           confirmingDelete={confirmingDelete}
           onConfirmDelete={handleDelete}

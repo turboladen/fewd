@@ -132,6 +132,51 @@ describe('FamilyManager', () => {
     expect(putBody.name).toBe('Alicia')
   })
 
+  it('an edit that empties notes and dietary goals set at load sends null', async () => {
+    const alice = makePerson({
+      id: 'p1',
+      name: 'Alice',
+      dietary_goals: 'More protein',
+      notes: 'Prefers mild food',
+    })
+    mockJson('GET', '/api/people', [alice])
+    renderWithProviders(<FamilyManager />)
+    await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Alice' }))
+
+    fireEvent.change(screen.getByDisplayValue('More protein'), { target: { value: '' } })
+    fireEvent.change(screen.getByDisplayValue('Prefers mild food'), { target: { value: '' } })
+    mockJson('PUT', '/api/people/p1', alice)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() =>
+      expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true)
+    )
+    const putCall = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'PUT')
+    const putBody = JSON.parse((putCall![1] as RequestInit).body as string)
+    expect(putBody).toHaveProperty('notes', null)
+    expect(putBody).toHaveProperty('dietary_goals', null)
+  })
+
+  it('notes and dietary goals empty at load are left out of the update', async () => {
+    const bob = makePerson({ id: 'p1', name: 'Bob', dietary_goals: null, notes: null })
+    mockJson('GET', '/api/people', [bob])
+    renderWithProviders(<FamilyManager />)
+    await waitFor(() => expect(screen.getByText('Bob')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Bob' }))
+
+    mockJson('PUT', '/api/people/p1', bob)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() =>
+      expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true)
+    )
+    const putCall = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'PUT')
+    const putBody = JSON.parse((putCall![1] as RequestInit).body as string)
+    expect(putBody).not.toHaveProperty('notes')
+    expect(putBody).not.toHaveProperty('dietary_goals')
+  })
+
   it('deletes a person: confirm Yes → DELETE → empty state returns', async () => {
     mockJson('GET', '/api/people', [makePerson({ id: 'p1', name: 'Alice' })])
 

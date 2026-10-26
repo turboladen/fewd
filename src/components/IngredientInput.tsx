@@ -129,11 +129,14 @@ export function IngredientRow({
         <input
           type='text'
           value={ingredient.prep ?? ''}
-          onChange={(e) =>
-            onChange({
-              ...ingredient,
-              prep: normalizeIngredientPrep(e.target.value),
-            })}
+          // The raw text is kept while typing so a space between words
+          // survives; each form's submit normalizes it too, since Enter
+          // submits without a blur.
+          onChange={(e) => onChange({ ...ingredient, prep: e.target.value })}
+          onBlur={() => {
+            const prep = normalizeIngredientPrep(ingredient.prep)
+            if (prep !== ingredient.prep) onChange({ ...ingredient, prep })
+          }}
           className='input-sm flex-1 min-w-[120px]'
           placeholder='Prep (optional)'
         />

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Ingredient } from '../types/recipe'
 import { IngredientInput, IngredientRow } from './IngredientInput'
@@ -232,5 +233,46 @@ describe('IngredientRow', () => {
         },
       },
     })
+  })
+})
+
+// Holds the list in state, the way a form does, so each change re-renders.
+function StatefulInput({ initial }: { initial: Ingredient[] }) {
+  const [value, setValue] = useState(initial)
+  return (
+    <>
+      <IngredientInput value={value} onChange={setValue} />
+      <output data-testid='prep'>{JSON.stringify(value[0].prep ?? null)}</output>
+    </>
+  )
+}
+
+describe('IngredientInput prep', () => {
+  it('keeps a trailing space while typing so a two-word prep can be entered', () => {
+    render(<StatefulInput initial={[single(1, 'onion')]} />)
+    const prep = screen.getByPlaceholderText('Prep (optional)') as HTMLInputElement
+
+    fireEvent.change(prep, { target: { value: 'thinly ' } })
+    expect(prep.value).toBe('thinly ')
+    fireEvent.change(prep, { target: { value: 'thinly sliced' } })
+    expect(prep.value).toBe('thinly sliced')
+  })
+
+  it('trims surrounding whitespace on blur', () => {
+    render(<StatefulInput initial={[single(1, 'onion')]} />)
+    const prep = screen.getByPlaceholderText('Prep (optional)') as HTMLInputElement
+
+    fireEvent.change(prep, { target: { value: '  thinly sliced  ' } })
+    fireEvent.blur(prep)
+    expect(prep.value).toBe('thinly sliced')
+  })
+
+  it('turns a blank prep into an absent one on blur', () => {
+    render(<StatefulInput initial={[single(1, 'onion')]} />)
+    const prep = screen.getByPlaceholderText('Prep (optional)')
+
+    fireEvent.change(prep, { target: { value: '   ' } })
+    fireEvent.blur(prep)
+    expect(screen.getByTestId('prep')).toHaveTextContent('null')
   })
 })

@@ -34,13 +34,14 @@ export interface CreatePersonDto {
   drink_dislikes?: string[]
 }
 
+/** A field set to `null` clears it; an absent field is left unchanged. */
 export interface UpdatePersonDto {
   name?: string
   birthdate?: string
-  dietary_goals?: string
+  dietary_goals?: string | null
   dislikes?: string[]
   favorites?: string[]
-  notes?: string
+  notes?: string | null
   is_active?: boolean
   drink_preferences?: string[]
   drink_dislikes?: string[]

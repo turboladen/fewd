@@ -11,8 +11,9 @@ import {
   useToggleDrinkFavorite,
   useUpdateDrinkRecipe,
 } from '../hooks/useDrinkRecipes'
-import type { DrinkRecipeFormData, UpdateDrinkRecipeDto } from '../types/drinkRecipe'
+import type { DrinkRecipe, DrinkRecipeFormData, UpdateDrinkRecipeDto } from '../types/drinkRecipe'
 import { parseDrinkRecipe } from '../types/drinkRecipe'
+import { clearableField } from '../utils/clearableField'
 
 export function DrinkRecipeDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -24,6 +25,8 @@ export function DrinkRecipeDetailPage() {
   const toggleFavoriteMutation = useToggleDrinkFavorite()
 
   const [isEditing, setIsEditing] = useState(false)
+  // This holds the recipe as the edit form opened on it.
+  const [loaded, setLoaded] = useState<DrinkRecipe | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   useEffect(() => {
@@ -82,18 +85,21 @@ export function DrinkRecipeDetailPage() {
   const parsed = parseDrinkRecipe(recipe)
 
   const handleUpdate = (formData: DrinkRecipeFormData) => {
+    const opened = loaded?.id === recipe.id ? loaded : recipe
     const dto: UpdateDrinkRecipeDto = {
       name: formData.name,
       servings: formData.servings,
       instructions: formData.instructions,
       ingredients: formData.ingredients,
-      technique: formData.technique || undefined,
-      glassware: formData.glassware || undefined,
-      garnish: formData.garnish || undefined,
+      // An emptied field is sent as null only when it held a value when the
+      // form opened, so a value another client wrote meanwhile survives.
+      technique: clearableField(formData.technique, opened.technique),
+      glassware: clearableField(formData.glassware, opened.glassware),
+      garnish: clearableField(formData.garnish, opened.garnish),
       tags: formData.tags,
-      description: formData.description || undefined,
-      notes: formData.notes || undefined,
-      icon: formData.icon || undefined,
+      description: clearableField(formData.description, opened.description),
+      notes: clearableField(formData.notes, opened.notes),
+      icon: clearableField(formData.icon, opened.icon),
       is_non_alcoholic: formData.is_non_alcoholic,
     }
     updateMutation.mutate({ id: recipe.id, data: dto }, {
@@ -160,9 +166,13 @@ export function DrinkRecipeDetailPage() {
       <DrinkRecipeDetail
         recipe={recipe}
         parsed={parsed}
-        onEdit={() => setIsEditing(true)}
+        onEdit={() => {
+          setLoaded(recipe)
+          setIsEditing(true)
+        }}
         onToggleFavorite={() => toggleFavoriteMutation.mutate(recipe.id)}
         onRatingChange={(rating) => updateMutation.mutate({ id: recipe.id, data: { rating } })}
+        onRatingClear={() => updateMutation.mutate({ id: recipe.id, data: { rating: null } })}
         onDelete={() => setConfirmingDelete(true)}
         confirmingDelete={confirmingDelete}
         onConfirmDelete={handleDelete}

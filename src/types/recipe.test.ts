@@ -7,6 +7,7 @@ import {
   formatTime,
   ingredientRatio,
   ingredientsEqual,
+  normalizeIngredientsPrep,
   parseInstructionSections,
   parseInstructionSteps,
   parseRecipe,
@@ -464,5 +465,29 @@ describe('formatRatio', () => {
 
   it('renders null as em dash', () => {
     expect(formatRatio(null)).toBe('—')
+  })
+})
+
+describe('normalizeIngredientsPrep', () => {
+  it('trims prep, drops a blank one, and reaches into alternatives', () => {
+    const amount: IngredientAmount = { type: 'single', value: 1 }
+    const [first, second] = normalizeIngredientsPrep([
+      {
+        name: 'onion',
+        amount,
+        unit: '',
+        prep: '  diced ',
+        or_alternative: { name: 'shallot', amount, unit: '', prep: ' minced' },
+      },
+      { name: 'salt', amount, unit: '', prep: '   ' },
+    ])
+    // A stored row can carry null for prep.
+    const [stored] = normalizeIngredientsPrep([
+      { name: 'salt', amount, unit: '', prep: null as unknown as string },
+    ])
+    expect(stored.prep).toBeUndefined()
+    expect(first.prep).toBe('diced')
+    expect(first.or_alternative?.prep).toBe('minced')
+    expect(second.prep).toBeUndefined()
   })
 })
