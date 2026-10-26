@@ -94,7 +94,7 @@ export function DrinkRecipeManager() {
     })
   }
 
-  const handleRate = (id: string, rating: number | null) => {
+  const handleRate = (id: string, rating: number) => {
     updateMutation.mutate({ id, data: { rating } })
   }
 
@@ -310,7 +310,6 @@ export function DrinkRecipeManager() {
                 <StarRating
                   value={recipe.rating ?? 0}
                   onChange={(rating) => handleRate(recipe.id, rating)}
-                  onClear={() => handleRate(recipe.id, null)}
                   size='sm'
                 />
               </div>
