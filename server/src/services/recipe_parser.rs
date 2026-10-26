@@ -1,7 +1,10 @@
 use crate::dto::{CreateRecipeDto, IngredientAmountDto, IngredientDto, TimeValueDto};
-use crate::services::ingredient_amount::{is_known_unit, try_parse_amount_dto};
+use crate::services::ingredient_amount::{
+    is_known_unit, try_parse_amount_dto, unicode_fraction_value, RANGE_DASHES,
+};
 use crate::services::ingredient_splitter::{first_top_level_or, split_name_and_prep};
 use crate::services::paren_notes::peel_size_paren;
+use migration::total_minutes::canonical_time_unit;
 
 /// The servings a parsed recipe gets when its source states none.
 pub const DEFAULT_SERVINGS: i32 = 4;
@@ -129,26 +132,163 @@ fn parse_time_value(s: &str) -> Option<TimeValueDto> {
 
     let s = s.to_lowercase();
 
-    // Handle ranges like "35-40 minutes" → take first number
-    let parts: Vec<&str> = s.split_whitespace().collect();
-    if parts.is_empty() {
+    // The value is the leading integer. A range such as "35-40 minutes",
+    // "35–40 minutes" or "5 to 10 minutes" keeps its first number.
+    let digits_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    let value: i32 = s[..digits_end].parse().ok()?;
+    let rest = &s[digits_end..];
+    // A decimal or attached fraction ("1.5 hours", "1½ hours") is not a whole
+    // count of its unit, so the field is skipped like any other value it
+    // cannot read.
+    if rest
+        .chars()
+        .next()
+        .is_some_and(|c| !(c.is_whitespace() || c.is_alphabetic() || RANGE_DASHES.contains(&c)))
+    {
         return None;
     }
 
-    let first_num = parts[0].split('-').next()?;
-    let value: i32 = first_num.parse().ok()?;
-
-    let unit = if parts.len() > 1 {
-        match parts[1] {
-            "hour" | "hours" | "hr" | "hrs" => "hours".to_string(),
-            "day" | "days" => "days".to_string(),
-            _ => "minutes".to_string(),
-        }
-    } else {
-        "minutes".to_string()
+    let tokens = time_tokens(rest);
+    let (value, unit) = match skip_range_tail(&tokens) {
+        // A value with no unit word counts minutes.
+        [] => (value, "minutes"),
+        [TimeToken::Word(word), later @ ..] => match canonical_time_unit(word) {
+            // An unrecognized word is kept as written. The import route drops a
+            // time whose unit it cannot read, rather than storing it as minutes.
+            None => (value, *word),
+            Some((unit, minutes_per_unit)) => {
+                let later = later_part_minutes(later, unit == "hours")?;
+                if later.is_empty() {
+                    (value, unit)
+                } else {
+                    let first = value.checked_mul(minutes_per_unit)?;
+                    (
+                        later.into_iter().try_fold(first, i32::checked_add)?,
+                        "minutes",
+                    )
+                }
+            }
+        },
+        // A separate fraction or number ("1 1/2 hours", "1 ½ hours") is not a
+        // whole count either.
+        _ => return None,
     };
+    Some(TimeValueDto {
+        value,
+        unit: unit.to_string(),
+    })
+}
 
-    Some(TimeValueDto { value, unit })
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TimeToken<'a> {
+    Number(&'a str),
+    Word(&'a str),
+    /// A range dash, which opens a range's upper bound ("35-40") or joins a
+    /// unit to its number ("30-minutes").
+    Dash,
+    /// A slash, as in a fraction ("1/2") or a rate ("10 minutes/side").
+    Slash,
+    /// A Unicode vulgar fraction such as `½`.
+    Fraction,
+    /// A comma or semicolon, which separates two durations.
+    Break,
+}
+
+/// Splits a time phrase into runs of ASCII digits, runs of letters, and
+/// punctuation tokens. Other characters are dropped.
+fn time_tokens(s: &str) -> Vec<TimeToken<'_>> {
+    let mut tokens = Vec::new();
+    let mut chars = s.char_indices().peekable();
+    while let Some((start, c)) = chars.next() {
+        let token = if c.is_ascii_digit() || c.is_alphabetic() {
+            let is_number = c.is_ascii_digit();
+            let same_run = |next: char| {
+                if is_number {
+                    next.is_ascii_digit()
+                } else {
+                    next.is_alphabetic()
+                }
+            };
+            let mut end = start + c.len_utf8();
+            while let Some(&(index, next)) = chars.peek() {
+                if !same_run(next) {
+                    break;
+                }
+                end = index + next.len_utf8();
+                chars.next();
+            }
+            if is_number {
+                TimeToken::Number(&s[start..end])
+            } else {
+                TimeToken::Word(&s[start..end])
+            }
+        } else if RANGE_DASHES.contains(&c) {
+            TimeToken::Dash
+        } else if c == '/' {
+            TimeToken::Slash
+        } else if unicode_fraction_value(c).is_some() {
+            TimeToken::Fraction
+        } else if c == ',' || c == ';' {
+            TimeToken::Break
+        } else {
+            continue;
+        };
+        tokens.push(token);
+    }
+    tokens
+}
+
+/// Skips the upper bound of a range ("-40", "to 40", "or 40") at the start of
+/// `tokens`, so a range keeps its first number, and skips a dash that joins
+/// a unit word to its number ("-minutes").
+fn skip_range_tail<'t, 'a>(tokens: &'t [TimeToken<'a>]) -> &'t [TimeToken<'a>] {
+    match tokens {
+        [TimeToken::Dash | TimeToken::Word("to" | "or"), TimeToken::Number(_), tail @ ..] => tail,
+        [TimeToken::Dash, tail @ ..] if matches!(tail.first(), Some(TimeToken::Word(_))) => tail,
+        _ => tokens,
+    }
+}
+
+/// Returns the minutes in each later part of a compound duration such as
+/// "1 hr 30 min", "1 hour and 30 minutes" or "1h30", where a bare number
+/// after hours counts minutes and a ranged part keeps its first number. Any
+/// token other than a number or "and" ends the duration, so "45 min–1 hr"
+/// has no later part. Returns `None` when a part is a fraction ("1 hr 1/2",
+/// "1 hour ½") or its minutes overflow, and an empty list when `tokens`
+/// holds no later part.
+fn later_part_minutes(tokens: &[TimeToken], first_in_hours: bool) -> Option<Vec<i32>> {
+    let mut parts = Vec::new();
+    let mut rest = tokens;
+    let mut after_hours = first_in_hours;
+    loop {
+        if let [TimeToken::Word("and"), tail @ ..] = rest {
+            rest = tail;
+        }
+        if let [TimeToken::Fraction, ..]
+        | [TimeToken::Number(_), TimeToken::Slash | TimeToken::Fraction, ..] = rest
+        {
+            return None;
+        }
+        let [TimeToken::Number(n), tail @ ..] = rest else {
+            break;
+        };
+        match skip_range_tail(tail) {
+            [TimeToken::Word(word), tail @ ..] => {
+                let Some((unit, minutes_per_unit)) = canonical_time_unit(word) else {
+                    break;
+                };
+                parts.push(n.parse::<i32>().ok()?.checked_mul(minutes_per_unit)?);
+                after_hours = unit == "hours";
+                rest = tail;
+            }
+            [] if after_hours => {
+                parts.push(n.parse().ok()?);
+                break;
+            }
+            _ => break,
+        }
+    }
+    Some(parts)
 }
 
 fn parse_servings(lines: &[&str]) -> Option<i32> {
@@ -156,10 +296,10 @@ fn parse_servings(lines: &[&str]) -> Option<i32> {
         let lower = line.trim().to_lowercase();
         if lower.starts_with("servings:") {
             let value_str = line.trim()["servings:".len()..].trim();
-            // Handle "12-15 chicken pieces" → take first number
+            // A range such as "12-15 chicken pieces" or "4–6" keeps its
+            // first number.
             let first_token = value_str.split_whitespace().next()?;
-            // Handle range "12-15" → take first number
-            let first_num = first_token.split('-').next()?;
+            let first_num = first_token.split(RANGE_DASHES).next()?;
             return first_num.parse().ok();
         }
     }
@@ -251,23 +391,15 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
                 )
             }
         }
-        // 3 parts: dispatch on whether parts[1] is a known unit.
-        //
-        //   - "2 cups flour" → parts[1]="cups" IS a unit → name="flour",
-        //     unit="cups". Standard case.
-        //   - "6 cloves garlic, minced" → parts[1]="cloves" IS a unit →
-        //     name="garlic, minced" → splitter peels prep.
-        //   - "1 zucchini, sliced into half-moons" → parts[1]="zucchini,"
-        //     is NOT a unit (compound name with prep clause). Treat the
-        //     whole `parts[1] + parts[2]` as the raw name (preserving the
-        //     comma so the splitter peels prep), set unit="whole".
-        //   - "4 medium red onions" → parts[1]="medium" is NOT a unit
-        //     (size modifier). Same compound-name treatment.
-        //
-        // The is_known_unit dispatch was added for fewd-4i3; before that
-        // the parser unconditionally treated parts[1] as the unit, which
-        // produced `name="sliced into half-moons", unit="zucchini,"` and
-        // similar misparses in prod data.
+        // 3 parts: whether parts[1] is a known unit decides the split.
+        //   - "2 cups flour": "cups" is a unit, so name="flour", unit="cups".
+        //   - "6 cloves garlic, minced": "cloves" is a unit, and the splitter
+        //     peels "minced" from name="garlic, minced".
+        //   - "1 zucchini, sliced into half-moons": "zucchini," is not a unit,
+        //     so parts[1] and parts[2] form the raw name, comma kept for the
+        //     splitter, with unit="whole". A size modifier ("4 medium red
+        //     onions") takes the same path. Reading every parts[1] as a unit
+        //     would store name="sliced into half-moons", unit="zucchini,".
         _ => {
             if let Some(amount) = try_parse_amount(parts[0]) {
                 let token = parts[1];
@@ -492,6 +624,145 @@ dinner, quick, mexican";
         assert_eq!(total.unit, "minutes");
     }
 
+    fn time_of(line: &str) -> Option<(i32, String)> {
+        let recipe = parse(&format!("# Dish\n{line}\n\n## Instructions\nCook"));
+        recipe
+            .prep_time
+            .or(recipe.cook_time)
+            .or(recipe.total_time)
+            .map(|time| (time.value, time.unit))
+    }
+
+    #[test]
+    fn time_units_map_through_the_shared_time_unit_table() {
+        for (line, value, unit) in [
+            ("Cook time: 2 h", 2, "hours"),
+            ("Total time: 1 d", 1, "days"),
+            ("Prep time: 10 m", 10, "minutes"),
+            ("Prep time: 10 mins", 10, "minutes"),
+            ("Cook time: 3 Hours", 3, "hours"),
+            ("Prep time: 15min", 15, "minutes"),
+            ("Cook time: 2h", 2, "hours"),
+            ("Cook time: 1hr", 1, "hours"),
+        ] {
+            assert_eq!(time_of(line), Some((value, unit.to_string())), "{line}");
+        }
+    }
+
+    #[test]
+    fn time_ranges_keep_the_first_number_and_find_the_unit() {
+        for (line, value, unit) in [
+            ("Total time: 35–40 minutes", 35, "minutes"),
+            ("Total time: 35—40 minutes", 35, "minutes"),
+            ("Total time: 35 - 40 minutes", 35, "minutes"),
+            ("Total time: 2-3 hours", 2, "hours"),
+            ("Prep time: 5 to 10 minutes", 5, "minutes"),
+            ("Prep time: 5 or 10 minutes", 5, "minutes"),
+            ("Cook time: 1-2h", 1, "hours"),
+        ] {
+            assert_eq!(time_of(line), Some((value, unit.to_string())), "{line}");
+        }
+    }
+
+    #[test]
+    fn time_without_a_unit_word_counts_minutes() {
+        assert_eq!(time_of("Prep time: 15"), Some((15, "minutes".to_string())));
+        assert_eq!(
+            time_of("Prep time: 10 minutes."),
+            Some((10, "minutes".to_string()))
+        );
+    }
+
+    #[test]
+    fn unrecognized_time_unit_is_kept_as_written() {
+        assert_eq!(
+            time_of("Prep time: 2 fortnights"),
+            Some((2, "fortnights".to_string()))
+        );
+    }
+
+    #[test]
+    fn time_that_is_not_a_whole_number_is_skipped() {
+        assert_eq!(time_of("Cook time: 1.5 hours"), None);
+        assert_eq!(time_of("Cook time: 1½ hours"), None);
+        assert_eq!(time_of("Cook time: 1 1/2 hours"), None);
+        assert_eq!(time_of("Cook time: 1 ½ hours"), None);
+        assert_eq!(time_of("Cook time: about 20 minutes"), None);
+    }
+
+    #[test]
+    fn compound_time_adds_its_parts_in_minutes() {
+        for (line, minutes) in [
+            ("Total time: 1 hr 30 min", 90),
+            ("Total time: 1 hour and 30 minutes", 90),
+            ("Total time: 1h30", 90),
+            ("Total time: 1h 30m", 90),
+            ("Total time: 1 day 2 hours", 1560),
+        ] {
+            assert_eq!(
+                time_of(line),
+                Some((minutes, "minutes".to_string())),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_break_between_durations_keeps_the_first() {
+        for (line, value, unit) in [
+            ("Total time: 45 min–1 hr", 45, "minutes"),
+            ("Cook time: 20 minutes - 1 hour", 20, "minutes"),
+            ("Cook time: 8 hours, 4 hours on high", 8, "hours"),
+            ("Cook time: 10 minutes/side", 10, "minutes"),
+            ("Cook time: 20 min/lb", 20, "minutes"),
+        ] {
+            assert_eq!(time_of(line), Some((value, unit.to_string())), "{line}");
+        }
+    }
+
+    #[test]
+    fn ranged_later_part_keeps_its_first_number() {
+        assert_eq!(
+            time_of("Total time: 1 hr 30–45 min"),
+            Some((90, "minutes".to_string()))
+        );
+        assert_eq!(
+            time_of("Total time: 2 hours 15-20 minutes"),
+            Some((135, "minutes".to_string()))
+        );
+    }
+
+    #[test]
+    fn compound_time_with_a_fractional_part_is_skipped() {
+        for line in [
+            "Total time: 1hr 1/2",
+            "Total time: 1 hour 1/2 hour",
+            "Total time: 1 hour and 1/2 hour",
+            "Total time: 1 hour ½",
+        ] {
+            assert_eq!(time_of(line), None, "{line}");
+        }
+    }
+
+    #[test]
+    fn unit_joined_by_a_dash_reads_as_attached() {
+        assert_eq!(
+            time_of("Prep time: 30-minutes"),
+            Some((30, "minutes".to_string()))
+        );
+        assert_eq!(time_of("Cook time: 1-hour"), Some((1, "hours".to_string())));
+    }
+
+    #[test]
+    fn compound_time_that_overflows_is_skipped() {
+        assert_eq!(time_of("Total time: 2000000 days 5 hours"), None);
+    }
+
+    #[test]
+    fn time_followed_by_an_unreadable_number_is_skipped() {
+        assert_eq!(time_of("Cook time: 1 to 1 1/2 hours"), None);
+    }
+
     #[test]
     fn test_time_parsing_parenthetical() {
         let md =
@@ -502,10 +773,52 @@ dinner, quick, mexican";
     }
 
     #[test]
+    fn servings_range_with_an_en_dash_keeps_the_first_number() {
+        let recipe = parse("# Wings\nServings: 4–6\n\n## Instructions\nFry");
+        assert_eq!(recipe.servings, 4);
+    }
+
+    #[test]
     fn test_servings_range() {
         let md = "# Wings\nServings: 12-15 pieces\n\n## Instructions\nFry";
         let recipe = parse(md);
         assert_eq!(recipe.servings, 12); // takes first number
+    }
+
+    fn only_ingredient(line: &str) -> IngredientDto {
+        let recipe = parse(&format!(
+            "# Dish\n\n## Ingredients\n{line}\n\n## Instructions\nMix"
+        ));
+        assert_eq!(recipe.ingredients.len(), 1, "{line}");
+        recipe.ingredients.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn es_plural_units_split_from_the_name() {
+        for (line, unit, name) in [
+            ("- 2 bunches kale", "bunches", "kale"),
+            ("- 3 pinches salt", "pinches", "salt"),
+            ("- 2 dashes bitters", "dashes", "bitters"),
+            ("- 4 leaves basil", "leaves", "basil"),
+        ] {
+            let ing = only_ingredient(line);
+            assert_eq!(
+                (ing.unit.as_str(), ing.name.as_str()),
+                (unit, name),
+                "{line}"
+            );
+        }
+        let kale = only_ingredient("- 2 bunches kale");
+        assert!(
+            matches!(kale.amount, IngredientAmountDto::Single { value } if (value - 2.0).abs() < 0.001)
+        );
+    }
+
+    #[test]
+    fn words_that_only_look_plural_stay_in_the_name() {
+        let ing = only_ingredient("- 2 glasses wine");
+        assert_eq!(ing.unit, "whole");
+        assert_eq!(ing.name, "glasses wine");
     }
 
     #[test]
@@ -726,17 +1039,12 @@ dinner, quick, mexican";
 
     #[test]
     fn test_ingredient_with_paren_alternative_and_prep() {
-        // End-to-end: a markdown line where the parenthetical is NOT trailing
-        // notes but a varietal alternative, followed by a prep clause. The
-        // parser should preserve the parens in `name` and put `grated` in
-        // `prep`.
-        //
-        // Pre-fewd-xez this dropped `, grated` and produced name="pear",
-        // notes=Some("or Fuji apple"). Pre-fewd-4i3 the 3-part branch put
-        // "Asian" in `unit`, leaving name="pear (or Fuji apple)" — wrong
-        // because "Asian" is a varietal modifier, not a unit. After
-        // fewd-4i3's is_known_unit dispatch, the full varietal stays in
-        // `name`: "Asian pear (or Fuji apple)".
+        // The parenthetical here is a varietal alternative, not trailing
+        // notes, and a prep clause follows it. The parser keeps the parens in
+        // `name` and puts `grated` in `prep`. "Asian" is a varietal modifier,
+        // not a unit, so it stays in `name` too: "Asian pear (or Fuji apple)".
+        // Reading the parens as notes would drop `, grated`, and reading
+        // "Asian" as the unit would leave name="pear (or Fuji apple)".
         let md = "# Test\n\n## Ingredients\n- 1 Asian pear (or Fuji apple), grated\n\n## Instructions\nMix";
         let recipe = parse(md);
         let ing = &recipe.ingredients[0];
@@ -762,17 +1070,13 @@ dinner, quick, mexican";
 
     #[test]
     fn test_ingredient_with_mid_string_size_parens() {
-        // The fewd-i47 hero case: parens carry per-can size info, the noun
-        // ("crushed San Marzano tomatoes") trails after `)` with no comma.
-        // Pre-fix: extract_notes left the line untouched, splitn(3, ' ')
-        // sliced off "cans" as the unit, and the entire `(28 oz each)
-        // crushed San Marzano tomatoes` substring landed in `name` —
-        // dropping the noun in the rendered UI.
-        //
-        // Post-fix: peel_size_paren rewrites the line to `2 cans crushed
-        // San Marzano tomatoes` with notes="28 oz each" before
-        // tokenization, so the standard known-unit dispatch produces the
-        // expected DTO.
+        // The parens carry per-can size info, and the noun ("crushed San
+        // Marzano tomatoes") trails after `)` with no comma. peel_size_paren
+        // rewrites the line to `2 cans crushed San Marzano tomatoes` with
+        // notes="28 oz each" before tokenization, so the known-unit dispatch
+        // reads "cans" as the unit. Without the peel, the whole `(28 oz each)
+        // crushed San Marzano tomatoes` substring would land in `name`, and
+        // the rendered UI would lose the noun.
         let md = "# Test\n\n## Ingredients\n- 2 cans (28 oz each) crushed San Marzano tomatoes\n\n## Instructions\nMix";
         let recipe = parse(md);
         let ing = &recipe.ingredients[0];

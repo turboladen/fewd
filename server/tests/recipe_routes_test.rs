@@ -428,3 +428,40 @@ async fn meal_writes_with_a_malformed_date_answer_400() {
         );
     }
 }
+
+#[tokio::test]
+async fn markdown_import_drops_a_time_with_an_unrecognized_unit() {
+    let db = setup_db().await;
+    let markdown =
+        "# Slow Stew\nPrep time: 2 fortnights\nCook time: 3 hours\n\n## Instructions\nSimmer";
+
+    let (status, body) = send_json(
+        app(&db),
+        "POST",
+        "/api/recipes/import/markdown",
+        serde_json::json!({ "markdown": markdown }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert!(body["prep_time"].is_null(), "{body}");
+    assert_eq!(body["cook_time"], r#"{"value":3,"unit":"hours"}"#, "{body}");
+}
+
+#[tokio::test]
+async fn markdown_import_reads_abbreviated_time_units() {
+    let db = setup_db().await;
+    let markdown = "# Braise\nCook time: 2 h\n\n## Instructions\nBraise";
+
+    let (status, body) = send_json(
+        app(&db),
+        "POST",
+        "/api/recipes/import/markdown",
+        serde_json::json!({ "markdown": markdown }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["cook_time"], r#"{"value":2,"unit":"hours"}"#, "{body}");
+    assert_eq!(body["total_minutes"], 120, "{body}");
+}

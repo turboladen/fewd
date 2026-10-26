@@ -4,7 +4,9 @@
 //! Canonical implementation lives in `migration::ingredient_amount` so the
 //! runtime parser and the backfill migration share one source of truth.
 
-pub use migration::{is_known_unit, try_parse_amount, unicode_fraction_value, AmountKind};
+pub use migration::{
+    is_known_unit, try_parse_amount, unicode_fraction_value, AmountKind, RANGE_DASHES,
+};
 
 use crate::dto::IngredientAmountDto;
 
@@ -21,12 +23,29 @@ pub fn try_parse_amount_dto(s: &str) -> Option<IngredientAmountDto> {
 mod tests {
     use super::*;
     use crate::services::unit_converter;
+    use migration::{DISCRETE_UNITS, MEASURED_UNITS};
 
-    /// Drift guard: every unit `unit_converter::normalize_unit` recognizes
-    /// as either a weight or a volume MUST also be accepted by
-    /// `is_known_unit`. The two modules independently maintain unit
-    /// knowledge — this test catches the case where someone adds a unit to
-    /// one and forgets the other.
+    // Drift guard: `is_known_unit` and `unit_converter` share one
+    // normalizer, but the converter keeps its own conversion tables, and the
+    // unit lists must agree with them.
+    #[test]
+    fn unit_lists_match_unit_converter_categories() {
+        for unit in MEASURED_UNITS {
+            assert!(
+                unit_converter::unit_category(unit).is_some(),
+                "unit_converter must classify measured unit {unit:?}"
+            );
+        }
+        for unit in DISCRETE_UNITS {
+            assert!(
+                unit_converter::unit_category(unit).is_none(),
+                "unit_converter must not convert discrete unit {unit:?}"
+            );
+        }
+    }
+
+    // Every weight and volume spelling the converter classifies must also
+    // be a known unit to the parser.
     #[test]
     fn is_known_unit_covers_unit_converter_weight_and_volume() {
         let units = [
@@ -80,13 +99,7 @@ mod tests {
             "fl oz",
         ];
         for unit in units {
-            assert!(
-                is_known_unit(unit),
-                "is_known_unit must accept {unit:?} (normalize_unit recognizes it)"
-            );
-            // Sanity: unit_converter must also classify it (catches us
-            // adding to is_known_unit's list without telling unit_converter
-            // — which would silently break shopping aggregation).
+            assert!(is_known_unit(unit), "is_known_unit must accept {unit:?}");
             assert!(
                 unit_converter::unit_category(unit).is_some(),
                 "unit_converter::unit_category must classify {unit:?}"

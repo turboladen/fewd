@@ -18,6 +18,10 @@
 
 use serde_json::{json, Value};
 
+/// The dash characters that join the two ends of a range: ASCII `-`, en-dash
+/// `–` and em-dash `—`.
+pub const RANGE_DASHES: [char; 3] = ['-', '–', '—'];
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AmountKind {
     Single(f64),
@@ -54,7 +58,7 @@ pub fn try_parse_amount_json(s: &str) -> Option<Value> {
 }
 
 fn split_on_dash(s: &str) -> Option<(&str, &str)> {
-    let dash_idx = s.find(['-', '–', '—'])?;
+    let dash_idx = s.find(RANGE_DASHES)?;
     // Splitting at the byte index of the dash; multi-byte dashes are handled
     // because find returns a byte index and we slice with the dash's char
     // length.
@@ -104,62 +108,114 @@ fn parse_simple_amount(s: &str) -> Option<f64> {
     None
 }
 
+/// Canonical names of the weight and volume units, as [`normalize_unit`]
+/// returns them.
+pub const MEASURED_UNITS: &[&str] = &[
+    "g", "kg", "mg", "oz", "lb", "ml", "l", "cup", "tbsp", "tsp", "pint", "quart", "gallon",
+    "fl oz",
+];
+
+/// Canonical names of the discrete cooking units (cloves, cans, pinches),
+/// as [`normalize_unit`] returns them.
+pub const DISCRETE_UNITS: &[&str] = &[
+    "whole",
+    "piece",
+    "clove",
+    "slice",
+    "can",
+    "sheet",
+    "head",
+    "bunch",
+    "sprig",
+    "bag",
+    "bottle",
+    "package",
+    "pkg",
+    "block",
+    "stalk",
+    "strip",
+    "pinch",
+    "dash",
+    "splash",
+    "drop",
+    "leaf",
+    "ball",
+    "sleeve",
+    "jar",
+    "container",
+    "stick",
+    "ear",
+    "shake",
+];
+
+/// Normalizes a unit string: trims, lowercases, reduces a plural to its
+/// singular, and maps aliases to one canonical name, so `"Tablespoons"`,
+/// `"tbs"` and `"tb"` all give `"tbsp"`.
+///
+/// Plurals that add `es` after `ch`, `sh`, `ss` or `x` lose both letters
+/// (`"bunches"` gives `"bunch"`), `"leaves"` gives `"leaf"`, a word ending in
+/// `ss` keeps it (`"glass"`), and any other trailing `s` is dropped when the
+/// word is longer than two letters (`"ts"` stays the teaspoon alias). A word
+/// with no alias comes back singular and lowercase, whether or not it is a
+/// unit. `"to taste"` and the `fl oz` spellings are matched whole.
+pub fn normalize_unit(unit: &str) -> String {
+    let s = unit.trim().to_lowercase();
+    match s.as_str() {
+        "fl oz" | "fl. oz" | "fl. oz." | "fluid ounce" | "fluid ounces" => {
+            return "fl oz".to_string()
+        }
+        "to taste" => return s,
+        _ => {}
+    }
+    let canonical = match singular_unit(&s) {
+        "gram" | "g" => "g",
+        "kilogram" | "kg" => "kg",
+        "milligram" | "mg" => "mg",
+        "ounce" | "oz" => "oz",
+        "pound" | "lb" => "lb",
+        "milliliter" | "millilitre" | "ml" => "ml",
+        "liter" | "litre" | "l" => "l",
+        "tablespoon" | "tbsp" | "tbs" | "tb" => "tbsp",
+        "teaspoon" | "tsp" | "ts" => "tsp",
+        "pint" | "pt" => "pint",
+        "quart" | "qt" => "quart",
+        "gallon" | "gal" => "gallon",
+        other => other,
+    };
+    canonical.to_string()
+}
+
+// The `es` rule covers only sibilant endings, because the units ending in a
+// plain `e` (slice, piece, shake) pluralize with a bare `s`. No `zes` or
+// `ies` rule: no unit needs one, and a `zes` rule would cut `"sizes"` short.
+fn singular_unit(s: &str) -> &str {
+    if s == "leaves" {
+        "leaf"
+    } else if s.ends_with("ss") {
+        s
+    } else if ["ches", "shes", "sses", "xes"]
+        .iter()
+        .any(|ending| s.ends_with(ending))
+    {
+        &s[..s.len() - 2]
+    } else if s.ends_with('s') && s.len() > 2 {
+        &s[..s.len() - 1]
+    } else {
+        s
+    }
+}
+
 /// Returns `true` if `token` looks like a recipe unit — weight, volume, or
 /// a recognized discrete cooking unit. Used by the parser's 3-part branch
 /// to decide whether `parts[1]` is a unit (`"6 cloves garlic"`) or part of
 /// a compound name (`"1 zucchini, sliced"`).
 ///
-/// Normalization: strip a single trailing `,`, trim, lowercase, then strip
-/// a single trailing `s` for plurals. Irregular plurals (`leaves`) are
-/// special-cased before the generic strip.
+/// A single trailing `,` is ignored. The rest passes through
+/// [`normalize_unit`] and counts as a unit when the result is in
+/// [`MEASURED_UNITS`] or [`DISCRETE_UNITS`].
 pub fn is_known_unit(token: &str) -> bool {
-    let stripped = token
-        .strip_suffix(',')
-        .unwrap_or(token)
-        .trim()
-        .to_lowercase();
-    if stripped.is_empty() {
-        return false;
-    }
-
-    // Multi-word special case (must come before plural stripping).
-    if matches!(
-        stripped.as_str(),
-        "fl oz" | "fl. oz" | "fl. oz." | "fluid ounce" | "fluid ounces"
-    ) {
-        return true;
-    }
-
-    // Irregular plurals — keep the explicit map small. Add entries here
-    // before the generic `s`-strip when the singular form differs by more
-    // than one trailing letter.
-    let singular = match stripped.as_str() {
-        "leaves" => "leaf",
-        other => {
-            if other.ends_with('s') && other.len() > 2 {
-                &other[..other.len() - 1]
-            } else {
-                other
-            }
-        }
-    };
-
-    matches!(
-        singular,
-        // Weight
-        "g" | "gram" | "kg" | "kilogram" | "mg" | "milligram" | "oz" | "ounce" | "lb" | "pound"
-        // Volume
-        | "ml" | "milliliter" | "millilitre"
-        | "l" | "liter" | "litre"
-        | "cup" | "tbsp" | "tablespoon" | "tb" | "tbs"
-        | "tsp" | "teaspoon" | "ts"
-        | "pint" | "pt" | "quart" | "qt" | "gallon" | "gal"
-        // Discrete cooking units
-        | "whole" | "piece" | "clove" | "slice" | "can" | "sheet" | "head" | "bunch"
-        | "sprig" | "bag" | "bottle" | "package" | "pkg" | "block" | "stalk" | "strip"
-        | "pinch" | "dash" | "splash" | "drop" | "leaf" | "ball" | "sleeve" | "jar"
-        | "container" | "stick" | "ear" | "shake"
-    )
+    let unit = normalize_unit(token.strip_suffix(',').unwrap_or(token));
+    MEASURED_UNITS.contains(&unit.as_str()) || DISCRETE_UNITS.contains(&unit.as_str())
 }
 
 /// Lookup table for Unicode vulgar fractions in the U+2150..U+215E block
@@ -378,6 +434,61 @@ mod tests {
         // Empty / garbage.
         assert!(!is_known_unit(""));
         assert!(!is_known_unit(","));
+    }
+
+    #[test]
+    fn is_known_unit_accepts_es_plurals() {
+        for unit in [
+            "bunches", "pinches", "dashes", "splashes", "Bunches", "bunches,",
+        ] {
+            assert!(is_known_unit(unit), "expected {unit:?} to be a known unit");
+        }
+    }
+
+    #[test]
+    fn is_known_unit_rejects_words_the_plural_rule_must_not_invent() {
+        for token in ["glass", "glasses", "boxes", "s", "ss", "to taste"] {
+            assert!(!is_known_unit(token), "{token:?} is not a unit");
+        }
+    }
+
+    #[test]
+    fn normalize_unit_reduces_plurals_and_aliases() {
+        for (input, expected) in [
+            ("bunches", "bunch"),
+            ("pinches", "pinch"),
+            ("dashes", "dash"),
+            ("splashes", "splash"),
+            ("glasses", "glass"),
+            ("glass", "glass"),
+            ("boxes", "box"),
+            ("leaves", "leaf"),
+            ("slices", "slice"),
+            ("shakes", "shake"),
+            ("sizes", "size"),
+            ("ts", "tsp"),
+            ("tbs", "tbsp"),
+            ("tb", "tbsp"),
+            ("lbs", "lb"),
+            ("cups", "cup"),
+            ("Tbsp", "tbsp"),
+            ("GRAMS", "g"),
+            ("fl oz", "fl oz"),
+            ("Fluid Ounces", "fl oz"),
+            ("to taste", "to taste"),
+            ("whole", "whole"),
+            ("  Cloves ", "clove"),
+        ] {
+            assert_eq!(normalize_unit(input), expected, "normalize_unit({input:?})");
+        }
+    }
+
+    #[test]
+    fn unit_lists_hold_canonical_names() {
+        for unit in MEASURED_UNITS.iter().chain(DISCRETE_UNITS) {
+            assert_eq!(normalize_unit(unit), *unit, "{unit:?} must be canonical");
+            assert!(is_known_unit(unit), "{unit:?} must be a known unit");
+        }
     }
 
     #[test]

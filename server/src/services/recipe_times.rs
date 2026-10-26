@@ -283,12 +283,12 @@ fn express_minutes(minutes: i32, preferred: [Option<&'static str>; 2]) -> Checke
         })
 }
 
-/// Drops each time field of an AI-generated recipe that [`check_time`]
-/// rejects, and drops the longer phase when a recipe with no total has a
-/// prep + cook sum too long for whole minutes, logging a warning for each
-/// field it drops. Call it on every recipe the
-/// model produces, whether it is saved at once (import) or handed back as a
-/// draft the client saves later (adapt, suggest).
+/// Drops each time field of an imported or AI-generated recipe that
+/// [`check_time`] rejects, and drops the longer phase when a recipe with no
+/// total has a prep + cook sum too long for whole minutes, logging a warning
+/// for each field it drops. Call it on every imported recipe and on every
+/// recipe the model produces, whether it is saved at once (import) or handed
+/// back as a draft the client saves later (adapt, suggest).
 //
 // Tokens are already spent by then, and a unit the model invented is not
 // something the person can fix (the web form's unit select cannot even
