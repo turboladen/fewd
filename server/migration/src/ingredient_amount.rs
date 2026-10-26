@@ -187,7 +187,7 @@ pub fn normalize_unit(unit: &str) -> String {
 
 // The `es` rule covers only sibilant endings, because the units ending in a
 // plain `e` (slice, piece, shake) pluralize with a bare `s`. No `zes` or
-// `ies` rule: no unit needs one, and `"sizes"` would become `"siz"`.
+// `ies` rule: no unit needs one, and a `zes` rule would cut `"sizes"` short.
 fn singular_unit(s: &str) -> &str {
     if s == "leaves" {
         "leaf"
