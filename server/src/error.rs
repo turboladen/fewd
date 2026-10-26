@@ -43,9 +43,19 @@ impl IntoResponse for AppError {
     }
 }
 
+/// Maps a missing row to a 404 that carries the service's message, and
+/// every other database error to a 500.
+//
+// An update whose row is deleted after the service loaded it affects no rows,
+// and SeaORM reports that as `RecordNotUpdated`, so a concurrent delete
+// answers 404 too.
 impl From<DbErr> for AppError {
     fn from(err: DbErr) -> Self {
-        AppError::Database(err)
+        match err {
+            DbErr::RecordNotFound(msg) => AppError::NotFound(msg),
+            DbErr::RecordNotUpdated => AppError::NotFound("Record not found".to_string()),
+            other => AppError::Database(other),
+        }
     }
 }
 
@@ -53,7 +63,28 @@ impl From<ServiceError> for AppError {
     fn from(err: ServiceError) -> Self {
         match err {
             ServiceError::Validation(e) => AppError::BadRequest(e.to_string()),
-            ServiceError::Database(e) => AppError::Database(e),
+            ServiceError::Database(e) => e.into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_or_vanished_row_is_not_found_and_other_errors_stay_internal() {
+        let missing = DbErr::RecordNotFound("Recipe not found".to_string());
+        assert!(
+            matches!(AppError::from(missing), AppError::NotFound(m) if m == "Recipe not found")
+        );
+        assert!(matches!(
+            AppError::from(DbErr::RecordNotUpdated),
+            AppError::NotFound(_)
+        ));
+        assert!(matches!(
+            AppError::from(DbErr::Custom("boom".to_string())),
+            AppError::Database(_)
+        ));
     }
 }

@@ -7,8 +7,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::dto::{
-    deserialize_optional_string_empty_as_none, IngredientAmountDto, IngredientDto, NutritionDto,
-    PortionSizeDto, TimeValueDto,
+    deserialize_prep, IngredientAmountDto, IngredientDto, NutritionDto, PortionSizeDto,
+    TimeValueDto,
 };
 
 use super::errors::InputError;
@@ -136,7 +136,7 @@ pub struct IngredientOut {
     /// for the recipe step, not the grocery list.
     #[serde(
         default,
-        deserialize_with = "deserialize_optional_string_empty_as_none",
+        deserialize_with = "deserialize_prep",
         skip_serializing_if = "Option::is_none"
     )]
     pub prep: Option<String>,
@@ -217,11 +217,10 @@ pub(super) fn format_date(dt: DateTime<Utc>) -> String {
 /// change". Returns the value untouched when it carries any non-whitespace
 /// character.
 //
-// No scalar on a person or a recipe has a clear-to-empty path — neither the
-// web UI nor the HTTP client sends one — so `Some("")` reaching a service
-// would be a back-door clear that forks that invariant. A field whose blank
-// value means "no change" routes through here, so the rule holds in one place
-// rather than per-field. A field that rejects a blank value instead — a
+// Over HTTP a clear is an explicit null, and the MCP update tools offer no
+// clear, so `Some("")` reaching a service would be an unintended clear by
+// another name. A field whose blank value means "no change" routes through
+// here, so the rule holds in one place rather than per-field. A field that rejects a blank value instead — a
 // recipe's `name`, a lookup `slug` — validates it at the converter and returns
 // an actionable error, because there a blank is a missing value rather than an
 // attempt to unset one.

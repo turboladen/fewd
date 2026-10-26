@@ -2899,7 +2899,7 @@ mod tests {
             seeded.id.clone(),
             crate::dto::UpdateRecipeDto {
                 is_favorite: Some(true),
-                rating: Some(5.0),
+                rating: Some(Some(5.0)),
                 ..Default::default()
             },
         )
@@ -3005,7 +3005,7 @@ mod tests {
             seeded.id.clone(),
             crate::dto::UpdateRecipeDto {
                 is_favorite: Some(true),
-                rating: Some(4.0),
+                rating: Some(Some(4.0)),
                 ..Default::default()
             },
         )
@@ -4459,7 +4459,7 @@ mod tests {
                 created.id.clone(),
                 UpdateRecipeDto {
                     is_favorite: Some(true),
-                    rating: Some(5.0),
+                    rating: Some(Some(5.0)),
                     ..Default::default()
                 },
             )

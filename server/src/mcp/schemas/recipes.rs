@@ -750,12 +750,12 @@ pub fn update_recipe_input_to_dto(input: UpdateRecipeInput) -> Result<UpdateReci
     // instead of silently defaulting to "leave unchanged".
     Ok(UpdateRecipeDto {
         name: input.name,
-        description: blank_to_none(input.description),
-        prep_time: input.prep_time.map(time_in),
-        cook_time: input.cook_time.map(time_in),
-        total_time: input.total_time.map(time_in),
+        description: blank_to_none(input.description).map(Some),
+        prep_time: input.prep_time.map(|t| Some(time_in(t))),
+        cook_time: input.cook_time.map(|t| Some(time_in(t))),
+        total_time: input.total_time.map(|t| Some(time_in(t))),
         servings: input.servings,
-        portion_size: input.portion_size.map(portion_in),
+        portion_size: input.portion_size.map(|p| Some(portion_in(p))),
         instructions: blank_to_none(input.instructions),
         // `ingredient_in` runs the comma'd-name splitter, exactly as on
         // create — skipping it would let "garlic, minced" land as one
@@ -765,8 +765,8 @@ pub fn update_recipe_input_to_dto(input: UpdateRecipeInput) -> Result<UpdateReci
             .map(|v| v.into_iter().map(ingredient_in).collect()),
         nutrition_per_serving: input.nutrition_per_serving.map(nutrition_in),
         tags: input.tags,
-        notes: blank_to_none(input.notes),
-        icon: blank_to_none(input.icon),
+        notes: blank_to_none(input.notes).map(Some),
+        icon: blank_to_none(input.icon).map(Some),
         // Owned by fewd-3w3 (favorite_recipe) and fewd-no0 (rate_recipe).
         is_favorite: None,
         rating: None,
@@ -834,7 +834,7 @@ pub fn rate_recipe_input_to_dto(input: RateRecipeInput) -> Result<UpdateRecipeDt
         notes: None,
         icon: None,
         is_favorite: None,
-        rating: Some(rounded),
+        rating: Some(Some(rounded)),
     })
 }
 
@@ -1128,9 +1128,8 @@ mod tests {
 
     #[test]
     fn update_blank_strings_mean_no_change() {
-        // The invariant: no recipe scalar has a clear-to-empty path. A
-        // caller sending "" must not persist an empty string as a
-        // back-door clear.
+        // `update_recipe` offers no clear, so a caller sending "" must not
+        // persist an empty string as a back-door clear.
         for blank in ["", "   ", "\t\n"] {
             let dto = update_recipe_input_to_dto(UpdateRecipeInput {
                 description: Some(blank.into()),
@@ -1175,18 +1174,28 @@ mod tests {
     }
 
     // Name the fields a converter actually writes. `UpdateRecipeDto`
-    // serializes every field, so reading the keys back rather than
-    // listing them means a field added later is covered here without
-    // anyone remembering to extend an assertion list.
+    // serializes exactly the fields that are set, a clear included as null,
+    // so reading the keys back covers a field added later without anyone
+    // extending an assertion list, and a stray clear counts as a write.
     fn written_fields(dto: &UpdateRecipeDto) -> Vec<String> {
         serde_json::to_value(dto)
             .expect("UpdateRecipeDto serializes")
             .as_object()
             .expect("a DTO serializes to an object")
-            .iter()
-            .filter(|(_, value)| !value.is_null())
-            .map(|(key, _)| key.clone())
+            .keys()
+            .cloned()
             .collect()
+    }
+
+    #[test]
+    fn update_writes_only_the_fields_it_was_given() {
+        // An omitted field must stay "leave unchanged", never a clear.
+        let dto = update_recipe_input_to_dto(UpdateRecipeInput {
+            name: Some("Renamed".into()),
+            ..mk_update("x")
+        })
+        .expect("valid input");
+        assert_eq!(written_fields(&dto), ["name"]);
     }
 
     #[test]
@@ -1217,7 +1226,7 @@ mod tests {
         for stars in [1.0, 2.0, 3.0, 4.0, 5.0] {
             let dto = rate_recipe_input_to_dto(mk_rate(stars))
                 .unwrap_or_else(|e| panic!("{stars} stars must be accepted: {e}"));
-            assert_eq!(dto.rating, Some(stars));
+            assert_eq!(dto.rating, Some(Some(stars)));
         }
     }
 
@@ -1240,7 +1249,11 @@ mod tests {
         ] {
             let dto = rate_recipe_input_to_dto(mk_rate(raw))
                 .unwrap_or_else(|e| panic!("{raw} must be accepted: {e}"));
-            assert_eq!(dto.rating, Some(stored), "{raw} must store as {stored}");
+            assert_eq!(
+                dto.rating,
+                Some(Some(stored)),
+                "{raw} must store as {stored}"
+            );
         }
     }
 
@@ -1283,7 +1296,7 @@ mod tests {
     #[test]
     fn rate_input_writes_only_rating() {
         let dto = rate_recipe_input_to_dto(mk_rate(4.0)).expect("valid rating");
-        assert_eq!(dto.rating, Some(4.0));
+        assert_eq!(dto.rating, Some(Some(4.0)));
         assert_eq!(written_fields(&dto), ["rating"]);
     }
 

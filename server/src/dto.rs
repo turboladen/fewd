@@ -31,6 +31,32 @@ where
     Option::<String>::deserialize(deserializer).map(|opt| opt.filter(|s| !s.trim().is_empty()))
 }
 
+/// Deserialize an ingredient's prep, trimming it and coercing a blank value
+/// to `None`.
+//
+// Trimming keeps " minced" and "minced" one prep for every client, the same
+// rule the web form applies through `normalizeIngredientPrep`.
+pub fn deserialize_prep<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer)
+        .map(|opt| opt.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()))
+}
+
+/// Deserializes an update field that may be absent, null, or a value. With
+/// `#[serde(default)]`, an absent field stays `None`, null becomes
+/// `Some(None)`, and a value becomes `Some(Some(v))`. Pair it with
+/// `skip_serializing_if = "Option::is_none"` so serializing round-trips the
+/// three states.
+pub fn nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
 // ─── Recipe DTOs ────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -73,13 +99,13 @@ pub struct IngredientDto {
     /// for serving"). Belongs to the recipe context, not the shopping list —
     /// the shopping aggregator ignores `prep` and groups by `name`.
     ///
-    /// `Some("")` is normalized to `None` on deserialize (LLMs occasionally
-    /// emit `""` instead of `null` for unset optional fields), and `None`
-    /// skips serialization to keep wire-format shape consistent with the
+    /// Deserializing trims it and normalizes a blank value to `None` (LLMs
+    /// occasionally emit `""` instead of `null` for unset optional fields),
+    /// and `None` skips serialization to keep wire-format shape consistent with the
     /// migration's struct.
     #[serde(
         default,
-        deserialize_with = "deserialize_optional_string_empty_as_none",
+        deserialize_with = "deserialize_prep",
         skip_serializing_if = "Option::is_none"
     )]
     pub prep: Option<String>,
@@ -131,21 +157,68 @@ pub struct CreateRecipeDto {
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct UpdateRecipeDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    pub description: Option<String>,
-    pub prep_time: Option<TimeValueDto>,
-    pub cook_time: Option<TimeValueDto>,
-    pub total_time: Option<TimeValueDto>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub prep_time: Option<Option<TimeValueDto>>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cook_time: Option<Option<TimeValueDto>>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub total_time: Option<Option<TimeValueDto>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub servings: Option<i32>,
-    pub portion_size: Option<PortionSizeDto>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub portion_size: Option<Option<PortionSizeDto>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ingredients: Option<Vec<IngredientDto>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub nutrition_per_serving: Option<NutritionDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
-    pub notes: Option<String>,
-    pub icon: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub notes: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub icon: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub is_favorite: Option<bool>,
-    pub rating: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rating: Option<Option<f64>>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -192,14 +265,31 @@ pub struct CreatePersonDto {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UpdatePersonDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub birthdate: Option<String>,
-    pub dietary_goals: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub dietary_goals: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub dislikes: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub favorites: Option<Vec<String>>,
-    pub notes: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub notes: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub is_active: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub drink_preferences: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub drink_dislikes: Option<Vec<String>>,
 }
 
@@ -417,20 +507,62 @@ fn default_servings_one() -> i32 {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UpdateDrinkRecipeDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    pub description: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub servings: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ingredients: Option<Vec<IngredientDto>>,
-    pub technique: Option<String>,
-    pub glassware: Option<String>,
-    pub garnish: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub technique: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub glassware: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub garnish: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
-    pub notes: Option<String>,
-    pub icon: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub notes: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub icon: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub is_favorite: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub is_non_alcoholic: Option<bool>,
-    pub rating: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rating: Option<Option<f64>>,
 }
 
 // ─── Cocktail Suggestion DTOs ──────────────────────────────────
@@ -454,4 +586,64 @@ pub struct AiSuggestCocktailsDto {
     pub include_non_alcoholic: bool,
     pub feedback: Option<String>,
     pub previous_suggestion_names: Option<Vec<String>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn update(body: serde_json::Value) -> UpdateRecipeDto {
+        serde_json::from_value(body).expect("update body deserializes")
+    }
+
+    #[test]
+    fn nullable_field_tells_absent_from_null_from_value() {
+        assert_eq!(update(serde_json::json!({})).notes, None);
+        assert_eq!(
+            update(serde_json::json!({ "notes": null })).notes,
+            Some(None)
+        );
+        assert_eq!(
+            update(serde_json::json!({ "notes": "salt" })).notes,
+            Some(Some("salt".to_string()))
+        );
+        assert_eq!(
+            update(serde_json::json!({ "rating": null })).rating,
+            Some(None)
+        );
+        assert!(matches!(
+            update(serde_json::json!({ "total_time": null })).total_time,
+            Some(None)
+        ));
+    }
+
+    #[test]
+    fn update_serializes_only_the_fields_it_carries_with_a_clear_as_null() {
+        let dto = UpdateRecipeDto {
+            name: Some("Soup".into()),
+            notes: Some(None),
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&dto).unwrap(),
+            serde_json::json!({ "name": "Soup", "notes": null })
+        );
+    }
+
+    #[test]
+    fn prep_is_trimmed_and_a_blank_prep_is_absent() {
+        let prep = |value: serde_json::Value| {
+            serde_json::from_value::<IngredientDto>(serde_json::json!({
+                "name": "onion",
+                "prep": value,
+                "amount": { "type": "single", "value": 1.0 },
+                "notes": null,
+            }))
+            .expect("ingredient deserializes")
+            .prep
+        };
+        assert_eq!(prep(" thinly sliced ".into()), Some("thinly sliced".into()));
+        assert_eq!(prep("  ".into()), None);
+        assert_eq!(prep(serde_json::Value::Null), None);
+    }
 }

@@ -96,7 +96,7 @@ impl DrinkRecipeService {
             recipe.name = Set(name);
         }
         if let Some(description) = data.description {
-            recipe.description = Set(Some(description));
+            recipe.description = Set(description);
         }
         if let Some(servings) = data.servings {
             recipe.servings = Set(servings);
@@ -108,22 +108,22 @@ impl DrinkRecipeService {
             recipe.ingredients = Set(to_json(&ingredients)?);
         }
         if let Some(technique) = data.technique {
-            recipe.technique = Set(Some(technique));
+            recipe.technique = Set(technique);
         }
         if let Some(glassware) = data.glassware {
-            recipe.glassware = Set(Some(glassware));
+            recipe.glassware = Set(glassware);
         }
         if let Some(garnish) = data.garnish {
-            recipe.garnish = Set(Some(garnish));
+            recipe.garnish = Set(garnish);
         }
         if let Some(tags) = data.tags {
             recipe.tags = Set(to_json(&tags)?);
         }
         if let Some(notes) = data.notes {
-            recipe.notes = Set(Some(notes));
+            recipe.notes = Set(notes);
         }
         if let Some(icon) = data.icon {
-            recipe.icon = Set(Some(icon));
+            recipe.icon = Set(icon);
         }
         if let Some(is_favorite) = data.is_favorite {
             recipe.is_favorite = Set(is_favorite);
@@ -132,7 +132,7 @@ impl DrinkRecipeService {
             recipe.is_non_alcoholic = Set(is_non_alcoholic);
         }
         if let Some(rating) = data.rating {
-            recipe.rating = Set(Some(whole_star_rating(rating)?));
+            recipe.rating = Set(rating.map(whole_star_rating).transpose()?);
         }
 
         recipe.updated_at = Set(chrono::Utc::now());
