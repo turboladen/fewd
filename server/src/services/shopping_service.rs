@@ -835,4 +835,77 @@ mod tests {
             assert_eq!(merged[0].ingredient.name, "Flour");
         }
     }
+
+    fn summed(items: &[IngredientWithSource]) -> (f64, String) {
+        match try_sum_amounts(items) {
+            (Some(IngredientAmountDto::Single { value }), Some(unit)) => (value, unit),
+            other => panic!("expected a single total, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn spellings_of_one_unit_sum_together() {
+        for (items, total, unit) in [
+            (
+                [item("kale", 1.0, "bunch"), item("kale", 2.0, "bunches")],
+                3.0,
+                "bunch",
+            ),
+            (
+                [item("cheese", 1.0, "oz."), item("cheese", 2.0, "oz")],
+                3.0,
+                "oz",
+            ),
+            (
+                [item("butter", 1.0, "T"), item("butter", 1.0, "tbsp")],
+                2.0,
+                "tbsp",
+            ),
+            (
+                [item("tofu", 1.0, "pkg"), item("tofu", 1.0, "package")],
+                2.0,
+                "package",
+            ),
+        ] {
+            assert_eq!(summed(&items), (total, unit.to_string()));
+        }
+    }
+
+    // A teaspoon and a tablespoon convert through ml: 19.716 ml, shown in the
+    // larger unit because each appears once.
+    #[test]
+    fn t_and_capital_t_sum_as_teaspoon_and_tablespoon() {
+        let items = [item("salt", 1.0, "t"), item("salt", 1.0, "T")];
+        assert_eq!(summed(&items), (1.33, "tbsp".to_string()));
+    }
+
+    #[test]
+    fn deciliters_and_cups_show_the_more_common_unit() {
+        let items = [
+            item("milk", 1.0, "dl"),
+            item("milk", 1.0, "dl"),
+            item("milk", 1.0, "cup"),
+        ];
+        assert_eq!(summed(&items), (4.37, "dl".to_string()));
+        let items = [item("milk", 1.0, "dl"), item("milk", 1.0, "cup")];
+        assert_eq!(summed(&items), (1.42, "cup".to_string()));
+    }
+
+    #[test]
+    fn merge_same_meal_sources_merges_a_dotted_abbreviation() {
+        let merged =
+            merge_same_meal_sources(vec![item("cheese", 1.0, "oz."), item("cheese", 2.0, "oz")]);
+        assert_eq!(merged.len(), 1);
+        assert!(matches!(
+            merged[0].ingredient.amount,
+            IngredientAmountDto::Single { value } if value == 3.0
+        ));
+    }
+
+    #[test]
+    fn merge_same_meal_sources_keeps_t_and_capital_t_apart() {
+        let merged = merge_same_meal_sources(vec![item("salt", 1.0, "t"), item("salt", 1.0, "T")]);
+        let units: Vec<&str> = merged.iter().map(|i| i.ingredient.unit.as_str()).collect();
+        assert_eq!(units, ["t", "T"]);
+    }
 }

@@ -1,6 +1,7 @@
 use crate::dto::{CreateRecipeDto, IngredientAmountDto, IngredientDto, TimeValueDto};
 use crate::services::ingredient_amount::{
-    is_known_unit, try_parse_amount_dto, unicode_fraction_value, RANGE_DASHES,
+    split_first_word, split_leading_unit, try_parse_amount_dto, unicode_fraction_value,
+    RANGE_DASHES,
 };
 use crate::services::ingredient_splitter::{first_top_level_or, split_name_and_prep};
 use crate::services::paren_notes::peel_size_paren;
@@ -332,8 +333,8 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
     let (line, notes) = extract_notes(line);
 
     // Peel mid-string size-info parens like "(28 oz each)" out of the line
-    // before tokenization so the noun trailing the parenthetical doesn't get
-    // sliced off by `splitn(3, ' ')`. See fewd-i47.
+    // before the line is split into words, so the noun after the
+    // parenthetical stays in the name. See fewd-i47.
     //
     // When both extract_notes (trailing parens) and peel_size_paren
     // (mid-string size parens) produce notes, merge with "; " — same
@@ -367,61 +368,26 @@ fn parse_ingredient_line(line: &str) -> Option<IngredientDto> {
         .and_then(|alt| parse_ingredient_line(&format!("* {alt}")))
         .map(Box::new);
 
-    let parts: Vec<&str> = line.splitn(3, ' ').collect();
+    let (first, after_first) = split_first_word(&line).unwrap_or((&line, ""));
+    let amount = try_parse_amount(first).filter(|_| !after_first.is_empty());
 
-    let mut primary = match parts.len() {
-        // Just a name like "salt"
-        1 => build_ingredient(
-            parts[0],
+    let mut primary = match amount {
+        // A line with no amount is a name, such as "salt" or "black pepper".
+        None => build_ingredient(
+            &line,
             IngredientAmountDto::Single { value: 1.0 },
             "to taste".to_string(),
             notes,
         ),
-        2 => {
-            if let Some(amount) = try_parse_amount(parts[0]) {
-                // Amount + name like "2 eggs"
-                build_ingredient(parts[1], amount, "whole".to_string(), notes)
-            } else {
-                // Two-word name like "black pepper"
-                build_ingredient(
-                    &line,
-                    IngredientAmountDto::Single { value: 1.0 },
-                    "to taste".to_string(),
-                    notes,
-                )
-            }
-        }
-        // 3 parts: whether parts[1] is a known unit decides the split.
-        //   - "2 cups flour": "cups" is a unit, so name="flour", unit="cups".
-        //   - "6 cloves garlic, minced": "cloves" is a unit, and the splitter
-        //     peels "minced" from name="garlic, minced".
-        //   - "1 zucchini, sliced into half-moons": "zucchini," is not a unit,
-        //     so parts[1] and parts[2] form the raw name, comma kept for the
-        //     splitter, with unit="whole". A size modifier ("4 medium red
-        //     onions") takes the same path. Reading every parts[1] as a unit
-        //     would store name="sliced into half-moons", unit="zucchini,".
-        _ => {
-            if let Some(amount) = try_parse_amount(parts[0]) {
-                let token = parts[1];
-                let token_stripped = token.strip_suffix(',').unwrap_or(token);
-                if is_known_unit(token_stripped) {
-                    build_ingredient(parts[2], amount, token_stripped.to_string(), notes)
-                } else {
-                    // Preserve the original token (with any trailing comma)
-                    // so the splitter can peel prep.
-                    let raw_name = format!("{} {}", token, parts[2]);
-                    build_ingredient(&raw_name, amount, "whole".to_string(), notes)
-                }
-            } else {
-                // Entire line is a name (no parseable amount).
-                build_ingredient(
-                    &line,
-                    IngredientAmountDto::Single { value: 1.0 },
-                    "to taste".to_string(),
-                    notes,
-                )
-            }
-        }
+        // A known unit of one or two words may follow the amount: "2 cups
+        // flour", "8 fl oz milk", or "6 cloves garlic, minced", where the
+        // splitter then peels "minced". Otherwise the rest is the raw name
+        // in whole items, with any comma kept for the splitter: "2 eggs",
+        // "4 medium red onions", "1 zucchini, sliced into half-moons".
+        Some(amount) => match split_leading_unit(after_first) {
+            Some((unit, name)) => build_ingredient(name, amount, unit, notes),
+            None => build_ingredient(after_first, amount, "whole".to_string(), notes),
+        },
     };
     primary.or_alternative = or_alternative;
     Some(primary)
@@ -815,6 +781,76 @@ dinner, quick, mexican";
     }
 
     #[test]
+    fn dotted_letter_and_metric_units_split_from_the_name() {
+        for (line, unit, name) in [
+            ("- 8 oz. cheese", "oz.", "cheese"),
+            ("- 2 Tbsp. butter", "Tbsp.", "butter"),
+            ("- 1 lb. beef", "lb.", "beef"),
+            ("- 1 T butter", "T", "butter"),
+            ("- 1 t salt", "t", "salt"),
+            ("- 1 c sugar", "c", "sugar"),
+            ("- 2 dl milk", "dl", "milk"),
+            ("- 1 kilo potatoes", "kilo", "potatoes"),
+        ] {
+            let ing = only_ingredient(line);
+            assert_eq!(
+                (ing.unit.as_str(), ing.name.as_str()),
+                (unit, name),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn two_word_fluid_ounce_units_split_from_the_name() {
+        for (line, unit) in [
+            ("- 8 fluid oz milk", "fluid oz"),
+            ("- 8 fl oz milk", "fl oz"),
+            ("- 8 fl. oz. milk", "fl. oz."),
+            ("- 8 fluid ounces milk", "fluid ounces"),
+            ("- 8 fl oz, milk", "fl oz"),
+            ("- 8 fl.oz. milk", "fl.oz."),
+        ] {
+            let ing = only_ingredient(line);
+            assert_eq!(
+                (ing.unit.as_str(), ing.name.as_str()),
+                (unit, "milk"),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn two_word_unit_with_nothing_after_it_stays_in_the_name() {
+        let ing = only_ingredient("- 2 fl oz");
+        assert_eq!((ing.unit.as_str(), ing.name.as_str()), ("whole", "fl oz"));
+    }
+
+    #[test]
+    fn double_space_after_the_amount_still_splits_the_unit() {
+        let ing = only_ingredient("- 8  oz milk");
+        assert_eq!((ing.unit.as_str(), ing.name.as_str()), ("oz", "milk"));
+    }
+
+    #[test]
+    fn one_letter_label_in_parens_stays_in_the_name() {
+        let ing = only_ingredient("- 2 tablets (vitamin C) crushed");
+        assert!(ing.name.contains("vitamin C"), "{}", ing.name);
+        assert!(ing.notes.is_none(), "{:?}", ing.notes);
+    }
+
+    #[test]
+    fn words_that_start_like_letter_units_stay_in_the_name() {
+        let ing = only_ingredient("- 1 T-bone steak");
+        assert_eq!(
+            (ing.unit.as_str(), ing.name.as_str()),
+            ("whole", "T-bone steak")
+        );
+        let ing = only_ingredient("- 2 cups. flour");
+        assert_eq!(ing.unit, "whole");
+    }
+
+    #[test]
     fn words_that_only_look_plural_stay_in_the_name() {
         let ing = only_ingredient("- 2 glasses wine");
         assert_eq!(ing.unit, "whole");
@@ -865,8 +901,8 @@ dinner, quick, mexican";
 
     #[test]
     fn test_ingredient_with_prep_clause() {
-        // "6 cloves garlic, minced" — splitn(3, ' ') leaves "garlic, minced"
-        // in parts[2]. The splitter pulls "minced" into the prep field.
+        // In "6 cloves garlic, minced" the text after the unit is
+        // "garlic, minced", and the splitter pulls "minced" into the prep field.
         let md = "# Test\n\n## Ingredients\n- 6 cloves garlic, minced\n\n## Instructions\nMix";
         let recipe = parse(md);
         let ing = &recipe.ingredients[0];
@@ -937,7 +973,7 @@ dinner, quick, mexican";
 
     #[test]
     fn test_compound_non_unit_with_prep() {
-        // The fewd-4i3 hero case: parts[1]="zucchini," is not a unit, so
+        // The fewd-4i3 hero case: "zucchini," after the amount is not a unit, so
         // the parser merges it into the name and lets the splitter peel
         // the prep clause.
         let md = "# Test\n\n## Ingredients\n- 1 zucchini, sliced into half-moons\n\n## Instructions\nMix";
@@ -950,7 +986,7 @@ dinner, quick, mexican";
 
     #[test]
     fn test_compound_non_unit_no_prep() {
-        // "4 medium red onions" — parts[1]="medium" is not a unit.
+        // In "4 medium red onions", "medium" after the amount is not a unit.
         let md = "# Test\n\n## Ingredients\n- 4 medium red onions\n\n## Instructions\nMix";
         let recipe = parse(md);
         let ing = &recipe.ingredients[0];
@@ -961,7 +997,7 @@ dinner, quick, mexican";
 
     #[test]
     fn test_bay_leaves() {
-        // "2 bay leaves" — parts[1]="bay" not a unit. Compound name.
+        // In "2 bay leaves", "bay" is not a unit, so the name is compound.
         let md = "# Test\n\n## Ingredients\n- 2 bay leaves\n\n## Instructions\nMix";
         let recipe = parse(md);
         let ing = &recipe.ingredients[0];
@@ -971,7 +1007,7 @@ dinner, quick, mexican";
 
     #[test]
     fn test_em_dash_range_with_compound_name() {
-        // "12–15 fresh sage leaves" — em-dash range, parts[1]="fresh" not a unit.
+        // In "12–15 fresh sage leaves" (an en-dash range), "fresh" is not a unit.
         let md = "# Test\n\n## Ingredients\n- 12–15 fresh sage leaves\n\n## Instructions\nMix";
         let recipe = parse(md);
         let ing = &recipe.ingredients[0];
@@ -985,7 +1021,7 @@ dinner, quick, mexican";
 
     #[test]
     fn test_em_dash_range_with_unit() {
-        // "3–4 lbs bone-in beef short ribs" — parts[1]="lbs" IS a unit.
+        // In "3–4 lbs bone-in beef short ribs", "lbs" after the amount is a unit.
         let md =
             "# Test\n\n## Ingredients\n- 3–4 lbs bone-in beef short ribs\n\n## Instructions\nMix";
         let recipe = parse(md);
@@ -1089,11 +1125,11 @@ dinner, quick, mexican";
         );
     }
 
-    /// Live-data calibration: parse the original markdown lines that
-    /// produced the misbucketed prod rows surfaced by the dietpi audit on
-    /// 2026-04-27. Asserts the post-fewd-4i3 parser produces clean
-    /// IngredientDto shapes — closing the loop with the m14 backfill,
-    /// which produces the same shapes from the post-m13 corrupted state.
+    // Live-data calibration: parse the original markdown lines that
+    // produced the misbucketed prod rows surfaced by the dietpi audit on
+    // 2026-04-27. Asserts the post-fewd-4i3 parser produces clean
+    // IngredientDto shapes, closing the loop with the m14 backfill, which
+    // produces the same shapes from the post-m13 corrupted state.
     #[test]
     fn live_data_calibration() {
         fn line(md_line: &str) -> IngredientDto {
@@ -1104,7 +1140,7 @@ dinner, quick, mexican";
             parse(&md).ingredients.into_iter().next().unwrap()
         }
 
-        // Compound non-unit at parts[1] (Pattern A's source).
+        // The word after the amount is not a unit (Pattern A's source).
         let zucchini = line("1 zucchini, sliced into half-moons");
         assert_eq!(zucchini.name, "zucchini");
         assert_eq!(zucchini.prep.as_deref(), Some("sliced into half-moons"));
@@ -1114,7 +1150,7 @@ dinner, quick, mexican";
         assert_eq!(scallions.name, "scallions");
         assert_eq!(scallions.prep.as_deref(), Some("thinly sliced"));
 
-        // Em-dash range: parts[1] is a unit.
+        // In this en-dash range, the word after the amount is a unit.
         let ribs = line("3–4 lbs bone-in beef short ribs");
         assert_eq!(ribs.name, "bone-in beef short ribs");
         assert_eq!(ribs.unit, "lbs");
@@ -1123,7 +1159,8 @@ dinner, quick, mexican";
             IngredientAmountDto::Range { min, max } if (min - 3.0).abs() < 0.001 && (max - 4.0).abs() < 0.001
         ));
 
-        // Em-dash range: parts[1] is NOT a unit (compound name path).
+        // In this en-dash range, the word after the amount is not a unit, so
+        // the name is compound.
         let sage = line("12–15 fresh sage leaves");
         assert_eq!(sage.name, "fresh sage leaves");
         assert_eq!(sage.unit, "whole");
@@ -1138,7 +1175,8 @@ dinner, quick, mexican";
         assert_eq!(milk.name, "milk");
         assert_eq!(milk.unit, "cups");
 
-        // Compound name w/o prep (size modifier at parts[1]).
+        // The name is compound without prep, because a size modifier follows
+        // the amount.
         let onions = line("4 medium red onions");
         assert_eq!(onions.name, "medium red onions");
         assert_eq!(onions.unit, "whole");

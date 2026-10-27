@@ -75,6 +75,8 @@ fn best_weight_unit(grams: f64) -> (f64, String) {
 fn volume_to_ml(normalized: &str) -> Option<f64> {
     match normalized {
         "ml" => Some(1.0),
+        "cl" => Some(10.0),
+        "dl" => Some(100.0),
         "l" => Some(1000.0),
         "cup" => Some(236.588),
         "tbsp" => Some(14.787),
@@ -438,6 +440,37 @@ mod tests {
         assert_eq!(unit_category("oz"), Some("weight"));
         assert_eq!(unit_category("whole"), None);
         assert_eq!(unit_category("pinch"), None);
+    }
+
+    #[test]
+    fn short_dotted_and_case_sensitive_spellings_are_measured() {
+        for unit in ["T", "t", "c", "C", "dl", "cl", "tsp.", "Tbsp.", "fluid oz"] {
+            assert_eq!(unit_category(unit), Some("volume"), "{unit:?}");
+        }
+        for unit in ["oz.", "lb.", "kilo"] {
+            assert_eq!(unit_category(unit), Some("weight"), "{unit:?}");
+        }
+        assert_eq!(to_base(1.0, "dl"), Some(100.0));
+        assert_eq!(to_base(1.0, "cl"), Some(10.0));
+        assert_eq!(to_base(1.0, "T"), to_base(1.0, "tbsp"));
+        assert_eq!(to_base(1.0, "t"), to_base(1.0, "tsp"));
+        assert_eq!(to_base(1.0, "kilo"), to_base(1.0, "kg"));
+    }
+
+    #[test]
+    fn capital_t_is_a_small_measurement_and_dl_is_graduated() {
+        assert!(matches!(
+            shopping_unit_class("T"),
+            ShoppingUnitClass::PassThrough
+        ));
+        assert!(matches!(
+            shopping_unit_class("tsp."),
+            ShoppingUnitClass::PassThrough
+        ));
+        assert!(matches!(
+            shopping_unit_class("dl"),
+            ShoppingUnitClass::Graduated
+        ));
     }
 
     #[test]

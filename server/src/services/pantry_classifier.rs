@@ -176,6 +176,17 @@ mod tests {
     }
 
     #[test]
+    fn letter_and_dotted_spoon_units_are_staples() {
+        let amt = single(1.0);
+        for unit in ["T", "t", "tsp.", "Tbsp."] {
+            assert!(
+                is_pantry_staple("anything", Some(unit), Some(&amt)),
+                "{unit:?}"
+            );
+        }
+    }
+
+    #[test]
     fn teaspoon_long_form_is_staple() {
         let amt = single(1.0);
         assert!(is_pantry_staple("anything", Some("teaspoon"), Some(&amt)));

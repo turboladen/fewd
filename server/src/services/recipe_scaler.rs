@@ -36,12 +36,13 @@ fn rounds_to_whole(unit: &str) -> bool {
 
 /// Scale ingredients by a ratio for a preview the user reviews before saving.
 ///
-/// Amounts round to two decimals, except that discrete units (such as eggs or
-/// cloves) round to the nearest whole number, half away from zero, and a
-/// positive amount never rounds below 1. A range whose bounds round to the
-/// same number becomes a single amount. Alternatives round the same way.
-/// A primary ingredient whose rounding changed its amount is listed in
-/// `flagged`; alternatives are never flagged.
+/// Amounts round to two decimals, except that amounts in a unit that is
+/// neither a weight, a volume nor "to taste" (such as eggs or cloves) round to
+/// the nearest whole number, half away from zero, and a positive amount never
+/// rounds below 1. A range whose bounds round to the same number becomes a
+/// single amount. Alternatives round the same way. A primary ingredient whose
+/// rounding changed its amount is listed in `flagged`; alternatives are never
+/// flagged.
 pub fn scale_ingredients(ingredients: &[IngredientDto], ratio: f64) -> ScaleResult {
     let mut scaled = Vec::with_capacity(ingredients.len());
     let mut flagged = Vec::new();
@@ -459,6 +460,29 @@ mod tests {
         assert!(!rounds_to_whole("g"));
         assert!(!rounds_to_whole("tbsp"));
         assert!(!rounds_to_whole("oz"));
+    }
+
+    #[test]
+    fn short_dotted_and_case_sensitive_units_do_not_round_to_whole() {
+        for unit in [
+            "tsp.", "Tbsp.", "oz.", "lb.", "c", "t", "T", "dl", "cl", "kilo", "fluid oz",
+        ] {
+            assert!(!rounds_to_whole(unit), "{unit:?} is measured");
+        }
+        for unit in ["whole", "glass.", "cups."] {
+            assert!(rounds_to_whole(unit), "{unit:?} is not measured");
+        }
+    }
+
+    #[test]
+    fn cup_and_tablespoon_letters_scale_without_rounding() {
+        let result = scale_ingredients(&[make_ingredient("sugar", 0.25, "c")], 0.5);
+        assert_eq!(single(&result.ingredients[0].amount), 0.13);
+        assert!(result.flagged.is_empty());
+
+        let result = scale_ingredients(&[make_ingredient("butter", 1.5, "T")], 5.0 / 4.0);
+        assert_eq!(single(&result.ingredients[0].amount), 1.88);
+        assert!(result.flagged.is_empty());
     }
 
     #[test]
