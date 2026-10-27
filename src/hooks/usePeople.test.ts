@@ -124,7 +124,7 @@ describe('useCreatePerson', () => {
 
     // Two GETs (initial + refetch after invalidation) + one POST.
     await waitFor(() => {
-      const getCalls = vi.mocked(fetch).mock.calls.filter(([, init]) => !init)
+      const getCalls = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'GET')
       expect(getCalls).toHaveLength(2)
     })
   })
@@ -217,7 +217,7 @@ describe('useProvisionMcpToken', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['people'] })
   })
 
-  it('sends the JSON Content-Type so the request is non-CORS-simple (anti-CSRF guard)', async () => {
+  it("sends the JSON Content-Type that the token route's empty body requires", async () => {
     mockJson('POST', '/api/people/p1/mcp-token', {
       token: 't',
       fingerprint: 'fp',

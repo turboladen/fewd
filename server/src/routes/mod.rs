@@ -1,4 +1,5 @@
 mod cocktails;
+mod csrf;
 mod meal_templates;
 mod meals;
 mod people;
@@ -9,12 +10,19 @@ pub(crate) mod sse_helpers;
 mod suggestions;
 mod version;
 
+use axum::middleware;
 use axum::routing::{delete, get, post, put};
 use axum::Router;
 
 use crate::AppState;
 
+/// Builds the `/api` router. Every route it serves answers 403 to a POST that
+/// a browser could send cross-site without a CORS preflight.
 pub fn api_routes() -> Router<AppState> {
+    routes().route_layer(middleware::from_fn(csrf::reject_cors_simple_posts))
+}
+
+fn routes() -> Router<AppState> {
     Router::new()
         // People
         .route("/people", get(people::list).post(people::create))

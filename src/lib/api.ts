@@ -1,5 +1,20 @@
 const BASE = '/api'
 
+// The server answers 403 to a POST that is neither JSON nor marked with this
+// header, which a cross-site form cannot send. Every request carries it.
+const BASE_HEADERS = { 'X-Requested-With': 'fetch' }
+
+// Builds the options for a call with an optional JSON body. The content type
+// goes only with a body.
+function requestInit(method: string, body?: unknown): RequestInit {
+  if (body === undefined) return { method, headers: { ...BASE_HEADERS } }
+  return {
+    method,
+    headers: { ...BASE_HEADERS, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -40,27 +55,19 @@ export interface StreamCallbacks<T> {
 
 export const api = {
   get<T>(path: string): Promise<T> {
-    return fetch(`${BASE}${path}`).then(handleResponse<T>)
+    return fetch(`${BASE}${path}`, requestInit('GET')).then(handleResponse<T>)
   },
 
   post<T>(path: string, body?: unknown): Promise<T> {
-    return fetch(`${BASE}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    }).then(handleResponse<T>)
+    return fetch(`${BASE}${path}`, requestInit('POST', body)).then(handleResponse<T>)
   },
 
   put<T>(path: string, body?: unknown): Promise<T> {
-    return fetch(`${BASE}${path}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    }).then(handleResponse<T>)
+    return fetch(`${BASE}${path}`, requestInit('PUT', body)).then(handleResponse<T>)
   },
 
   delete(path: string): Promise<void> {
-    return fetch(`${BASE}${path}`, { method: 'DELETE' }).then(handleResponse<void>)
+    return fetch(`${BASE}${path}`, requestInit('DELETE')).then(handleResponse<void>)
   },
 
   upload<T>(path: string, file: File): Promise<T> {
@@ -68,6 +75,8 @@ export const api = {
     formData.append('file', file)
     return fetch(`${BASE}${path}`, {
       method: 'POST',
+      // The browser sets the multipart Content-Type and its boundary.
+      headers: { ...BASE_HEADERS },
       body: formData,
     }).then(handleResponse<T>)
   },
@@ -80,12 +89,7 @@ export const api = {
   stream<T>(path: string, body: unknown, callbacks: StreamCallbacks<T>): AbortController {
     const controller = new AbortController()
 
-    fetch(`${BASE}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
+    fetch(`${BASE}${path}`, { ...requestInit('POST', body), signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) {
           const errBody = await response.json().catch(() => ({ message: 'Unknown error' }))

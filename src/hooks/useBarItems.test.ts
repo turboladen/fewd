@@ -93,7 +93,7 @@ describe('useCreateBarItem', () => {
     await waitFor(() => expect(create.result.current.isSuccess).toBe(true))
 
     await waitFor(() => {
-      const getCalls = vi.mocked(fetch).mock.calls.filter(([, init]) => !init)
+      const getCalls = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'GET')
       expect(getCalls).toHaveLength(2)
     })
   })
