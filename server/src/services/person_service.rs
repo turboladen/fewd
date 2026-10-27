@@ -3,6 +3,7 @@ use sea_orm::*;
 
 use crate::dto::{CreatePersonDto, UpdatePersonDto};
 use crate::entities::person::{self, Entity as Person};
+use crate::services::normalize::person_name_key;
 use crate::services::to_json;
 
 pub struct PersonService;
@@ -39,14 +40,14 @@ impl PersonService {
         db: &DatabaseConnection,
         name: &str,
     ) -> Result<Option<person::Model>, DbErr> {
-        let target = name.trim().to_lowercase();
+        let target = person_name_key(name);
         if target.is_empty() {
             return Ok(None);
         }
         let matches: Vec<person::Model> = Self::get_all(db)
             .await?
             .into_iter()
-            .filter(|p| p.name.trim().to_lowercase() == target)
+            .filter(|p| person_name_key(&p.name) == target)
             .collect();
         match matches.len() {
             0 => Ok(None),

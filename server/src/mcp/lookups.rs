@@ -7,8 +7,29 @@ use std::collections::HashMap;
 
 use sea_orm::DatabaseConnection;
 
+use crate::services::normalize::person_name_key;
 use crate::services::person_service::PersonService;
 use crate::services::recipe_service::RecipeService;
+
+/// Normalize a caller-supplied recipe slug for lookup. Returns `None` when
+/// the slug is empty or whitespace-only, so the caller reports a missing
+/// value instead of a failed lookup.
+//
+// Stored slugs are lowercase by construction (`migration::slug::slugify`), and
+// SQLite compares TEXT with BINARY collation, so the lowercasing is what
+// makes the documented "case-insensitive" contract true. The blank guard
+// keeps the diagnostic honest: `"no recipe with slug ''"` describes a
+// typo, and a blank slug is a missing value.
+pub(super) fn normalize_slug(raw: &str) -> Option<String> {
+    let key = slug_key(raw);
+    (!key.is_empty()).then_some(key)
+}
+
+// The one slug normalization: `normalize_slug` and every `recipe_id_by_slug`
+// key go through it, so a lookup and the table it probes cannot disagree.
+fn slug_key(raw: &str) -> String {
+    raw.trim().to_lowercase()
+}
 
 /// Lookup tables built once per meal tool call.
 pub(super) struct MealLookups {
@@ -35,13 +56,13 @@ impl MealLookups {
         let person_id_by_name = warn_and_collect_unambiguous(
             people
                 .iter()
-                .map(|(id, name)| (name.trim().to_lowercase(), id.clone())),
+                .map(|(id, name)| (person_name_key(name), id.clone())),
             "person_name",
         );
         let recipe_id_by_slug = warn_and_collect_unambiguous(
             recipes
                 .iter()
-                .map(|(id, slug, _name)| (slug.trim().to_lowercase(), id.clone())),
+                .map(|(id, slug, _name)| (slug_key(slug), id.clone())),
             "recipe_slug",
         );
         let person_names = people.into_iter().collect();
@@ -64,13 +85,11 @@ impl MealLookups {
         let person_id_by_name = warn_and_collect_unambiguous(
             people
                 .iter()
-                .map(|p| (p.name.trim().to_lowercase(), p.id.clone())),
+                .map(|p| (person_name_key(&p.name), p.id.clone())),
             "person_name",
         );
         let recipe_id_by_slug = warn_and_collect_unambiguous(
-            recipes
-                .iter()
-                .map(|r| (r.slug.trim().to_lowercase(), r.id.clone())),
+            recipes.iter().map(|r| (slug_key(&r.slug), r.id.clone())),
             "recipe_slug",
         );
         let person_names = people.into_iter().map(|p| (p.id, p.name)).collect();
@@ -104,7 +123,7 @@ impl MealLookups {
     /// to its UUID, or `None` if no active family member matches.
     pub(super) fn person_id_for_name(&self, name: &str) -> Option<&str> {
         self.person_id_by_name
-            .get(name.trim().to_lowercase().as_str())
+            .get(person_name_key(name).as_str())
             .map(String::as_str)
     }
 
@@ -112,7 +131,7 @@ impl MealLookups {
     /// or `None` if no recipe matches.
     pub(super) fn recipe_id_for_slug(&self, slug: &str) -> Option<&str> {
         self.recipe_id_by_slug
-            .get(slug.trim().to_lowercase().as_str())
+            .get(slug_key(slug).as_str())
             .map(String::as_str)
     }
 }
@@ -193,6 +212,18 @@ mod tests {
         assert_eq!(l.recipe_id_for_slug("Carbonara"), Some("r1"));
         assert_eq!(l.recipe_id_for_slug("carbonara"), Some("r1"));
         assert_eq!(l.recipe_id_for_slug("ghost"), None);
+    }
+
+    #[test]
+    fn normalize_slug_trims_lowercases_and_rejects_blanks() {
+        assert_eq!(
+            super::normalize_slug("  Carbonara "),
+            Some("carbonara".to_string())
+        );
+        for blank in ["", "   ", "\t\n"] {
+            assert_eq!(super::normalize_slug(blank), None, "{blank:?}");
+        }
+        assert_eq!(mk_lookups().recipe_id_for_slug("  CARBONARA "), Some("r1"));
     }
 
     #[test]

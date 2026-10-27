@@ -20,6 +20,12 @@ pub fn normalize_tags(tags: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+/// The key two people's names are compared by: trimmed and lowercased. An
+/// empty key means the name was blank.
+pub fn person_name_key(name: &str) -> String {
+    name.trim().to_lowercase()
+}
+
 /// Trim `name`, rejecting it when nothing but whitespace remains.
 ///
 /// # Errors
@@ -167,6 +173,12 @@ mod tests {
             or_alternative: Some(Box::new(alternative)),
             ..named(name)
         }
+    }
+
+    #[test]
+    fn person_name_key_trims_and_lowercases() {
+        assert_eq!(person_name_key("  Alice\t"), "alice");
+        assert_eq!(person_name_key(" \n"), "");
     }
 
     #[test]

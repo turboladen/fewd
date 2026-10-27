@@ -892,6 +892,56 @@ describe('RecipeForm', () => {
     ).toBeInTheDocument()
   })
 
+  it('blocks the save and announces it when the name is only whitespace', () => {
+    const onSubmit = vi.fn()
+    render(
+      <RecipeForm
+        initialData={{
+          name: '  \t',
+          description: '',
+          servings: 4,
+          instructions: 'Blend',
+          ingredients: [row('basil')],
+          tags: [],
+          notes: '',
+          icon: '',
+        }}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+        submitLabel='Save'
+      />,
+    )
+    fireEvent.submit(screen.getByRole('button', { name: 'Save' }).closest('form')!)
+
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent('Name cannot be blank.')
+  })
+
+  it('blocks the save when the instructions are only whitespace', () => {
+    const onSubmit = vi.fn()
+    render(
+      <RecipeForm
+        initialData={{
+          name: 'Pesto',
+          description: '',
+          servings: 4,
+          instructions: '  \n\t',
+          ingredients: [row('basil')],
+          tags: [],
+          notes: '',
+          icon: '',
+        }}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+        submitLabel='Save'
+      />,
+    )
+    fireEvent.submit(screen.getByRole('button', { name: 'Save' }).closest('form')!)
+
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(screen.getByText('Instructions cannot be blank. Add the steps.')).toBeInTheDocument()
+  })
+
   it('drops a row whose amount the user cleared and saves the rest', () => {
     const onSubmit = renderForm([row('garlic'), row('', { amount: { type: 'single', value: 0 } })])
 

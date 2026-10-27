@@ -19,6 +19,7 @@ use serde::Serialize;
 
 use crate::entities::person;
 use crate::services::meal_service::MealService;
+use crate::services::normalize::person_name_key;
 use crate::services::person_service::PersonService;
 use crate::services::printable_service::{self, PersonNameMap};
 use crate::services::recipe_import_service::{ImportError, RecipeImportService};
@@ -28,7 +29,7 @@ use crate::services::service_error::ServiceError;
 use crate::services::settings_service::SettingsService;
 use crate::services::shopping_service::ShoppingService;
 
-use super::lookups::MealLookups;
+use super::lookups::{normalize_slug, MealLookups};
 use super::schemas::errors::{variant_error_message, InputError, ResolveError};
 use super::schemas::{
     adapt_recipe_input_to_spec, create_meal_input_to_dto, create_recipe_input_to_dto,
@@ -129,7 +130,7 @@ impl FewdMcp {
             Ok(v) => v,
             Err(e) => return Ok(e),
         };
-        if let Err(msg) = params.validate_has_filter() {
+        if let Err(msg) = params.validate() {
             return Ok(tool_user_error(msg));
         }
 
@@ -230,7 +231,7 @@ impl FewdMcp {
             Ok(v) => v,
             Err(e) => return Ok(e),
         };
-        let recipe = match self.resolve_recipe_by_slug(&params.slug).await? {
+        let recipe = match self.resolve_recipe_by_slug("slug", &params.slug).await? {
             Ok(recipe) => recipe,
             Err(e) => return Ok(e),
         };
@@ -241,21 +242,23 @@ impl FewdMcp {
     }
 
     /// Load the recipe a slug-addressed tool call names, normalizing case
-    /// and surrounding whitespace first. The outer `Err` is a protocol-level
-    /// database failure; the inner `Err` is a tool-level message for the LLM
-    /// — a blank slug, or one that matches no recipe. Callers match on the
-    /// inner result and return it as-is, the same early-return shape
+    /// and surrounding whitespace first. `field` names the input in the
+    /// blank-slug error. The outer `Err` is a protocol-level database
+    /// failure; the inner `Err` is a tool-level message for the LLM — a
+    /// blank slug, or one that matches no recipe. Callers match on the inner
+    /// result and return it as-is, the same early-return shape
     /// `LenientParameters::into_tool_input` uses.
     //
     // The not-found message quotes the raw slug rather than the normalized
     // one, so the LLM sees back the exact string it sent.
     async fn resolve_recipe_by_slug(
         &self,
+        field: &'static str,
         raw_slug: &str,
     ) -> Result<Result<crate::entities::recipe::Model, CallToolResult>, McpError> {
         let Some(normalized) = normalize_slug(raw_slug) else {
             return Ok(Err(tool_user_error(
-                InputError::EmptyField("slug").to_string(),
+                InputError::EmptyField(field).to_string(),
             )));
         };
         let found = RecipeService::get_by_slug(&self.db, normalized)
@@ -331,16 +334,11 @@ impl FewdMcp {
             Ok(v) => v,
             Err(e) => return Ok(e),
         };
-        // Validate empty / whitespace-only `name` at input time rather
-        // than letting it route through `find_active_by_name → Ok(None)
-        // → "no active family member named ''. Call list_people …"`,
-        // which is technically actionable but semantically misleading
-        // (the problem is a missing value, not a typo'd name). Matches
-        // the precedent set by `create_recipe_input_to_dto` for empty
-        // recipe names. `create_meal` / `search_recipes`' person lookups
-        // share the same latent issue and would benefit from the same
-        // treatment — tracked as a follow-up bead.
-        if input.name.trim().is_empty() {
+        // A blank `name` is a missing value, not a typo, so it is rejected
+        // here instead of reaching `find_active_by_name`, whose `Ok(None)`
+        // would send the LLM to `list_people`. `create_meal` and
+        // `search_recipes` reject blank person names the same way.
+        if person_name_key(&input.name).is_empty() {
             return Ok(tool_user_error(InputError::EmptyField("name").to_string()));
         }
         // `find_active_by_name` is the same case-insensitive resolver
@@ -581,19 +579,15 @@ impl FewdMcp {
             Ok(v) => v,
             Err(e) => return Ok(e),
         };
-        // `resolve_recipe_by_slug` reports a blank slug as `slug`, which is not
-        // the field this tool takes, so the blank case is caught here first.
-        if normalize_slug(&input.parent_recipe_slug).is_none() {
-            return Ok(tool_user_error(
-                InputError::EmptyField("parent_recipe_slug").to_string(),
-            ));
-        }
         let parent_slug = input.parent_recipe_slug.clone();
         let spec = match adapt_recipe_input_to_spec(input) {
             Ok(spec) => spec,
             Err(e) => return Ok(tool_user_error(e.to_string())),
         };
-        let parent = match self.resolve_recipe_by_slug(&parent_slug).await? {
+        let parent = match self
+            .resolve_recipe_by_slug("parent_recipe_slug", &parent_slug)
+            .await?
+        {
             Ok(recipe) => recipe,
             Err(e) => return Ok(e),
         };
@@ -636,7 +630,7 @@ impl FewdMcp {
             Ok(dto) => dto,
             Err(e) => return Ok(tool_user_error(e.to_string())),
         };
-        let existing = match self.resolve_recipe_by_slug(&slug).await? {
+        let existing = match self.resolve_recipe_by_slug("slug", &slug).await? {
             Ok(recipe) => recipe,
             Err(e) => return Ok(e),
         };
@@ -662,7 +656,7 @@ impl FewdMcp {
             Ok(v) => v,
             Err(e) => return Ok(e),
         };
-        let existing = match self.resolve_recipe_by_slug(&input.slug).await? {
+        let existing = match self.resolve_recipe_by_slug("slug", &input.slug).await? {
             Ok(recipe) => recipe,
             Err(e) => return Ok(e),
         };
@@ -692,7 +686,7 @@ impl FewdMcp {
             Ok(v) => v,
             Err(e) => return Ok(e),
         };
-        let existing = match self.resolve_recipe_by_slug(&input.slug).await? {
+        let existing = match self.resolve_recipe_by_slug("slug", &input.slug).await? {
             Ok(recipe) => recipe,
             Err(e) => return Ok(e),
         };
@@ -722,7 +716,7 @@ impl FewdMcp {
             Ok(v) => v,
             Err(e) => return Ok(e),
         };
-        let existing = match self.resolve_recipe_by_slug(&input.slug).await? {
+        let existing = match self.resolve_recipe_by_slug("slug", &input.slug).await? {
             Ok(recipe) => recipe,
             Err(e) => return Ok(e),
         };
@@ -1085,23 +1079,6 @@ fn internal_error(detail: String) -> McpError {
 /// dropped, so they're reserved for transport / internal failures.
 fn tool_user_error(message: impl Into<String>) -> CallToolResult {
     CallToolResult::error(vec![ContentBlock::text(message.into())])
-}
-
-/// Normalize a caller-supplied recipe slug for lookup. Returns `None` when
-/// the slug is empty or whitespace-only, so the caller reports a missing
-/// value instead of a failed lookup.
-//
-// Stored slugs are lowercase by construction (`migration::slug::slugify`), and
-// SQLite compares TEXT with BINARY collation, so the lowercasing is what
-// makes the documented "case-insensitive" contract true. The blank guard
-// keeps the diagnostic honest: `"no recipe with slug ''"` describes a
-// typo, and a blank slug is a missing value.
-fn normalize_slug(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_lowercase())
 }
 
 /// Reject a list-returning tool call when the pre-conversion row count
@@ -1988,6 +1965,108 @@ mod tests {
         assert_tool_user_error(result, &["Bob", "list_people"]);
     }
 
+    // Send `servings` to `create_meal` on 2026-01-01 and return the result
+    // with the number of meals stored on that date afterwards.
+    async fn create_meal_with(
+        mcp: &FewdMcp,
+        servings: serde_json::Value,
+    ) -> (Result<CallToolResult, McpError>, usize) {
+        let args = args_with(&[
+            ("date", serde_json::json!("2026-01-01")),
+            ("meal_type", serde_json::json!("Dinner")),
+            ("servings", servings),
+        ]);
+        let result = mcp
+            .create_meal(LenientParameters::<CreateMealInput>::extract(args))
+            .await;
+        let stored = MealService::get_all_for_date_range(
+            &mcp.db,
+            "2026-01-01".to_string(),
+            "2026-01-01".to_string(),
+        )
+        .await
+        .expect("read meals back")
+        .len();
+        (result, stored)
+    }
+
+    #[tokio::test]
+    async fn create_meal_blank_person_name_returns_input_error_not_unknown_person() {
+        // A blank name is a missing value, so the error must say so rather
+        // than send the caller to `list_people` hunting for a typo.
+        let mcp = setup_test_mcp().await;
+        seed_person(&mcp, "Alice").await;
+        let recipe = seed_recipe(&mcp, "Carbonara").await;
+        for blank in ["", "   "] {
+            for serving in [
+                serde_json::json!({"kind": "recipe", "person_name": blank,
+                    "recipe_slug": recipe.slug, "servings_count": 1.0}),
+                serde_json::json!({"kind": "adhoc", "person_name": blank, "items": []}),
+            ] {
+                let (result, stored) = create_meal_with(&mcp, serde_json::json!([serving])).await;
+                let text = serde_json::to_string(&result).unwrap_or_default();
+                assert!(
+                    !text.contains("no active family member"),
+                    "{blank:?}: {text}"
+                );
+                assert_tool_user_error(result, &["serving #1: person_name must not be empty"]);
+                assert_eq!(stored, 0, "{blank:?} saves nothing");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn create_meal_blank_recipe_slug_returns_input_error_not_unknown_recipe() {
+        let mcp = setup_test_mcp().await;
+        seed_person(&mcp, "Alice").await;
+        let recipe = seed_recipe(&mcp, "Carbonara").await;
+        for blank in ["", "   "] {
+            let servings = serde_json::json!([
+                {"kind": "recipe", "person_name": "Alice", "recipe_slug": recipe.slug,
+                    "servings_count": 1.0},
+                {"kind": "recipe", "person_name": "Alice", "recipe_slug": blank,
+                    "servings_count": 1.0},
+            ]);
+            let (result, stored) = create_meal_with(&mcp, servings).await;
+            let text = serde_json::to_string(&result).unwrap_or_default();
+            assert!(!text.contains("no recipe with slug"), "{blank:?}: {text}");
+            assert_tool_user_error(result, &["serving #2: recipe_slug must not be empty"]);
+            assert_eq!(stored, 0, "{blank:?} saves nothing");
+        }
+    }
+
+    #[tokio::test]
+    async fn search_recipes_blank_excluded_person_returns_input_error() {
+        // Both shapes name the blank entry: alone, it is still a filter the
+        // caller sent, and beside a real name it is not a typo.
+        let mcp = setup_test_mcp().await;
+        seed_person(&mcp, "Alice").await;
+        for (args, entry) in [
+            (
+                args_with(&[("excludes_for_persons", serde_json::json!(["  "]))]),
+                "entry #1",
+            ),
+            (
+                args_with(&[
+                    ("tags", serde_json::json!(["dinner"])),
+                    ("excludes_for_persons", serde_json::json!(["Alice", "  "])),
+                ]),
+                "entry #2",
+            ),
+        ] {
+            let result = mcp
+                .search_recipes(LenientParameters::<SearchRecipesParams>::extract(args))
+                .await;
+            let text = serde_json::to_string(&result).unwrap_or_default();
+            assert!(!text.contains("requires at least one filter"), "{text}");
+            assert!(!text.contains("no active family member"), "{text}");
+            assert_tool_user_error(
+                result,
+                &[&format!("excludes_for_persons {entry} must not be empty")],
+            );
+        }
+    }
+
     use crate::dto::{
         CreateRecipeDto, IngredientAmountDto, IngredientDto, NutritionDto, TimeValueDto,
     };
@@ -2743,6 +2822,49 @@ mod tests {
         )))
         .await
         .expect("update_recipe returns Ok")
+    }
+
+    #[tokio::test]
+    async fn a_stored_blank_reads_as_null_so_echoing_get_recipe_back_succeeds() {
+        // HTTP writes store a blank string verbatim, and `update_recipe`
+        // rejects one, so `get_recipe` must not hand a blank back.
+        use super::super::schemas::GetRecipeParams;
+
+        let mcp = setup_test_mcp().await;
+        let seeded = RecipeService::create(
+            &mcp.db,
+            CreateRecipeDto {
+                description: Some("  ".into()),
+                notes: Some(String::new()),
+                icon: Some("\t".into()),
+                ..bare_recipe_dto("Blank Fields")
+            },
+        )
+        .await
+        .expect("seed recipe");
+
+        let read = mcp
+            .get_recipe(LenientParameters::for_test(GetRecipeParams {
+                slug: seeded.slug.clone(),
+            }))
+            .await
+            .expect("get_recipe returns Ok");
+        let full = tool_result_json(&read);
+        for field in ["description", "notes", "icon"] {
+            assert!(full[field].is_null(), "{field}: {full}");
+        }
+
+        let echoed = update_with(
+            &mcp,
+            serde_json::json!({
+                "slug": seeded.slug,
+                "description": full["description"],
+                "notes": full["notes"],
+                "icon": full["icon"],
+            }),
+        )
+        .await;
+        assert_ne!(echoed.is_error, Some(true), "{echoed:?}");
     }
 
     #[tokio::test]
@@ -4742,6 +4864,22 @@ mod tests {
             let added = ingredients.last().expect("an added ingredient");
             assert_eq!(added["name"], "garlic");
             assert_eq!(added["prep"], "minced");
+        }
+
+        #[tokio::test]
+        async fn input_errors_are_reported_before_a_blank_parent_slug() {
+            // The parent is looked up only after the rest of the input
+            // validates, as `update_recipe` does.
+            let mcp = setup_test_mcp().await;
+            let args = spicy_with(json!({
+                "parent_recipe_slug": "  ",
+                "ingredient_changes": null,
+                "instruction_edits": null,
+            }));
+            assert_tool_user_error(
+                adapt(&mcp, args).await,
+                &["needs at least one ingredient_changes"],
+            );
         }
 
         #[tokio::test]

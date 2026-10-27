@@ -132,6 +132,14 @@ Expect: tool-level error listing every accepted filter. The error message is the
 
 Expect: tool-level error mentioning the unknown name AND pointing at `list_people`.
 
+**Error path — blank person:**
+
+```json
+{ "tags": ["dinner"], "excludes_for_persons": ["Alice", "  "] }
+```
+
+Expect: tool-level error saying `excludes_for_persons entry #2` must not be empty. `{ "excludes_for_persons": ["  "] }` alone gets the same error for entry #1, not "requires at least one filter".
+
 **Error path — wildcard-only query:**
 
 ```json
@@ -682,6 +690,8 @@ Expect: tool-level error listing the canonical types (Breakfast, Lunch, Dinner, 
 ```
 
 Expect: tool-level error mentioning the unknown name AND pointing at `list_people`.
+
+**Error path — blank person or slug:** the same call with `"person_name": "  "` returns `serving #1: person_name must not be empty or whitespace-only`, and with a blank `recipe_slug` it returns `serving #1: recipe_slug must not be empty or whitespace-only`. Each names the missing field, so the caller fills it in rather than correcting a typo; the person error still points at `list_people` for valid names.
 
 ## When to upgrade a scenario to an automated test
 

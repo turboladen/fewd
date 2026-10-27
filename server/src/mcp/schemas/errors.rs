@@ -98,6 +98,13 @@ pub enum InputError {
     /// An `adapt_recipe` ingredient change, numbered from 1, names no
     /// ingredient to replace or remove.
     EmptyIngredientChangeName(usize),
+    /// A `create_meal` serving, numbered from 1, has a blank `person_name`.
+    EmptyServingPersonName(usize),
+    /// A `create_meal` serving, numbered from 1, has a blank `recipe_slug`.
+    EmptyServingRecipeSlug(usize),
+    /// A `search_recipes` `excludes_for_persons` entry, numbered from 1, is
+    /// blank.
+    EmptyExcludedPerson(usize),
     /// An ingredient or ad-hoc item has a blank name. `location` numbers the
     /// entry from 1, such as `ingredient #2` or `serving #1 item #3`, and
     /// `field` is the blank field within it, such as `or_alternative.name`.
@@ -176,6 +183,18 @@ impl std::fmt::Display for InputError {
             Self::EmptyIngredientChangeName(number) => write!(
                 f,
                 "ingredient change #{number}: name must not be empty or whitespace-only. Give the whole name of the ingredient to replace or remove, as get_recipe shows it."
+            ),
+            Self::EmptyServingPersonName(number) => write!(
+                f,
+                "serving #{number}: person_name must not be empty or whitespace-only. Call list_people for valid names."
+            ),
+            Self::EmptyServingRecipeSlug(number) => write!(
+                f,
+                "serving #{number}: recipe_slug must not be empty or whitespace-only. Call list_curated_recipes or search_recipes for a slug."
+            ),
+            Self::EmptyExcludedPerson(number) => write!(
+                f,
+                "excludes_for_persons entry #{number} must not be empty or whitespace-only. Remove it, or use a name from list_people."
             ),
             Self::EmptyIngredientName { location, field } => write!(
                 f,
