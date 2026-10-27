@@ -22,6 +22,7 @@ mod m20260523_000017_rename_recipe_planning_fields;
 mod m20260605_000018_normalize_meal_types;
 mod m20260607_000019_add_recipe_total_minutes;
 mod m20261026_000020_trim_names_and_drop_blank_ingredients;
+mod m20261026_000021_backfill_blank_recipe_instructions;
 pub mod paren_notes;
 pub mod slug;
 pub mod total_minutes;
@@ -60,6 +61,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260605_000018_normalize_meal_types::Migration),
             Box::new(m20260607_000019_add_recipe_total_minutes::Migration),
             Box::new(m20261026_000020_trim_names_and_drop_blank_ingredients::Migration),
+            Box::new(m20261026_000021_backfill_blank_recipe_instructions::Migration),
         ]
     }
 }

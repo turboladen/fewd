@@ -129,6 +129,9 @@ pub enum VariantError {
         find: String,
         count: usize,
     },
+    /// The variant's instructions would be empty or whitespace-only, which
+    /// create rejects.
+    EmptyInstructions,
     /// The parent's stored JSON does not parse. This is a server-side fault,
     /// not something the caller can correct.
     MalformedParent(String),
@@ -214,6 +217,7 @@ impl std::fmt::Display for VariantError {
                 f,
                 "instruction edit #{number}: '{find}' occurs {count} times in the instructions. The text to find must match exactly once, so include more of the surrounding text, or send the full instructions instead."
             ),
+            Self::EmptyInstructions => write!(f, "the variant would have no instructions."),
             Self::MalformedParent(detail) => {
                 write!(f, "the parent recipe has malformed stored data: {detail}")
             }
@@ -238,9 +242,9 @@ impl std::fmt::Display for VariantError {
 ///
 /// # Errors
 ///
-/// Returns a [`VariantError`] when a change does not apply or when the
-/// parent's stored JSON is malformed. Nothing is built unless every change
-/// applies.
+/// Returns a [`VariantError`] when a change does not apply, when the
+/// variant's instructions would be blank, or when the parent's stored JSON is
+/// malformed. Nothing is built unless every change applies.
 //
 // Dropping rather than rejecting keeps the parent untouched: the only fix a
 // rejection could suggest is editing the parent, which is exactly what
@@ -268,6 +272,9 @@ pub fn build_variant_dto(
             apply_instruction_edits(&parent.instructions, &edits)?
         }
     };
+    if instructions.trim().is_empty() {
+        return Err(VariantError::EmptyInstructions);
+    }
 
     let nutrition_per_serving = if ingredients_changed {
         None
@@ -1156,6 +1163,53 @@ mod tests {
             .expect("builds");
             assert_eq!(dto.instructions, "Boil.\r\nServe.");
         }
+    }
+
+    #[test]
+    fn blank_variant_instructions_are_rejected() {
+        let blank_parent = recipe::Model {
+            instructions: " \n".into(),
+            ..parent()
+        };
+        let emptied = recipe::Model {
+            instructions: "Boil.".into(),
+            ..parent()
+        };
+        for (parent, change) in [
+            (&blank_parent, None),
+            (&blank_parent, Some(InstructionChange::Edits(vec![]))),
+            (
+                &emptied,
+                Some(InstructionChange::Edits(vec![edit("Boil.", " ")])),
+            ),
+        ] {
+            let err = build_variant_dto(
+                parent,
+                VariantSpec {
+                    instruction_change: change,
+                    ..spec()
+                },
+            )
+            .expect_err("a blank variant is not built");
+            assert!(matches!(err, VariantError::EmptyInstructions), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn replacement_instructions_rescue_a_blank_parent() {
+        let parent = recipe::Model {
+            instructions: String::new(),
+            ..parent()
+        };
+        let dto = build_variant_dto(
+            &parent,
+            VariantSpec {
+                instruction_change: Some(InstructionChange::Replace("Boil.".into())),
+                ..spec()
+            },
+        )
+        .expect("builds");
+        assert_eq!(dto.instructions, "Boil.");
     }
 
     #[test]

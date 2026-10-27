@@ -244,7 +244,8 @@ pub struct CreateRecipeInput {
     pub servings: i32,
     #[serde(default)]
     pub portion_size: Option<PortionSizeOut>,
-    /// Full preparation instructions. Markdown is fine.
+    /// Full preparation instructions. Markdown is fine. A blank value is
+    /// rejected.
     pub instructions: String,
     pub ingredients: Vec<IngredientOut>,
     #[serde(default)]
@@ -387,12 +388,13 @@ pub struct UnrateRecipeInput {
     pub slug: String,
 }
 
-/// Input for the `update_recipe` MCP tool.
+/// Input for the `update_recipe` MCP tool. Omit a field to leave it
+/// unchanged. Null clears `description`, `notes`, `icon`, `portion_size`, and
+/// each time, so never send null to mean "keep it".
 //
-// Blank optional strings pass through `blank_to_none`, so a blank value
-// means no change. A blank `name` instead mirrors
-// `create_recipe_input_to_dto`'s rejection, so create and update agree on
-// what a valid recipe name is.
+// The clearable fields take `crate::dto::nullable`, the helper HTTP PUT uses,
+// so absent, null, and a value stay three distinct states. schemars renders
+// them exactly like a plain `Option<T>`: nullable and not required.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateRecipeInput {
@@ -400,23 +402,30 @@ pub struct UpdateRecipeInput {
     /// `search_recipes` or `get_recipe` first to find it. A blank slug is
     /// rejected.
     pub slug: String,
-    /// New display name. A blank value is rejected. Renaming does NOT change
-    /// the slug, so keep using the original slug afterwards.
+    /// New display name. A blank value is rejected, and null leaves the name
+    /// unchanged. Renaming does NOT change the slug, so keep using the
+    /// original slug afterwards.
     #[serde(default)]
     pub name: Option<String>,
-    /// Replaces the description. A blank value is ignored.
-    #[serde(default)]
-    pub description: Option<String>,
+    /// Replaces the description. Send null to clear it. A blank value is
+    /// rejected.
+    #[serde(default, deserialize_with = "crate::dto::nullable")]
+    pub description: Option<Option<String>>,
     /// Hands-on time. The `unit` must be minutes, hours, or days (singular,
     /// plural, or the "min" / "hr" / "d" abbreviations) and is stored in its
     /// plural form. Any other unit rejects the whole call, writing nothing.
-    /// A value equal to the stored duration is ignored.
-    #[serde(default)]
-    pub prep_time: Option<TimeOut>,
-    /// Time on the heat. Same `unit` vocabulary as `prep_time`.
-    #[serde(default)]
-    pub cook_time: Option<TimeOut>,
-    /// Sets a new total time; omit it otherwise. Changing `prep_time` or
+    /// A value equal to the stored duration is ignored. Send null to clear
+    /// it; clearing a time never moves the stored total.
+    #[serde(default, deserialize_with = "crate::dto::nullable")]
+    pub prep_time: Option<Option<TimeOut>>,
+    /// Time on the heat. Same `unit` vocabulary and null clear as
+    /// `prep_time`.
+    #[serde(default, deserialize_with = "crate::dto::nullable")]
+    pub cook_time: Option<Option<TimeOut>>,
+    /// Sets a new total time; omit it otherwise. Send null to clear a stored
+    /// total, which drops the recipe from every `max_total_time_minutes`
+    /// search. When no total is stored, null is no change, so a `prep_time`
+    /// or `cook_time` sent with it still derives one. Changing `prep_time` or
     /// `cook_time` shifts the stored total by the same amount, so resting or
     /// marinating time survives without this field. A phase the recipe had
     /// no value for is assumed to fit inside the stored total and does not
@@ -430,11 +439,12 @@ pub struct UpdateRecipeInput {
     /// This is the duration `search_recipes`' `max_total_time_minutes`
     /// filter compares, and it takes the same `unit` vocabulary as
     /// `prep_time`.
-    #[serde(default)]
-    pub total_time: Option<TimeOut>,
-    /// Servings the recipe is authored for. Must be at least 1. A new count
-    /// sent without `ingredients` rescales every stored amount, alternatives
-    /// included, by the ratio of new to old servings. Scaled amounts round to
+    #[serde(default, deserialize_with = "crate::dto::nullable")]
+    pub total_time: Option<Option<TimeOut>>,
+    /// Servings the recipe is authored for. Must be at least 1, and null
+    /// leaves the count unchanged. A new count sent without `ingredients`
+    /// rescales every stored amount, alternatives included, by the ratio of
+    /// new to old servings. Scaled amounts round to
     /// two decimals, and a discrete count such as eggs can come out
     /// fractional, so check the returned `ingredients`. Send `ingredients` in
     /// the same call to set the amounts yourself; nothing is rescaled then.
@@ -443,33 +453,38 @@ pub struct UpdateRecipeInput {
     #[serde(default)]
     pub servings: Option<i32>,
     /// How big one serving is, as a `{value, unit}` pair — e.g.
-    /// `{"value": 1.5, "unit": "cup"}`. Replaces the stored pair whole.
-    #[serde(default)]
-    pub portion_size: Option<PortionSizeOut>,
+    /// `{"value": 1.5, "unit": "cup"}`. Replaces the stored pair whole. Send
+    /// null to clear it.
+    #[serde(default, deserialize_with = "crate::dto::nullable")]
+    pub portion_size: Option<Option<PortionSizeOut>>,
     /// Replaces the full instruction text rather than appending to it.
-    /// A blank value is ignored, so there is no way to erase the steps.
+    /// Instructions cannot be cleared, so a blank value is rejected and null
+    /// leaves them unchanged.
     #[serde(default)]
     pub instructions: Option<String>,
     /// Replaces the whole ingredient list — this is not a merge. Omitted
     /// ingredients are deleted, so read the current list with `get_recipe`
-    /// and send it back complete. `[]` clears the list.
+    /// and send it back complete. `[]` clears the list, and null leaves it
+    /// unchanged.
     #[serde(default)]
     pub ingredients: Option<Vec<IngredientOut>>,
     /// Replaces the whole nutrition block. Every field inside it is
     /// independently optional, so sending `{"calories": 500}` alone nulls
-    /// protein, carbs, fat, and notes.
+    /// protein, carbs, fat, and notes. Null leaves the block unchanged.
     #[serde(default)]
     pub nutrition_per_serving: Option<NutritionOut>,
-    /// Replaces the whole tag list. `[]` clears it.
+    /// Replaces the whole tag list. `[]` clears it, and null leaves it
+    /// unchanged.
     #[serde(default)]
     pub tags: Option<Vec<String>>,
-    /// Replaces the notes. A blank value is ignored.
-    #[serde(default)]
-    pub notes: Option<String>,
-    /// Emoji / icon character displayed next to the recipe. A blank value is
-    /// ignored.
-    #[serde(default)]
-    pub icon: Option<String>,
+    /// Replaces the notes. Send null to clear them. A blank value is
+    /// rejected.
+    #[serde(default, deserialize_with = "crate::dto::nullable")]
+    pub notes: Option<Option<String>>,
+    /// Emoji / icon character displayed next to the recipe. Send null to
+    /// clear it. A blank value is rejected.
+    #[serde(default, deserialize_with = "crate::dto::nullable")]
+    pub icon: Option<Option<String>>,
 }
 
 // Number each ingredient from 1, so a blank name is reported by position.
@@ -491,15 +506,20 @@ pub fn create_recipe_input_to_dto(
     parent_recipe_id: Option<String>,
 ) -> Result<CreateRecipeDto, InputError> {
     if input.name.trim().is_empty() {
-        return Err(InputError::EmptyName("name"));
+        return Err(InputError::EmptyField("name"));
     }
     if input.servings < 1 {
         return Err(InputError::NonPositiveServings(input.servings));
     }
+    if input.instructions.trim().is_empty() {
+        return Err(InputError::EmptyField("instructions"));
+    }
 
+    // A blank optional string means absent, so create never stores a value
+    // that `update_recipe` would refuse to take back.
     Ok(CreateRecipeDto {
         name: input.name,
-        description: input.description,
+        description: blank_to_none(input.description),
         source: input.source,
         source_url: input.source_url,
         parent_recipe_id,
@@ -512,8 +532,8 @@ pub fn create_recipe_input_to_dto(
         ingredients: ingredients_in(input.ingredients)?,
         nutrition_per_serving: input.nutrition_per_serving.map(nutrition_in),
         tags: input.tags,
-        notes: input.notes,
-        icon: input.icon,
+        notes: blank_to_none(input.notes),
+        icon: blank_to_none(input.icon),
     })
 }
 
@@ -642,7 +662,7 @@ pub fn adapt_recipe_input_to_spec(input: AdaptRecipeInput) -> Result<VariantSpec
     let ingredient_changes = input.ingredient_changes.unwrap_or_default();
     let instruction_edits = input.instruction_edits.unwrap_or_default();
     if input.name.trim().is_empty() {
-        return Err(InputError::EmptyName("name"));
+        return Err(InputError::EmptyField("name"));
     }
     if both_instruction_forms {
         return Err(InputError::ConflictingInstructionChanges);
@@ -652,7 +672,7 @@ pub fn adapt_recipe_input_to_spec(input: AdaptRecipeInput) -> Result<VariantSpec
         .as_deref()
         .is_some_and(|text| text.trim().is_empty())
     {
-        return Err(InputError::EmptyName("instructions"));
+        return Err(InputError::BlankUnclearableField("instructions"));
     }
     if ingredient_changes.is_empty() && input.instructions.is_none() && instruction_edits.is_empty()
     {
@@ -750,42 +770,60 @@ fn ingredient_change_in(
 /// The field docs on [`UpdateRecipeInput`] state the clear semantics this
 /// enforces.
 pub fn update_recipe_input_to_dto(input: UpdateRecipeInput) -> Result<UpdateRecipeDto, InputError> {
-    // `name` and `servings` get exactly the checks
+    // `name`, `servings`, and `instructions` get exactly the checks
     // `create_recipe_input_to_dto` applies, so a value create would reject
     // can't reach the row through update instead.
     if input.name.as_deref().is_some_and(|n| n.trim().is_empty()) {
-        return Err(InputError::EmptyName("name"));
+        return Err(InputError::EmptyField("name"));
     }
     if let Some(servings) = input.servings {
         if servings < 1 {
             return Err(InputError::NonPositiveServings(servings));
         }
     }
+    if input
+        .instructions
+        .as_deref()
+        .is_some_and(|text| text.trim().is_empty())
+    {
+        return Err(InputError::BlankUnclearableField("instructions"));
+    }
+    // A blank string here is most likely an attempt to clear the field, so
+    // the error points at null rather than storing "" or ignoring it.
+    for (field, value) in [
+        ("description", &input.description),
+        ("notes", &input.notes),
+        ("icon", &input.icon),
+    ] {
+        if value
+            .as_ref()
+            .and_then(Option::as_deref)
+            .is_some_and(|text| text.trim().is_empty())
+        {
+            return Err(InputError::BlankClearableField(field));
+        }
+    }
 
-    // The remaining string fields have no create-side rule to mirror, so
-    // they take the `update_person` treatment instead: empty means "no
-    // change", never "clear". `blank_to_none` carries the rationale.
-    //
     // Written as an explicit literal rather than `..Default::default()`:
     // a field added to UpdateRecipeDto later must be categorized here
     // instead of silently defaulting to "leave unchanged".
     Ok(UpdateRecipeDto {
         name: input.name,
-        description: blank_to_none(input.description).map(Some),
-        prep_time: input.prep_time.map(|t| Some(time_in(t))),
-        cook_time: input.cook_time.map(|t| Some(time_in(t))),
-        total_time: input.total_time.map(|t| Some(time_in(t))),
+        description: input.description,
+        prep_time: input.prep_time.map(|t| t.map(time_in)),
+        cook_time: input.cook_time.map(|t| t.map(time_in)),
+        total_time: input.total_time.map(|t| t.map(time_in)),
         servings: input.servings,
-        portion_size: input.portion_size.map(|p| Some(portion_in(p))),
-        instructions: blank_to_none(input.instructions),
+        portion_size: input.portion_size.map(|p| p.map(portion_in)),
+        instructions: input.instructions,
         // `ingredient_in` runs the comma'd-name splitter, exactly as on
         // create — skipping it would let "garlic, minced" land as one
         // ingredient name and fragment shopping aggregation.
         ingredients: input.ingredients.map(ingredients_in).transpose()?,
         nutrition_per_serving: input.nutrition_per_serving.map(nutrition_in),
         tags: input.tags,
-        notes: blank_to_none(input.notes).map(Some),
-        icon: blank_to_none(input.icon).map(Some),
+        notes: input.notes,
+        icon: input.icon,
         // Owned by fewd-3w3 (favorite_recipe) and fewd-no0 (rate_recipe).
         is_favorite: None,
         rating: None,
@@ -888,7 +926,7 @@ mod tests {
     #[test]
     fn adapt_rejects_a_blank_name() {
         let err = adapt_spec(serde_json::json!({"name": "  "})).unwrap_err();
-        assert!(matches!(err, InputError::EmptyName("name")), "{err:?}");
+        assert!(matches!(err, InputError::EmptyField("name")), "{err:?}");
     }
 
     #[test]
@@ -916,9 +954,10 @@ mod tests {
     fn adapt_rejects_blank_instructions() {
         let err = adapt_spec(serde_json::json!({"instructions": " \n "})).unwrap_err();
         assert!(
-            matches!(err, InputError::EmptyName("instructions")),
+            matches!(err, InputError::BlankUnclearableField("instructions")),
             "{err:?}"
         );
+        assert!(err.to_string().contains("omit"), "{err}");
     }
 
     #[test]
@@ -1099,7 +1138,7 @@ mod tests {
             total_time: None,
             servings,
             portion_size: None,
-            instructions: String::new(),
+            instructions: "Stir.".into(),
             ingredients: vec![],
             nutrition_per_serving: None,
             tags: vec![],
@@ -1146,22 +1185,112 @@ mod tests {
     }
 
     #[test]
-    fn update_blank_strings_mean_no_change() {
-        // `update_recipe` offers no clear, so a caller sending "" must not
-        // persist an empty string as a back-door clear.
+    fn update_rejects_blank_instructions() {
         for blank in ["", "   ", "\t\n"] {
-            let dto = update_recipe_input_to_dto(UpdateRecipeInput {
-                description: Some(blank.into()),
+            let err = update_recipe_input_to_dto(UpdateRecipeInput {
                 instructions: Some(blank.into()),
-                notes: Some(blank.into()),
-                icon: Some(blank.into()),
                 ..mk_update("x")
             })
-            .expect("blank strings are not an error");
-            assert!(dto.description.is_none(), "description, blank {blank:?}");
-            assert!(dto.instructions.is_none(), "instructions, blank {blank:?}");
-            assert!(dto.notes.is_none(), "notes, blank {blank:?}");
-            assert!(dto.icon.is_none(), "icon, blank {blank:?}");
+            .unwrap_err();
+            assert!(
+                matches!(err, InputError::BlankUnclearableField("instructions")),
+                "{blank:?}: {err:?}"
+            );
+            assert!(err.to_string().contains("omit"), "{err}");
+        }
+    }
+
+    // Deserialize update arguments the way the tool receives them.
+    fn update_from(args: serde_json::Value) -> UpdateRecipeInput {
+        serde_json::from_value(args).expect("update arguments deserialize")
+    }
+
+    #[test]
+    fn update_rejects_blank_clearable_strings() {
+        // A blank is most likely an attempt to clear, so the error names null.
+        for field in ["description", "notes", "icon"] {
+            for blank in ["", "   ", "\t\n"] {
+                let err = update_recipe_input_to_dto(update_from(
+                    serde_json::json!({"slug": "x", field: blank}),
+                ))
+                .unwrap_err();
+                assert!(
+                    matches!(err, InputError::BlankClearableField(f) if f == field),
+                    "{field} = {blank:?}: {err:?}"
+                );
+                assert!(err.to_string().contains("null"), "{err}");
+            }
+        }
+    }
+
+    const CLEARABLE: [&str; 7] = [
+        "description",
+        "notes",
+        "icon",
+        "portion_size",
+        "prep_time",
+        "cook_time",
+        "total_time",
+    ];
+
+    #[test]
+    fn update_null_clears_each_clearable_field() {
+        let mut args = serde_json::json!({"slug": "x"});
+        for field in CLEARABLE {
+            args[field] = serde_json::Value::Null;
+        }
+        let dto = update_recipe_input_to_dto(update_from(args)).expect("nulls are valid");
+
+        let mut written = written_fields(&dto);
+        written.sort();
+        let mut expected = CLEARABLE.map(String::from).to_vec();
+        expected.sort();
+        assert_eq!(written, expected);
+        let cleared = serde_json::to_value(&dto).expect("UpdateRecipeDto serializes");
+        for field in CLEARABLE {
+            assert!(cleared[field].is_null(), "{field} is a clear: {cleared}");
+        }
+    }
+
+    #[test]
+    fn update_null_on_other_fields_changes_nothing() {
+        let dto = update_recipe_input_to_dto(update_from(serde_json::json!({
+            "slug": "x",
+            "name": null,
+            "servings": null,
+            "instructions": null,
+            "ingredients": null,
+            "nutrition_per_serving": null,
+            "tags": null,
+        })))
+        .expect("nulls are valid");
+        assert!(
+            written_fields(&dto).is_empty(),
+            "{:?}",
+            written_fields(&dto)
+        );
+    }
+
+    #[test]
+    fn update_clearable_fields_publish_null_in_the_schema() {
+        // The schema is the LLM's only view of the clear, so each clearable
+        // field must admit null, stay optional, and say that null clears it.
+        let schema = serde_json::to_value(schemars::schema_for!(UpdateRecipeInput))
+            .expect("schema serializes");
+        let required = schema["required"].as_array().cloned().unwrap_or_default();
+        for field in CLEARABLE {
+            let property = &schema["properties"][field];
+            let text = property.to_string();
+            assert!(text.contains("\"null\""), "{field} admits null: {property}");
+            assert!(
+                !required.contains(&serde_json::json!(field)),
+                "{field} is optional"
+            );
+            let doc = property["description"].as_str().unwrap_or_default();
+            assert!(
+                doc.contains("null") && doc.contains("clear"),
+                "{field}'s doc says null clears it: {doc:?}"
+            );
         }
     }
 
@@ -1351,6 +1480,31 @@ mod tests {
     fn rejects_negative_servings() {
         let err = create_recipe_input_to_dto(mk_input("X", -1), None).unwrap_err();
         assert!(format!("{err}").contains("servings"));
+    }
+
+    #[test]
+    fn create_rejects_blank_instructions() {
+        for blank in ["", "   ", "\t\n"] {
+            let mut input = mk_input("Tacos", 4);
+            input.instructions = blank.into();
+            let err = create_recipe_input_to_dto(input, None).unwrap_err();
+            assert!(
+                matches!(err, InputError::EmptyField("instructions")),
+                "{blank:?}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn create_treats_blank_optional_strings_as_absent() {
+        let mut input = mk_input("Tacos", 4);
+        input.description = Some("".into());
+        input.notes = Some("   ".into());
+        input.icon = Some("\t".into());
+        let dto = create_recipe_input_to_dto(input, None).expect("blanks are valid");
+        assert_eq!(dto.description, None);
+        assert_eq!(dto.notes, None);
+        assert_eq!(dto.icon, None);
     }
 
     #[test]

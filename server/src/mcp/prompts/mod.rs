@@ -44,7 +44,7 @@ impl FewdMcp {
         // line. Reject it with the same actionable error other write paths use.
         if args.family_schedule.trim().is_empty() {
             return Err(McpError::invalid_params(
-                InputError::EmptyName("family_schedule").to_string(),
+                InputError::EmptyField("family_schedule").to_string(),
                 None,
             ));
         }

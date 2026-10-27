@@ -67,8 +67,8 @@ pub enum ValidationError {
     /// A meal `date` is not a calendar date in `YYYY-MM-DD` form. Carries
     /// the date as the caller sent it.
     InvalidDate(String),
-    /// A required name field is empty or whitespace-only.
-    EmptyName { field: &'static str },
+    /// A required field is empty or whitespace-only.
+    EmptyField { field: &'static str },
     /// An ingredient or ad-hoc item has an empty or whitespace-only name.
     /// `field` locates it with positions counted from 1, such as
     /// `ingredients[2].name` or `servings[1].adhoc_items[3].or_alternative.name`.
@@ -111,7 +111,7 @@ impl std::fmt::Display for ValidationError {
                 f,
                 "date must be a calendar date in YYYY-MM-DD form (got '{date}')."
             ),
-            Self::EmptyName { field } => {
+            Self::EmptyField { field } => {
                 write!(f, "{field} must not be empty or whitespace-only.")
             }
             Self::EmptyIngredientName { field } => write!(
@@ -198,7 +198,7 @@ mod tests {
                 ValidationError::NonPositiveServingsCount(_)
                 | ValidationError::StoredServingsCount { .. } => "servings_count",
                 ValidationError::InvalidDate(_) => "date",
-                ValidationError::EmptyName { field } => field,
+                ValidationError::EmptyField { field } => field,
                 ValidationError::EmptyIngredientName { field } => field,
             }
         }
@@ -222,7 +222,7 @@ mod tests {
                 count: 0.0,
             },
             ValidationError::InvalidDate("06/10/2025".into()),
-            ValidationError::EmptyName { field: "name" },
+            ValidationError::EmptyField { field: "name" },
             ValidationError::EmptyIngredientName {
                 field: "ingredients[2].name".into(),
             },

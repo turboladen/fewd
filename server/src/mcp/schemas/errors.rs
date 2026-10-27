@@ -40,7 +40,13 @@ pub enum InputError {
     NonPositiveServings(i32),
     NonPositiveServingsCount(f64),
     UnknownMealType(String),
-    EmptyName(&'static str),
+    /// A required field is empty or whitespace-only.
+    EmptyField(&'static str),
+    /// An update sent a blank string for a field that null clears.
+    BlankClearableField(&'static str),
+    /// A blank string was sent for an optional field that cannot be blank, so
+    /// the recovery is to omit it.
+    BlankUnclearableField(&'static str),
     /// Carries the rating exactly as the caller sent it.
     //
     // The range check runs on the rounded value, so reporting that instead
@@ -116,7 +122,15 @@ impl std::fmt::Display for InputError {
                 f,
                 "meal_type must be one of Breakfast, Lunch, Dinner, or Snack (case-insensitive; got '{mt}')."
             ),
-            Self::EmptyName(field) => write!(f, "{field} must not be empty or whitespace-only."),
+            Self::EmptyField(field) => write!(f, "{field} must not be empty or whitespace-only."),
+            Self::BlankClearableField(field) => write!(
+                f,
+                "{field} must not be empty or whitespace-only. Send null to clear it, or omit it to leave it unchanged."
+            ),
+            Self::BlankUnclearableField(field) => write!(
+                f,
+                "{field} must not be empty or whitespace-only. It cannot be cleared, so omit it to leave it unchanged."
+            ),
             Self::RatingOutOfRange(n) => write!(
                 f,
                 "rating must be a whole number from 1 to 5 (got {n}). Fractional values round to the nearest star. Call unrate_recipe to remove a rating entirely — 0 is not a rating."
@@ -213,6 +227,11 @@ pub fn variant_error_message(err: &VariantError, parent_slug: &str) -> String {
             *number,
             format!("Call get_recipe on '{parent_slug}' for its current instruction text."),
         ),
+        VariantError::EmptyInstructions => {
+            return format!(
+                "{err} Send `instructions` with the full steps, in place of any `instruction_edits`."
+            )
+        }
         VariantError::MalformedParent(_) => return err.to_string(),
     };
     if number > 1 {

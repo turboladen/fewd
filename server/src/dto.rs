@@ -16,6 +16,19 @@ where
     Option::<f64>::deserialize(deserializer).map(|opt| opt.unwrap_or(0.0))
 }
 
+/// Deserialize a string that may be null as the empty string. Pair it with
+/// `#[serde(default)]` so a missing key reads the same way.
+//
+// The model returns `"instructions": null` for a page without steps. Reading
+// it as "" lets `sanitize_generated_recipe` repair the recipe instead of the
+// whole import failing to parse.
+fn deserialize_null_as_empty<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Option::unwrap_or_default)
+}
+
 /// Coerce `Some("")` and `Some("   ")` into `None` so empty-string optional
 /// strings are treated as absent at every boundary. LLM clients sometimes emit
 /// `""` instead of `null` for unset optional fields; without this helper the
@@ -147,6 +160,7 @@ pub struct CreateRecipeDto {
     pub total_time: Option<TimeValueDto>,
     pub servings: i32,
     pub portion_size: Option<PortionSizeDto>,
+    #[serde(default, deserialize_with = "deserialize_null_as_empty")]
     pub instructions: String,
     pub ingredients: Vec<IngredientDto>,
     pub nutrition_per_serving: Option<NutritionDto>,

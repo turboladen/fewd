@@ -3151,7 +3151,7 @@ mod recipe_discovery {
             }),
             servings: 4,
             portion_size: None,
-            instructions: String::new(),
+            instructions: "Cook.".into(),
             ingredients: ingredients
                 .into_iter()
                 .map(|n| IngredientDto {
@@ -3605,7 +3605,7 @@ mod recipe_discovery {
             total_time: None,
             servings: 4,
             portion_size: None,
-            instructions: String::new(),
+            instructions: "Cook.".into(),
             ingredients: vec![IngredientDto {
                 name: "tomato".to_string(),
                 prep: Some("chopped, no olives please".to_string()),
@@ -3953,7 +3953,7 @@ mod recipe_discovery {
             total_time: None,
             servings: 4,
             portion_size: None,
-            instructions: String::new(),
+            instructions: "Cook.".into(),
             ingredients: vec![IngredientDto {
                 name: "tomato".to_string(),
                 prep: Some("chopped, with olives on the side".to_string()),

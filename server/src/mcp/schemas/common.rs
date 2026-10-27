@@ -215,17 +215,16 @@ pub(super) fn format_date(dt: DateTime<Utc>) -> String {
     dt.format("%Y-%m-%d").to_string()
 }
 
-/// Coerce an update tool's empty or whitespace-only string field to "no
-/// change". Returns the value untouched when it carries any non-whitespace
-/// character.
+/// Coerce an empty or whitespace-only string field to `None`. Returns the
+/// value untouched when it carries any non-whitespace character.
 //
-// Over HTTP a clear is an explicit null, and the MCP update tools offer no
-// clear, so `Some("")` reaching a service would be an unintended clear by
-// another name. A field whose blank value means "no change" routes through
-// here, so the rule holds in one place rather than per-field. A field that rejects a blank value instead — a
-// recipe's `name`, a lookup `slug` — validates it at the converter and returns
-// an actionable error, because there a blank is a missing value rather than an
-// attempt to unset one.
+// A service stores `Some("")` as given. `None` means "no change" for
+// `update_person`'s notes, "inherit" for an `adapt_recipe` field, and
+// "absent" for `create_recipe`'s description, notes, and icon, so a blank
+// takes that meaning there. A field that rejects a blank value, such as a
+// recipe's `name` or a lookup `slug`, or one that null clears, such as
+// `update_recipe`'s notes, validates it at the converter and returns an
+// actionable error.
 pub(super) fn blank_to_none(value: Option<String>) -> Option<String> {
     value.filter(|s| !s.trim().is_empty())
 }
