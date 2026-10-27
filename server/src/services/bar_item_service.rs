@@ -2,6 +2,7 @@ use sea_orm::*;
 
 use crate::dto::{BulkBarItemsDto, CreateBarItemDto};
 use crate::entities::bar_item::{self, Entity as BarItem};
+use crate::services::begin_write;
 
 pub struct BarItemService;
 
@@ -28,6 +29,7 @@ impl BarItemService {
         item.insert(db).await
     }
 
+    /// Creates every item or, on any failure, none of them.
     pub async fn bulk_create(
         db: &DatabaseConnection,
         data: BulkBarItemsDto,
@@ -35,6 +37,7 @@ impl BarItemService {
         let now = chrono::Utc::now();
         let mut created = Vec::with_capacity(data.items.len());
 
+        let txn = begin_write(db).await?;
         for item_dto in data.items {
             let item = bar_item::ActiveModel {
                 id: Set(uuid::Uuid::new_v4().to_string()),
@@ -42,8 +45,9 @@ impl BarItemService {
                 category: Set(item_dto.category),
                 created_at: Set(now),
             };
-            created.push(item.insert(db).await?);
+            created.push(item.insert(&txn).await?);
         }
+        txn.commit().await?;
 
         Ok(created)
     }

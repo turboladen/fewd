@@ -1,6 +1,7 @@
 use sea_orm::*;
 
-use crate::entities::setting::{self, Entity as Setting};
+use crate::entities::setting::Entity as Setting;
+use crate::services::begin_write;
 use crate::services::claude_client::ClaudeClient;
 
 pub struct SettingsService;
@@ -11,33 +12,18 @@ impl SettingsService {
         Ok(result.map(|m| m.value))
     }
 
-    /// Upsert a setting: insert if the key doesn't exist, update if it does.
-    ///
-    /// This is a non-atomic read-then-write (find + insert/update), fine for
-    /// last-writer-wins settings (API key, model, …). It is NOT safe under write
-    /// concurrency: two writers accumulating a value can both read the old one and lose
-    /// an update, and two writers first-creating the *same absent key* both see `None`
-    /// and the loser fails on the primary-key constraint. For counters, do the
-    /// arithmetic in a single SQL statement instead (see `increment_token_usage` /
-    /// `increment_counter`).
+    /// Stores a setting, inserting the key if it is absent and replacing its
+    /// value if it exists. Concurrent calls are safe and the last one wins.
+    /// To accumulate a value, such as a counter, use one SQL statement that
+    /// does the arithmetic instead (see `increment_token_usage`).
     pub async fn set<C: ConnectionTrait>(db: &C, key: String, value: String) -> Result<(), DbErr> {
-        let existing = Setting::find_by_id(key.clone()).one(db).await?;
-
-        match existing {
-            Some(model) => {
-                let mut active: setting::ActiveModel = model.into();
-                active.value = Set(value);
-                active.update(db).await?;
-            }
-            None => {
-                let new_setting = setting::ActiveModel {
-                    key: Set(key),
-                    value: Set(value),
-                };
-                new_setting.insert(db).await?;
-            }
-        }
-
+        db.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "INSERT INTO settings (key, value) VALUES (?, ?) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [key.into(), value.into()],
+        ))
+        .await?;
         Ok(())
     }
 
@@ -69,22 +55,19 @@ impl SettingsService {
             .unwrap_or_else(|| ClaudeClient::default_model().to_string())
     }
 
-    /// Increment the cumulative token-usage counters. Each counter is bumped with one
-    /// atomic `INSERT … ON CONFLICT(key) DO UPDATE SET value = value + delta` statement:
-    /// the read and add happen together in one statement, and SQLite admits only a
-    /// single writer at a time, so concurrent callers can't lose updates (the bug
-    /// fewd-4as fixed). The upsert is also
-    /// write-first — no `SELECT` precedes it — so there's no read-snapshot to invalidate,
-    /// and a contended call waits on the write lock (busy_timeout) instead of failing
-    /// with `SQLITE_BUSY_SNAPSHOT`; that safety comes from the statement shape, not the
-    /// transaction. The surrounding `db.begin()` is only for all-or-nothing grouping, so
-    /// the three counters never advance partially.
+    /// Adds to the cumulative token-usage counters. The three counters advance
+    /// together or not at all, and concurrent callers never lose an update.
+    /// A failure is logged, not returned.
+    //
+    // Each counter moves in one `INSERT … ON CONFLICT(key) DO UPDATE SET value =
+    // value + delta` statement, so the read and the add happen together under
+    // SQLite's write lock.
     pub async fn increment_token_usage(
         db: &DatabaseConnection,
         input_tokens: u64,
         output_tokens: u64,
     ) {
-        let txn = match db.begin().await {
+        let txn = match begin_write(db).await {
             Ok(t) => t,
             Err(e) => {
                 tracing::warn!("Failed to begin transaction for token usage: {}", e);

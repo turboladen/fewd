@@ -8,43 +8,15 @@
 //! increments against a real file-backed, multi-connection pool and asserts every
 //! one is counted.
 
+mod common;
+
+use common::TempDbPath;
 use fewd_lib::db;
 use fewd_lib::services::settings_service::SettingsService;
 
-/// File-backed (not `:memory:`) so the 5-connection pool shares one database — the
-/// condition under which the lost-update race exists.
-struct TempDbPath(String);
-
-impl TempDbPath {
-    fn new() -> Self {
-        let path = std::env::temp_dir()
-            .join(format!("fewd_token_usage_test_{}.db", std::process::id()))
-            .to_string_lossy()
-            .into_owned();
-        let me = Self(path);
-        // A crashed prior run with a recycled PID could leave a stale DB whose
-        // non-zero counters would make this test's exact-sum assertion fail
-        // spuriously. Start from a clean slate.
-        me.remove_files();
-        me
-    }
-
-    fn remove_files(&self) {
-        for suffix in ["", "-wal", "-shm"] {
-            let _ = std::fs::remove_file(format!("{}{}", self.0, suffix));
-        }
-    }
-}
-
-impl Drop for TempDbPath {
-    fn drop(&mut self) {
-        self.remove_files();
-    }
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_increments_sum_without_lost_updates() {
-    let temp = TempDbPath::new();
+    let temp = TempDbPath::new("token_usage_test");
     let db = db::init(&temp.0).await.expect("db::init failed");
 
     const N: u64 = 50;

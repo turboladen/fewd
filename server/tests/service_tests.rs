@@ -5395,3 +5395,412 @@ async fn meal_template_from_meal_trims_stored_adhoc_items_and_rejects_a_blank_on
     );
     assert_eq!(MealTemplateService::get_all(&db).await.unwrap().len(), 1);
 }
+
+// --- Multi-row write atomicity ---
+
+// Installs a trigger that aborts every statement it matches, so a test can
+// make one write inside a service call fail on demand. `when` is the trigger's
+// event clause, such as "BEFORE UPDATE ON recipes".
+async fn fail_writes(db: &DatabaseConnection, name: &str, when: &str) {
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+    db.execute(Statement::from_string(
+        DatabaseBackend::Sqlite,
+        format!("CREATE TRIGGER {name} {when} BEGIN SELECT RAISE(ABORT, 'forced failure'); END"),
+    ))
+    .await
+    .unwrap();
+}
+
+async fn drop_trigger(db: &DatabaseConnection, name: &str) {
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+    db.execute(Statement::from_string(
+        DatabaseBackend::Sqlite,
+        format!("DROP TRIGGER {name}"),
+    ))
+    .await
+    .unwrap();
+}
+
+async fn recipe_row(db: &DatabaseConnection, id: &str) -> fewd_lib::entities::recipe::Model {
+    RecipeService::get_by_id(db, id.to_string())
+        .await
+        .unwrap()
+        .unwrap()
+}
+
+fn servings_update(servings: Vec<PersonServingDto>) -> fewd_lib::dto::UpdateMealDto {
+    fewd_lib::dto::UpdateMealDto {
+        date: None,
+        meal_type: None,
+        order_index: None,
+        servings: Some(servings),
+    }
+}
+
+#[tokio::test]
+async fn meal_create_rolls_back_when_counter_write_fails() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    fail_writes(&db, "fail_recipe_update", "BEFORE UPDATE ON recipes").await;
+
+    MealService::create(
+        &db,
+        dinner("2025-06-10", vec![recipe_serving("alice", &recipe.id, 1.0)]),
+    )
+    .await
+    .unwrap_err();
+
+    let meals = MealService::get_all_for_date_range(&db, "2025-06-01".into(), "2025-06-30".into())
+        .await
+        .unwrap();
+    assert!(meals.is_empty(), "{meals:?}");
+    let stored = recipe_row(&db, &recipe.id).await;
+    assert_eq!(stored.times_planned, 0);
+    assert!(stored.last_planned.is_none());
+}
+
+#[tokio::test]
+async fn meal_update_rolls_back_counters_when_meal_write_fails() {
+    let db = setup_db().await;
+    let a = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let b = RecipeService::create(&db, test_recipe_dto("Soup"))
+        .await
+        .unwrap();
+    let meal = MealService::create(
+        &db,
+        dinner("2025-06-10", vec![recipe_serving("alice", &a.id, 1.0)]),
+    )
+    .await
+    .unwrap();
+    // `OF servings` keeps the trigger off any write that leaves servings
+    // alone, so the failure lands on the meal write itself.
+    fail_writes(
+        &db,
+        "fail_meal_servings",
+        "BEFORE UPDATE OF servings ON meals",
+    )
+    .await;
+
+    MealService::update(
+        &db,
+        meal.id.clone(),
+        servings_update(vec![recipe_serving("alice", &b.id, 1.0)]),
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(recipe_row(&db, &a.id).await.times_planned, 1);
+    let b_stored = recipe_row(&db, &b.id).await;
+    assert_eq!(b_stored.times_planned, 0);
+    assert!(b_stored.last_planned.is_none());
+    let stored = MealService::get_by_id(&db, meal.id).await.unwrap().unwrap();
+    assert_eq!(stored.servings, meal.servings);
+}
+
+#[tokio::test]
+async fn meal_delete_rolls_back_counters_when_delete_fails() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let meal = MealService::create(
+        &db,
+        dinner("2025-06-10", vec![recipe_serving("alice", &recipe.id, 1.0)]),
+    )
+    .await
+    .unwrap();
+    fail_writes(&db, "fail_meal_delete", "BEFORE DELETE ON meals").await;
+
+    MealService::delete(&db, meal.id.clone()).await.unwrap_err();
+
+    assert_eq!(recipe_row(&db, &recipe.id).await.times_planned, 1);
+    assert!(MealService::get_by_id(&db, meal.id)
+        .await
+        .unwrap()
+        .is_some());
+}
+
+#[tokio::test]
+async fn meal_update_moves_counters_between_recipes() {
+    let db = setup_db().await;
+    let a = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let b = RecipeService::create(&db, test_recipe_dto("Soup"))
+        .await
+        .unwrap();
+    let meal = MealService::create(
+        &db,
+        dinner("2025-06-10", vec![recipe_serving("alice", &a.id, 1.0)]),
+    )
+    .await
+    .unwrap();
+    let a_before = recipe_row(&db, &a.id).await;
+    assert_eq!(a_before.times_planned, 1);
+    assert!(a_before.last_planned.is_some());
+
+    MealService::update(
+        &db,
+        meal.id,
+        servings_update(vec![recipe_serving("alice", &b.id, 1.0)]),
+    )
+    .await
+    .unwrap();
+
+    let a_after = recipe_row(&db, &a.id).await;
+    assert_eq!(a_after.times_planned, 0);
+    // Removing a recipe from a meal lowers its count but keeps the date it
+    // was last planned.
+    assert_eq!(a_after.last_planned, a_before.last_planned);
+    let b_after = recipe_row(&db, &b.id).await;
+    assert_eq!(b_after.times_planned, 1);
+    assert!(b_after.last_planned.is_some());
+}
+
+#[tokio::test]
+async fn meal_delete_decrements_counters_and_floors_at_zero() {
+    use sea_orm::ActiveModelTrait;
+    let db = setup_db().await;
+    let a = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let b = RecipeService::create(&db, test_recipe_dto("Soup"))
+        .await
+        .unwrap();
+    let meal = MealService::create(
+        &db,
+        dinner(
+            "2025-06-10",
+            vec![
+                recipe_serving("alice", &a.id, 1.0),
+                recipe_serving("bob", &b.id, 1.0),
+            ],
+        ),
+    )
+    .await
+    .unwrap();
+    let mut row = recipe_row(&db, &b.id).await.into_active_model();
+    row.times_planned = Set(0);
+    row.update(&db).await.unwrap();
+
+    MealService::delete(&db, meal.id).await.unwrap();
+
+    assert_eq!(recipe_row(&db, &a.id).await.times_planned, 0);
+    assert_eq!(recipe_row(&db, &b.id).await.times_planned, 0);
+}
+
+// Collects formatted tracing output so a test can assert that a warning
+// was logged.
+#[derive(Clone, Default)]
+struct CapturedLogs(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl CapturedLogs {
+    fn text(&self) -> String {
+        String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+    }
+
+    fn subscriber(&self) -> impl tracing::Subscriber + Send + Sync {
+        let logs = self.clone();
+        tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(move || logs.clone())
+            .finish()
+    }
+}
+
+impl std::io::Write for CapturedLogs {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+async fn corrupt_meal_servings(db: &DatabaseConnection, meal_id: &str) {
+    use sea_orm::ActiveModelTrait;
+    let meal = MealService::get_by_id(db, meal_id.to_string())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut row = meal.into_active_model();
+    row.servings = Set("not json".to_string());
+    row.update(db).await.unwrap();
+}
+
+#[tokio::test]
+async fn meal_update_with_corrupt_servings_succeeds_and_warns() {
+    use tracing::instrument::WithSubscriber;
+    let db = setup_db().await;
+    let a = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let b = RecipeService::create(&db, test_recipe_dto("Soup"))
+        .await
+        .unwrap();
+    let meal = MealService::create(
+        &db,
+        dinner("2025-06-10", vec![recipe_serving("alice", &a.id, 1.0)]),
+    )
+    .await
+    .unwrap();
+    corrupt_meal_servings(&db, &meal.id).await;
+    let logs = CapturedLogs::default();
+
+    MealService::update(
+        &db,
+        meal.id.clone(),
+        servings_update(vec![recipe_serving("alice", &b.id, 1.0)]),
+    )
+    .with_subscriber(logs.subscriber())
+    .await
+    .unwrap();
+
+    // The stored servings cannot say which recipes the meal already had, so
+    // no count moves and the warning names the meal.
+    assert_eq!(recipe_row(&db, &a.id).await.times_planned, 1);
+    assert_eq!(recipe_row(&db, &b.id).await.times_planned, 0);
+    let text = logs.text();
+    assert!(
+        text.lines()
+            .any(|line| line.contains("WARN") && line.contains(&meal.id)),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn meal_delete_with_corrupt_servings_succeeds_and_warns() {
+    use tracing::instrument::WithSubscriber;
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let meal = MealService::create(
+        &db,
+        dinner("2025-06-10", vec![recipe_serving("alice", &recipe.id, 1.0)]),
+    )
+    .await
+    .unwrap();
+    corrupt_meal_servings(&db, &meal.id).await;
+    let logs = CapturedLogs::default();
+
+    MealService::delete(&db, meal.id.clone())
+        .with_subscriber(logs.subscriber())
+        .await
+        .unwrap();
+
+    assert!(MealService::get_by_id(&db, meal.id.clone())
+        .await
+        .unwrap()
+        .is_none());
+    let text = logs.text();
+    assert!(
+        text.lines()
+            .any(|line| line.contains("WARN") && line.contains(&meal.id)),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn bar_item_bulk_create_is_all_or_nothing() {
+    use fewd_lib::dto::{BulkBarItemsDto, CreateBarItemDto};
+    use fewd_lib::services::bar_item_service::BarItemService;
+    let db = setup_db().await;
+    fail_writes(
+        &db,
+        "fail_boom_item",
+        "BEFORE INSERT ON bar_items WHEN NEW.name = 'boom'",
+    )
+    .await;
+    let item = |name: &str| CreateBarItemDto {
+        name: name.to_string(),
+        category: "spirit".to_string(),
+    };
+
+    BarItemService::bulk_create(
+        &db,
+        BulkBarItemsDto {
+            items: vec![item("rum"), item("boom")],
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert!(BarItemService::get_all(&db).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn seed_data_is_all_or_nothing() {
+    let db = setup_db().await;
+    fail_writes(
+        &db,
+        "fail_pat",
+        "BEFORE INSERT ON people WHEN NEW.name = 'Pat'",
+    )
+    .await;
+
+    seed_data::seed_if_empty(&db).await.unwrap_err();
+    assert!(PersonService::get_all(&db).await.unwrap().is_empty());
+
+    // An all-or-nothing failure leaves the table empty, so the next start
+    // seeds every person.
+    drop_trigger(&db, "fail_pat").await;
+    seed_data::seed_if_empty(&db).await.unwrap();
+    assert_eq!(PersonService::get_all(&db).await.unwrap().len(), 4);
+}
+
+// `recipe_toggle_favorite` covers the returned rows; this pins the stored
+// flag and the error kind for a missing id.
+#[tokio::test]
+async fn recipe_toggle_favorite_stores_the_flag_and_reports_a_missing_id() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+
+    RecipeService::toggle_favorite(&db, recipe.id.clone())
+        .await
+        .unwrap();
+    assert!(recipe_row(&db, &recipe.id).await.is_favorite);
+
+    let missing = RecipeService::toggle_favorite(&db, "missing".to_string())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(missing, sea_orm::DbErr::RecordNotFound(_)),
+        "{missing:?}"
+    );
+}
+
+#[tokio::test]
+async fn drink_toggle_favorite_flips_the_stored_flag() {
+    use fewd_lib::services::drink_recipe_service::DrinkRecipeService;
+    let db = setup_db().await;
+    let drink = DrinkRecipeService::create(&db, test_drink_dto("Daiquiri"))
+        .await
+        .unwrap();
+    assert!(!drink.is_favorite);
+
+    let on = DrinkRecipeService::toggle_favorite(&db, drink.id.clone())
+        .await
+        .unwrap();
+    assert!(on.is_favorite);
+    let off = DrinkRecipeService::toggle_favorite(&db, drink.id.clone())
+        .await
+        .unwrap();
+    assert!(!off.is_favorite);
+
+    let missing = DrinkRecipeService::toggle_favorite(&db, "missing".to_string())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(missing, sea_orm::DbErr::RecordNotFound(_)),
+        "{missing:?}"
+    );
+}

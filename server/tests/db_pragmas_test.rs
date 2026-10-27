@@ -10,35 +10,14 @@
 use sea_orm::sqlx::Row;
 use std::time::Duration;
 
+mod common;
+
+use common::TempDbPath;
 use fewd_lib::db;
-
-/// A throwaway file-backed DB path unique to this test process. File-backed (not
-/// `:memory:`) so the pool's connections all attach to one shared database, the way
-/// production does — `:memory:` would give every connection its own separate DB.
-struct TempDbPath(String);
-
-impl TempDbPath {
-    fn new() -> Self {
-        let path = std::env::temp_dir()
-            .join(format!("fewd_busy_timeout_test_{}.db", std::process::id()))
-            .to_string_lossy()
-            .into_owned();
-        Self(path)
-    }
-}
-
-impl Drop for TempDbPath {
-    fn drop(&mut self) {
-        // Best-effort cleanup of the DB and its WAL sidecars.
-        for suffix in ["", "-wal", "-shm"] {
-            let _ = std::fs::remove_file(format!("{}{}", self.0, suffix));
-        }
-    }
-}
 
 #[tokio::test]
 async fn every_pooled_connection_has_busy_timeout() {
-    let temp = TempDbPath::new();
+    let temp = TempDbPath::new("busy_timeout_test");
     let db = db::init(&temp.0).await.expect("db::init failed");
     let pool = db.get_sqlite_connection_pool();
 
