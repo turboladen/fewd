@@ -6,6 +6,8 @@ Branches: `fewd-<id>/<short-slug>` (e.g. `fewd-abc/mcp-host-allowlist`). The bra
 
 Commit messages, PR titles, and PR descriptions never contain bead IDs, because a reader of `main` or GitHub cannot look them up. This repo squash-merges with every commit's message in the merge body, so the rule covers each commit on a branch, not just the PR title. Use a conventional-commits prefix with a domain scope — `fix(mcp): ...`, `feat(recipes): ...`, `ci: ...`, `docs: ...` — and describe follow-up work in words ("tracked separately"). PR numbers and commit SHAs are fine to cite. Older commits on `main` carry bead scopes; don't copy that style.
 
+Because every commit's message lands in the squash body, each one must still be true of the branch's net diff. When a later commit removes or reworks what an earlier message describes, reword the earlier commit or squash the branch (`git reset --soft origin/main`, then one commit) before the PR merges.
+
 ## Dependent PRs
 
 When one PR builds on another, make them a real GitHub stack with the `gh stack` extension (`gh stack init`, `add`, `submit`, `sync`, and `merge`), so each PR shows only its own layer. Don't merge sibling branches into each other or note the dependency in a PR description.
@@ -25,3 +27,7 @@ Give `/code-review` the worktree path as its target (`xhigh --fix <worktree>`). 
 Drive a worktree from another session with `git -C <worktree>` or a subshell `( cd <worktree> && … )`. A bare `cd` in the Bash tool moves the session's working directory, and teammates see it move.
 
 When several agents commit in parallel, each writes its commit message to a file named for its unit, such as `commit-msg-<unit>.txt`. With a shared filename, one agent's message can land on another agent's commit.
+
+Never run `git stash` in a worktree. The stash stack is shared by the main checkout and every worktree, so one agent's `stash pop` can apply another agent's changes. To show a new test failing against the unfixed code, commit first, then restore only the production files with `git checkout HEAD~1 -- <path>`, run the tests, and put them back with `git checkout HEAD -- <path>`.
+
+Parallel PRs that each append tests to the same file, such as `server/tests/recipe_routes_test.rs`, conflict at its end once one merges. Rebase the next branch onto `main`, keep both sides, rerun its gates, and force-push with `--force-with-lease`.
