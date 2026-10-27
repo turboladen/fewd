@@ -7,6 +7,7 @@ use crate::dto::{
     CreateRecipeDto, IngredientDto, NutritionDto, PortionSizeDto, TimeValueDto, UpdateRecipeDto,
 };
 use crate::entities::recipe;
+use crate::services::normalize::person_name_key;
 use crate::services::recipe_variant::{
     IngredientChange, IngredientMatch, InstructionChange, InstructionEdit, PrepFilter, VariantSpec,
 };
@@ -101,7 +102,11 @@ pub struct SearchRecipesParams {
     /// case-insensitive substrings against ingredient names — e.g. "olive
     /// oil" is excluded when a person dislikes "olive". Plan around this
     /// when the substring is genuinely shared between an avoided and
-    /// acceptable ingredient.
+    /// acceptable ingredient. A blank entry is rejected, unlike in `tags` and
+    /// `includes_ingredient_substrings`.
+    //
+    // Dropping a blank entry, as `tags` does, would silently skip that
+    // person's dislikes.
     #[serde(default)]
     pub excludes_for_persons: Option<Vec<String>>,
     /// Restrict results to recipes that contain ALL of these substrings in
@@ -118,6 +123,28 @@ pub struct SearchRecipesParams {
 }
 
 impl SearchRecipesParams {
+    /// Run every input check `search_recipes` makes before it queries,
+    /// returning the message for the caller.
+    //
+    // A blank person is checked first: a list of only blanks would
+    // otherwise read as "no filter", though the caller sent one.
+    pub fn validate(&self) -> Result<(), String> {
+        self.validate_person_names().map_err(|e| e.to_string())?;
+        self.validate_has_filter().map_err(str::to_string)
+    }
+
+    /// Reject a blank `excludes_for_persons` entry, naming its position.
+    fn validate_person_names(&self) -> Result<(), InputError> {
+        let names = self.excludes_for_persons.as_deref().unwrap_or_default();
+        match names
+            .iter()
+            .position(|name| person_name_key(name).is_empty())
+        {
+            Some(index) => Err(InputError::EmptyExcludedPerson(index + 1)),
+            None => Ok(()),
+        }
+    }
+
     /// Reject the all-empty / wildcard-only case. The full archive is
     /// intentionally not exposed via this tool — for an unfiltered shortlist
     /// the LLM should call `list_curated_recipes`.
@@ -266,9 +293,9 @@ pub fn recipe_to_brief(recipe: &recipe::Model) -> Result<RecipeBrief, String> {
     Ok(RecipeBrief {
         slug: recipe.slug.clone(),
         name: recipe.name.clone(),
-        description: recipe.description.clone(),
+        description: blank_to_none(recipe.description.clone()),
         tags,
-        icon: recipe.icon.clone(),
+        icon: blank_to_none(recipe.icon.clone()),
         servings: recipe.servings,
         total_time: total_time.map(time_out),
         times_planned: recipe.times_planned,
@@ -300,7 +327,9 @@ pub fn recipe_to_full(
     Ok(RecipeFull {
         slug: recipe.slug.clone(),
         name: recipe.name.clone(),
-        description: recipe.description.clone(),
+        // A stored blank reads as absent, here and for notes and icon, so a
+        // client that echoes this back to `update_recipe` is not rejected.
+        description: blank_to_none(recipe.description.clone()),
         source: recipe.source.clone(),
         source_url: recipe.source_url.clone(),
         parent_recipe_slug: parent_slug,
@@ -313,8 +342,8 @@ pub fn recipe_to_full(
         ingredients: ingredients.iter().map(ingredient_out).collect(),
         nutrition_per_serving: nutrition.map(nutrition_out),
         tags,
-        notes: recipe.notes.clone(),
-        icon: recipe.icon.clone(),
+        notes: blank_to_none(recipe.notes.clone()),
+        icon: blank_to_none(recipe.icon.clone()),
         is_favorite: recipe.is_favorite,
         times_planned: recipe.times_planned,
         last_planned: recipe.last_planned.map(format_date),
@@ -1559,6 +1588,39 @@ mod tests {
             ..Default::default()
         };
         assert!(p.validate_has_filter().is_err());
+    }
+
+    #[test]
+    fn search_params_validate_person_names_numbers_the_blank_entry() {
+        let with = |names: &[&str]| SearchRecipesParams {
+            excludes_for_persons: Some(names.iter().map(|n| n.to_string()).collect()),
+            ..Default::default()
+        };
+        assert!(with(&["Alice", "Bob"]).validate_person_names().is_ok());
+        assert!(SearchRecipesParams::default()
+            .validate_person_names()
+            .is_ok());
+        for (names, number) in [(&["  "][..], 1), (&["Alice", ""][..], 2)] {
+            let err = with(names).validate_person_names().unwrap_err();
+            assert!(
+                matches!(err, InputError::EmptyExcludedPerson(n) if n == number),
+                "{names:?}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn search_params_validate_reports_blank_persons_before_a_missing_filter() {
+        let p = SearchRecipesParams {
+            excludes_for_persons: Some(vec!["  ".into()]),
+            ..Default::default()
+        };
+        let err = p.validate().unwrap_err();
+        assert!(err.contains("excludes_for_persons entry #1"), "{err}");
+        assert!(SearchRecipesParams::default()
+            .validate()
+            .unwrap_err()
+            .contains("at least one filter"));
     }
 
     #[test]

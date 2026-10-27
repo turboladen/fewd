@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::dto::{CreateMealDto, MealType, PersonServingDto};
 use crate::entities::meal;
 
-use crate::mcp::lookups::MealLookups;
+use crate::mcp::lookups::{normalize_slug, MealLookups};
+use crate::services::normalize::person_name_key;
 
 use super::common::{
     ingredient_in, ingredient_out, parse_json, validate_date_yyyy_mm_dd, IngredientOut,
@@ -68,8 +69,9 @@ pub struct CreateMealInput {
 pub enum ServingInput {
     Recipe {
         /// Must match an active family member's name (case-insensitive).
+        /// Must not be blank.
         person_name: String,
-        /// Must match an existing recipe's slug.
+        /// Must match an existing recipe's slug. Must not be blank.
         recipe_slug: String,
         /// How many recipe-servings this person is eating (e.g. 1.0 for a
         /// standard serving, 0.5 for half). The shopping-list aggregator
@@ -81,6 +83,8 @@ pub enum ServingInput {
         notes: Option<String>,
     },
     Adhoc {
+        /// Must match an active family member's name (case-insensitive).
+        /// Must not be blank.
         person_name: String,
         /// Ingredients the person is eating without a named recipe.
         items: Vec<IngredientOut>,
@@ -256,8 +260,8 @@ fn serving_input_to_dto(
             servings_count,
             notes,
         } => {
-            let person_id = resolve_person(&person_name, lookups)?;
-            let recipe_id = resolve_recipe(&recipe_slug, lookups)?;
+            let person_id = resolve_person(number, &person_name, lookups)?;
+            let recipe_id = resolve_recipe(number, &recipe_slug, lookups)?;
             Ok(PersonServingDto::Recipe {
                 person_id,
                 recipe_id,
@@ -270,7 +274,7 @@ fn serving_input_to_dto(
             items,
             notes,
         } => {
-            let person_id = resolve_person(&person_name, lookups)?;
+            let person_id = resolve_person(number, &person_name, lookups)?;
             let adhoc_items = items
                 .into_iter()
                 .enumerate()
@@ -290,18 +294,34 @@ fn serving_input_to_dto(
     }
 }
 
-fn resolve_person(name: &str, lookups: &MealLookups) -> Result<String, ResolveError> {
+// A blank name or slug is a missing value, reported for its serving number,
+// rather than an unknown one that sends the caller looking for a typo.
+fn resolve_person(
+    number: usize,
+    name: &str,
+    lookups: &MealLookups,
+) -> Result<String, CreateMealError> {
+    if person_name_key(name).is_empty() {
+        return Err(InputError::EmptyServingPersonName(number).into());
+    }
     lookups
         .person_id_for_name(name)
         .map(|s| s.to_string())
-        .ok_or_else(|| ResolveError::UnknownPerson(name.to_string()))
+        .ok_or_else(|| ResolveError::UnknownPerson(name.to_string()).into())
 }
 
-fn resolve_recipe(slug: &str, lookups: &MealLookups) -> Result<String, ResolveError> {
+fn resolve_recipe(
+    number: usize,
+    slug: &str,
+    lookups: &MealLookups,
+) -> Result<String, CreateMealError> {
+    if normalize_slug(slug).is_none() {
+        return Err(InputError::EmptyServingRecipeSlug(number).into());
+    }
     lookups
         .recipe_id_for_slug(slug)
         .map(|s| s.to_string())
-        .ok_or_else(|| ResolveError::UnknownRecipe(slug.to_string()))
+        .ok_or_else(|| ResolveError::UnknownRecipe(slug.to_string()).into())
 }
 
 #[cfg(test)]
@@ -376,6 +396,74 @@ mod tests {
         let msg = format!("{err}");
         assert!(msg.contains("ghost-recipe"));
         assert!(msg.contains("search_recipes"));
+    }
+
+    fn meal_with(servings: Vec<ServingInput>) -> CreateMealInput {
+        CreateMealInput {
+            date: "2026-04-22".into(),
+            meal_type: "dinner".into(),
+            order_index: None,
+            servings,
+        }
+    }
+
+    fn recipe_serving(person_name: &str, recipe_slug: &str) -> ServingInput {
+        ServingInput::Recipe {
+            person_name: person_name.into(),
+            recipe_slug: recipe_slug.into(),
+            servings_count: 1.0,
+            notes: None,
+        }
+    }
+
+    #[test]
+    fn create_meal_input_numbers_a_blank_person_name_in_either_serving_kind() {
+        for blank in ["", "  "] {
+            for serving in [
+                recipe_serving(blank, "carbonara"),
+                ServingInput::Adhoc {
+                    person_name: blank.into(),
+                    items: vec![],
+                    notes: None,
+                },
+            ] {
+                let input = meal_with(vec![recipe_serving("Alice", "carbonara"), serving]);
+                let err = create_meal_input_to_dto(input, &mk_lookups()).unwrap_err();
+                assert!(
+                    matches!(
+                        err,
+                        CreateMealError::Input(InputError::EmptyServingPersonName(2))
+                    ),
+                    "{blank:?}: {err:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn create_meal_input_numbers_a_blank_recipe_slug() {
+        let input = meal_with(vec![recipe_serving("Alice", " ")]);
+        let err = create_meal_input_to_dto(input, &mk_lookups()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CreateMealError::Input(InputError::EmptyServingRecipeSlug(1))
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn create_meal_input_checks_the_person_before_the_recipe() {
+        let input = meal_with(vec![recipe_serving("", "")]);
+        let err = create_meal_input_to_dto(input, &mk_lookups()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CreateMealError::Input(InputError::EmptyServingPersonName(1))
+            ),
+            "{err:?}"
+        );
     }
 
     #[test]

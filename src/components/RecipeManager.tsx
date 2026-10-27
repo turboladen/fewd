@@ -180,6 +180,16 @@ export function RecipeForm({
       setValidationError('At least 1 ingredient with a name required')
       return
     }
+    // `required` lets whitespace through, and the server rejects it, so
+    // catch a blank name or instructions here with a message beside the form.
+    if (form.name.trim() === '') {
+      setValidationError('Name cannot be blank.')
+      return
+    }
+    if (form.instructions.trim() === '') {
+      setValidationError('Instructions cannot be blank. Add the steps.')
+      return
+    }
     setValidationError(null)
     onSubmit({ ...form, ingredients: normalizeIngredientsPrep(ingredients) })
   }
@@ -346,7 +356,7 @@ export function RecipeForm({
       </div>
 
       {validationError && (
-        <div className='panel-error text-red-700 text-sm'>
+        <div role='alert' className='panel-error text-red-700 text-sm'>
           {validationError}
         </div>
       )}

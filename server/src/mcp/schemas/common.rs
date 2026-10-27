@@ -220,11 +220,11 @@ pub(super) fn format_date(dt: DateTime<Utc>) -> String {
 //
 // A service stores `Some("")` as given. `None` means "no change" for
 // `update_person`'s notes, "inherit" for an `adapt_recipe` field, and
-// "absent" for `create_recipe`'s description, notes, and icon, so a blank
-// takes that meaning there. A field that rejects a blank value, such as a
-// recipe's `name` or a lookup `slug`, or one that null clears, such as
-// `update_recipe`'s notes, validates it at the converter and returns an
-// actionable error.
+// "absent" for `create_recipe`'s description, notes, and icon and for the
+// same fields on recipe reads, so a blank takes that meaning there. A field
+// that rejects a blank value, such as a recipe's `name` or a lookup `slug`,
+// or one that null clears, such as `update_recipe`'s notes, validates it at
+// the converter and returns an actionable error.
 pub(super) fn blank_to_none(value: Option<String>) -> Option<String> {
     value.filter(|s| !s.trim().is_empty())
 }
