@@ -23,14 +23,15 @@ mod m20260605_000018_normalize_meal_types;
 mod m20260607_000019_add_recipe_total_minutes;
 mod m20261026_000020_trim_names_and_drop_blank_ingredients;
 mod m20261026_000021_backfill_blank_recipe_instructions;
+mod m20261026_000022_resplit_units_from_ingredient_names;
 pub mod paren_notes;
 pub mod slug;
 pub mod total_minutes;
 
 pub use ingredient_amount::{
-    is_known_unit, normalize_unit, split_first_word, split_leading_unit, try_parse_amount,
-    try_parse_amount_json, unicode_fraction_value, AmountKind, DISCRETE_UNITS, MEASURED_UNITS,
-    RANGE_DASHES,
+    is_amount_char, is_known_unit, normalize_unit, split_first_word, split_leading_unit,
+    try_parse_amount, try_parse_amount_json, unicode_fraction_value, AmountKind, DISCRETE_UNITS,
+    MEASURED_UNITS, RANGE_DASHES,
 };
 pub use ingredient_splitter::{first_top_level_or, split_name_and_prep};
 pub use paren_notes::peel_size_paren;
@@ -63,6 +64,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260607_000019_add_recipe_total_minutes::Migration),
             Box::new(m20261026_000020_trim_names_and_drop_blank_ingredients::Migration),
             Box::new(m20261026_000021_backfill_blank_recipe_instructions::Migration),
+            Box::new(m20261026_000022_resplit_units_from_ingredient_names::Migration),
         ]
     }
 }

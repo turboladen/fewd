@@ -22,7 +22,7 @@
 //! and the backfill migration that repairs rows whose size info landed in the
 //! ingredient name.
 
-use crate::ingredient_amount::{is_known_unit, unicode_fraction_value};
+use crate::ingredient_amount::{is_amount_char, is_known_unit};
 
 /// Peel a mid-string size-info parenthetical from `s`, returning
 /// `(cleaned, Some(notes))` if the heuristic matches, or `(s.to_string(), None)`
@@ -88,26 +88,33 @@ fn suffix_starts_with_word_chars(suffix: &str) -> bool {
 /// True if any whitespace-delimited token inside the parenthetical is a
 /// known unit. Every character that is not alphanumeric is trimmed off each
 /// candidate, so `"oz,"` and `"oz."` still match while `"28oz"` (no
-/// separator) does not. A one-letter token counts only when the token before
-/// it holds a number.
+/// separator) does not. A one-letter token, or a unit that is also an
+/// ordinary word (`box`, `kilo`), counts only when the token before it holds
+/// a number.
 fn contains_unit_token(inner: &str) -> bool {
     // A bare letter in a parenthetical is usually a label (vitamin C, size L,
-    // Plan B); it measures something only after a number. Any token with a
-    // digit or a fraction counts as that number, so "1,5 l", "~400 g",
+    // Plan B), and "(from a box)" or "(Kilo brand)" describes rather than
+    // measures; either measures something only after a number. Any token with
+    // a digit or a fraction counts as that number, so "1,5 l", "~400 g",
     // "2x400 g" and "14.5 oz/411 g" all qualify.
     let tokens: Vec<&str> = inner.split_whitespace().collect();
     tokens.iter().enumerate().any(|(i, tok)| {
         let stripped = tok.trim_matches(|c: char| !c.is_alphanumeric());
-        let measured =
-            stripped.chars().count() > 1 || i.checked_sub(1).is_some_and(|j| has_number(tokens[j]));
+        let after_number = || {
+            i.checked_sub(1)
+                .is_some_and(|j| tokens[j].chars().any(is_amount_char))
+        };
+        let measured = !needs_a_number(stripped) || after_number();
         measured && is_known_unit(stripped)
     })
 }
 
-fn has_number(token: &str) -> bool {
-    token
-        .chars()
-        .any(|c| c.is_ascii_digit() || unicode_fraction_value(c).is_some())
+fn needs_a_number(unit: &str) -> bool {
+    unit.chars().count() <= 1
+        || matches!(
+            unit.to_lowercase().as_str(),
+            "box" | "boxes" | "kilo" | "kilos"
+        )
 }
 
 #[cfg(test)]
@@ -235,8 +242,11 @@ mod tests {
     }
 
     #[test]
-    fn one_letter_label_in_parens_is_left_alone() {
+    fn labels_and_descriptions_in_parens_are_left_alone() {
         for line in [
+            "2 cups raisins (from a box) chopped",
+            "1 can (in a box) beans",
+            "1 pack (Kilo brand) rice",
             "2 tablets (vitamin C) crushed",
             "1 bag (size L) chips",
             "1 binder (Plan B) clips",
@@ -256,6 +266,8 @@ mod tests {
             ("1 jar (8 oz.) pesto", "1 jar pesto", "8 oz."),
             ("1 bottle (1,5 l) water", "1 bottle water", "1,5 l"),
             ("1 bottle (0,5 l) water", "1 bottle water", "0,5 l"),
+            ("1 crate (2 boxes) pasta", "1 crate pasta", "2 boxes"),
+            ("1 sack (1 kilo) rice", "1 sack rice", "1 kilo"),
             (
                 "1 can (14.5 oz/411 g) diced tomatoes",
                 "1 can diced tomatoes",

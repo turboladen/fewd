@@ -828,6 +828,45 @@ dinner, quick, mexican";
     }
 
     #[test]
+    fn of_after_a_unit_is_dropped_from_the_name() {
+        for (line, unit, name) in [
+            ("- 2 pinches of salt", "pinches", "salt"),
+            ("- 2 of the eggs", "whole", "of the eggs"),
+        ] {
+            let ing = only_ingredient(line);
+            assert_eq!(
+                (ing.unit.as_str(), ing.name.as_str()),
+                (unit, name),
+                "{line}"
+            );
+        }
+        let beans = only_ingredient("- 2 cans of beans, drained");
+        assert_eq!(
+            (beans.unit.as_str(), beans.name.as_str()),
+            ("cans", "beans")
+        );
+        assert_eq!(beans.prep.as_deref(), Some("drained"));
+    }
+
+    #[test]
+    fn box_is_a_unit() {
+        for (line, unit, name) in [
+            ("- 2 boxes pasta", "boxes", "pasta"),
+            // Equipment lines are rare in ingredient lists, so "box grater"
+            // splitting like a box of graters is an accepted cost.
+            ("- 1 box grater", "box", "grater"),
+            ("- 2 boxed cake mixes", "whole", "boxed cake mixes"),
+        ] {
+            let ing = only_ingredient(line);
+            assert_eq!(
+                (ing.unit.as_str(), ing.name.as_str()),
+                (unit, name),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
     fn two_word_unit_with_nothing_after_it_stays_in_the_name() {
         let ing = only_ingredient("- 2 fl oz");
         assert_eq!((ing.unit.as_str(), ing.name.as_str()), ("whole", "fl oz"));

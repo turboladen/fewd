@@ -458,6 +458,15 @@ mod tests {
     }
 
     #[test]
+    fn box_counts_whole_items() {
+        assert_eq!(unit_category("boxes"), None);
+        assert!(matches!(
+            shopping_unit_class("box"),
+            ShoppingUnitClass::Count
+        ));
+    }
+
+    #[test]
     fn capital_t_is_a_small_measurement_and_dl_is_graduated() {
         assert!(matches!(
             shopping_unit_class("T"),

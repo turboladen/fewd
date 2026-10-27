@@ -9,7 +9,7 @@ use std::ops::Range;
 use serde::Serialize;
 
 use crate::dto::{IngredientAmountDto, IngredientDto};
-use crate::services::ingredient_amount::{is_known_unit, unicode_fraction_value};
+use crate::services::ingredient_amount::{is_amount_char, is_known_unit};
 
 /// Instructions with amounts injected, and how many ingredients were placed.
 #[derive(Debug, Serialize)]
@@ -339,8 +339,9 @@ fn format_injection(ingredient: &IngredientDto, matched: &str) -> String {
 }
 
 /// Whether a quantity sits right before `pos`, either directly ("3 eggs", "2-3
-/// eggs", "½ lemon") or through one unit or size word and an optional "of" ("2
-/// cups flour", "1 large egg", "2 tbsp. oil", "2 cups of flour"). A number
+/// eggs", "½ lemon"), through one unit or size word and an optional "of" ("2
+/// cups flour", "1 large egg", "2 tbsp. oil", "2 cups of flour"), or through a
+/// two-word unit such as "fl oz" and an optional "of" ("8 fl oz milk"). A number
 /// earlier in the sentence does not count, and neither does a common connecting
 /// word such as "until" or "add" between the number and the name.
 fn has_number_before(line: &str, pos: usize) -> bool {
@@ -381,9 +382,7 @@ const CONNECTING_WORDS: &[&str] = &[
 /// Whether `text` ends in a quantity: a digit, which covers "1/2" and "2-3", or
 /// any unicode fraction the amount parser accepts.
 fn ends_in_quantity(text: &str) -> bool {
-    text.chars()
-        .next_back()
-        .is_some_and(|c| c.is_ascii_digit() || unicode_fraction_value(c).is_some())
+    text.chars().next_back().is_some_and(is_amount_char)
 }
 
 /// Split trimmed `text` into the trimmed text before its last word and the word.
