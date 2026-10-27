@@ -9,7 +9,7 @@ use std::ops::Range;
 use serde::Serialize;
 
 use crate::dto::{IngredientAmountDto, IngredientDto};
-use crate::services::ingredient_amount::unicode_fraction_value;
+use crate::services::ingredient_amount::{is_known_unit, unicode_fraction_value};
 
 /// Instructions with amounts injected, and how many ingredients were placed.
 #[derive(Debug, Serialize)]
@@ -359,7 +359,15 @@ fn has_number_before(line: &str, pos: usize) -> bool {
     } else {
         (rest, word)
     };
-    is_quantity_word(word) && ends_in_quantity(rest)
+    if is_quantity_word(word) && ends_in_quantity(rest) {
+        return true;
+    }
+    // A two-word unit such as "fl oz" also sits between the quantity and the
+    // name, because the parser splits it off the name the same way.
+    let Some((rest, first)) = split_last_word(rest) else {
+        return false;
+    };
+    is_known_unit(&format!("{first} {word}")) && ends_in_quantity(rest)
 }
 
 // A settled ingredient loses its amount for the whole recipe, so these words,
@@ -368,12 +376,6 @@ fn has_number_before(line: &str, pos: usize) -> bool {
 const CONNECTING_WORDS: &[&str] = &[
     "and", "or", "until", "then", "to", "at", "with", "for", "in", "into", "on", "of", "the", "a",
     "an", "add", "more", "degrees",
-];
-
-// A period after one of these is an abbreviation. After any other word, such as
-// "min" in "Simmer 10 min. Salt the soup", it ends a sentence.
-const UNIT_ABBREVIATIONS: &[&str] = &[
-    "tsp", "tsps", "tbsp", "tbsps", "oz", "ozs", "lb", "lbs", "c", "pt", "qt", "g", "kg", "ml", "l",
 ];
 
 /// Whether `text` ends in a quantity: a digit, which covers "1/2" and "2-3", or
@@ -398,11 +400,13 @@ fn split_last_word(text: &str) -> Option<(&str, &str)> {
 
 /// Whether `word` can stand between a quantity and an ingredient name.
 fn is_quantity_word(word: &str) -> bool {
-    let lower = word.to_lowercase();
-    match lower.strip_suffix('.') {
-        Some(abbreviation) => UNIT_ABBREVIATIONS.contains(&abbreviation),
-        None => !CONNECTING_WORDS.contains(&lower.as_str()),
+    // A word with a period counts only when it is a unit abbreviation that
+    // the parser also reads ("2 T. butter"). After any other word, such as
+    // "min" in "Simmer 10 min. Salt the soup", the period ends a sentence.
+    if word.ends_with('.') {
+        return is_known_unit(word);
     }
+    !CONNECTING_WORDS.contains(&word.to_lowercase().as_str())
 }
 
 fn format_amount(amount: &IngredientAmountDto) -> String {
@@ -920,6 +924,36 @@ mod tests {
         let result = enhance_instructions(&ingredients, instructions);
         assert_eq!(result.enhanced_text, instructions);
         assert_eq!(result.injection_count, 0);
+    }
+
+    #[test]
+    fn every_dotted_unit_the_parser_reads_counts_as_numbered() {
+        for (unit, step) in [
+            ("T.", "Melt 2 T. butter."),
+            ("tbs.", "Melt 2 tbs. butter."),
+            ("t.", "Melt 2 t. butter."),
+            ("dl.", "Melt 2 dl. butter."),
+            ("lbs.", "Melt 2 lbs. butter."),
+        ] {
+            let ingredients = vec![make_ingredient("butter", 2.0, unit)];
+            let result = enhance_instructions(&ingredients, step);
+            assert_eq!(result.enhanced_text, step, "{unit}");
+            assert_eq!(result.injection_count, 0, "{unit}");
+        }
+    }
+
+    #[test]
+    fn a_two_word_unit_counts_as_numbered() {
+        for (unit, step) in [
+            ("fl oz", "Whisk in 8 fl oz milk."),
+            ("fluid ounces", "Whisk in 8 fluid ounces milk."),
+            ("fl. oz.", "Whisk in 8 fl. oz. milk."),
+        ] {
+            let ingredients = vec![make_ingredient("milk", 8.0, unit)];
+            let result = enhance_instructions(&ingredients, step);
+            assert_eq!(result.enhanced_text, step, "{unit}");
+            assert_eq!(result.injection_count, 0, "{unit}");
+        }
     }
 
     #[test]

@@ -2,9 +2,9 @@
 //!
 //! Canonical implementation lives here so both the runtime markdown parser
 //! (`recipe_parser::parse_ingredient_line` via the server-side re-export)
-//! and the backfill migration that repairs misbucketed prod rows share one
-//! source of truth — they cannot drift on what counts as a parseable amount
-//! or a known unit.
+//! and the backfill migrations that repair misbucketed rows read amounts and
+//! units with the same code. A migration that has already run keeps the rows
+//! it wrote, so a change here reaches only rows written or repaired later.
 //!
 //! Recognized amount forms:
 //! - Plain integers and decimals (`"2"`, `"1.5"`).
@@ -111,8 +111,8 @@ fn parse_simple_amount(s: &str) -> Option<f64> {
 /// Canonical names of the weight and volume units, as [`normalize_unit`]
 /// returns them.
 pub const MEASURED_UNITS: &[&str] = &[
-    "g", "kg", "mg", "oz", "lb", "ml", "l", "cup", "tbsp", "tsp", "pint", "quart", "gallon",
-    "fl oz",
+    "g", "kg", "mg", "oz", "lb", "ml", "dl", "cl", "l", "cup", "tbsp", "tsp", "pint", "quart",
+    "gallon", "fl oz",
 ];
 
 /// Canonical names of the discrete cooking units (cloves, cans, pinches),
@@ -130,7 +130,6 @@ pub const DISCRETE_UNITS: &[&str] = &[
     "bag",
     "bottle",
     "package",
-    "pkg",
     "block",
     "stalk",
     "strip",
@@ -148,46 +147,129 @@ pub const DISCRETE_UNITS: &[&str] = &[
     "shake",
 ];
 
-/// Normalizes a unit string: trims, lowercases, reduces a plural to its
-/// singular, and maps aliases to one canonical name, so `"Tablespoons"`,
-/// `"tbs"` and `"tb"` all give `"tbsp"`.
+/// Normalizes a unit string to one canonical name: trims, lowercases, reduces
+/// a plural to its singular and maps aliases, so `"Tablespoons"`, `"tbs"` and
+/// `"Tbsp."` all give `"tbsp"`. `"t"` gives `"tsp"`, and `"T"` or `"Ts"` gives
+/// `"tbsp"`.
 ///
-/// Plurals that add `es` after `ch`, `sh`, `ss` or `x` lose both letters
-/// (`"bunches"` gives `"bunch"`), `"leaves"` gives `"leaf"`, a word ending in
-/// `ss` keeps it (`"glass"`), and any other trailing `s` is dropped when the
-/// word is longer than two letters (`"ts"` stays the teaspoon alias). A word
-/// with no alias comes back singular and lowercase, whether or not it is a
-/// unit. `"to taste"` and the `fl oz` spellings are matched whole.
+/// An abbreviation may end in one period; a full word with a period
+/// (`"cups."`) comes back lowercase and otherwise unchanged. `"fl"` or
+/// `"fluid"` before an ounce spelling gives `"fl oz"`. A word with no alias
+/// comes back singular and lowercase, whether or not it is a unit. The result
+/// normalizes to itself.
 pub fn normalize_unit(unit: &str) -> String {
-    let s = unit.trim().to_lowercase();
-    match s.as_str() {
-        "fl oz" | "fl. oz" | "fl. oz." | "fluid ounce" | "fluid ounces" => {
-            return "fl oz".to_string()
-        }
-        "to taste" => return s,
+    let trimmed = unit.trim();
+    // Only the capitalized forms are case-sensitive. All-caps "TS" stays the
+    // teaspoon alias, because a recipe that writes every unit in capitals
+    // cannot be told apart from one that uses capital T for tablespoon.
+    match strip_period(trimmed).0 {
+        "t" => return "tsp".to_string(),
+        "T" | "Ts" => return "tbsp".to_string(),
         _ => {}
     }
-    let canonical = match singular_unit(&s) {
-        "gram" | "g" => "g",
-        "kilogram" | "kg" => "kg",
-        "milligram" | "mg" => "mg",
-        "ounce" | "oz" => "oz",
-        "pound" | "lb" => "lb",
-        "milliliter" | "millilitre" | "ml" => "ml",
-        "liter" | "litre" | "l" => "l",
-        "tablespoon" | "tbsp" | "tbs" | "tb" => "tbsp",
-        "teaspoon" | "tsp" | "ts" => "tsp",
-        "pint" | "pt" => "pint",
-        "quart" | "qt" => "quart",
-        "gallon" | "gal" => "gallon",
-        other => other,
-    };
-    canonical.to_string()
+    let lower = trimmed.to_lowercase();
+    if is_fluid_ounce(&lower) {
+        return "fl oz".to_string();
+    }
+    let (body, dotted) = strip_period(&lower);
+    if !dotted && body.split_whitespace().eq(["to", "taste"]) {
+        return "to taste".to_string();
+    }
+    let singular = singular_unit(body);
+    if let Some(canonical) = abbreviation(singular) {
+        return canonical.to_string();
+    }
+    // A period or a space left at the end of the singular ("oz.s", "cup s")
+    // is not a spelling of any unit, and resolving it would make a second
+    // call give a different result.
+    if dotted || singular.ends_with(|c: char| c == '.' || c.is_whitespace()) {
+        return lower;
+    }
+    full_word_alias(singular).unwrap_or(singular).to_string()
 }
 
-// The `es` rule covers only sibilant endings, because the units ending in a
-// plain `e` (slice, piece, shake) pluralize with a bare `s`. No `zes` or
-// `ies` rule: no unit needs one, and a `zes` rule would cut `"sizes"` short.
+fn strip_period(s: &str) -> (&str, bool) {
+    match s.strip_suffix('.') {
+        Some(body) => (body, true),
+        None => (s, false),
+    }
+}
+
+// This matches "fl" or "fluid" followed by an ounce spelling ("fl oz",
+// "fl. oz.", "fluid ounces"), and the packaging spelling "fl.oz" with no space.
+// The ounce word follows the same period rule as a single unit.
+fn is_fluid_ounce(lower: &str) -> bool {
+    let mut words = lower.split_whitespace();
+    let (first, ounce) = match (words.next(), words.next(), words.next()) {
+        (Some(first), Some(ounce), None) => (first, ounce),
+        (Some(word), None, None) => match word.strip_prefix("fl.") {
+            Some(ounce) if !ounce.is_empty() => ("fl.", ounce),
+            _ => return false,
+        },
+        _ => return false,
+    };
+    if !matches!(first, "fl" | "fl." | "fluid") {
+        return false;
+    }
+    let (body, dotted) = strip_period(ounce);
+    match singular_unit(body) {
+        "oz" => true,
+        "ounce" => !dotted,
+        _ => false,
+    }
+}
+
+// These short spellings may carry one trailing period ("oz.", "lbs.").
+fn abbreviation(singular: &str) -> Option<&'static str> {
+    Some(match singular {
+        "g" => "g",
+        "kg" => "kg",
+        "mg" => "mg",
+        "oz" => "oz",
+        "lb" => "lb",
+        "ml" => "ml",
+        // dl and cl are units of their own rather than aliases of ml, because
+        // the shopping list shows a sum in the unit this function returns.
+        "dl" => "dl",
+        "cl" => "cl",
+        "l" => "l",
+        "c" => "cup",
+        "tbsp" | "tbs" | "tb" | "tbl" => "tbsp",
+        "tsp" | "ts" => "tsp",
+        "pt" => "pint",
+        "qt" => "quart",
+        "gal" => "gallon",
+        "pkg" => "package",
+        _ => return None,
+    })
+}
+
+// Full words never take a period, because "cups." is a typo at the end of a
+// sentence, so it stays unknown rather than becoming a unit.
+fn full_word_alias(singular: &str) -> Option<&'static str> {
+    Some(match singular {
+        "gram" => "g",
+        "kilogram" | "kilo" => "kg",
+        "milligram" => "mg",
+        "ounce" => "oz",
+        "pound" => "lb",
+        "milliliter" | "millilitre" => "ml",
+        "deciliter" | "decilitre" => "dl",
+        "centiliter" | "centilitre" => "cl",
+        "liter" | "litre" => "l",
+        "tablespoon" => "tbsp",
+        "teaspoon" => "tsp",
+        _ => return None,
+    })
+}
+
+// Plurals that add `es` after `ch`, `sh`, `ss` or `x` lose both letters,
+// "leaves" gives "leaf", a word ending in `ss` keeps it ("glass"), and any
+// other trailing `s` is dropped when the word is longer than two letters, so
+// "ts" stays the teaspoon alias. The `es` rule covers only sibilant endings,
+// because the units ending in a plain `e` (slice, piece, shake) pluralize
+// with a bare `s`. There is no `zes` or `ies` rule, because no unit needs one
+// and a `zes` rule would cut "sizes" short.
 fn singular_unit(s: &str) -> &str {
     if s == "leaves" {
         "leaf"
@@ -206,16 +288,55 @@ fn singular_unit(s: &str) -> &str {
 }
 
 /// Returns `true` if `token` looks like a recipe unit — weight, volume, or
-/// a recognized discrete cooking unit. Used by the parser's 3-part branch
-/// to decide whether `parts[1]` is a unit (`"6 cloves garlic"`) or part of
-/// a compound name (`"1 zucchini, sliced"`).
+/// a recognized discrete cooking unit. It tells a unit (`"6 cloves garlic"`)
+/// from the first word of a compound name (`"1 zucchini, sliced"`).
 ///
 /// A single trailing `,` is ignored. The rest passes through
-/// [`normalize_unit`] and counts as a unit when the result is in
+/// [`normalize_unit`], so a period on an abbreviation (`"oz."`) and the
+/// case of `"t"` and `"T"` count, and it is a unit when the result is in
 /// [`MEASURED_UNITS`] or [`DISCRETE_UNITS`].
 pub fn is_known_unit(token: &str) -> bool {
     let unit = normalize_unit(token.strip_suffix(',').unwrap_or(token));
     MEASURED_UNITS.contains(&unit.as_str()) || DISCRETE_UNITS.contains(&unit.as_str())
+}
+
+/// Splits a known unit off the front of `s`, the text that follows an
+/// ingredient's amount, and returns the unit and the rest.
+///
+/// The first two words are tried as one unit (`"fl oz milk"`), then the first
+/// word alone (`"cups flour"`). Words are separated by any run of whitespace,
+/// and a two-word unit comes back joined by one space. A trailing `,` on the
+/// unit is dropped (`"cloves, minced"` gives `"cloves"`); otherwise the unit
+/// is returned as written, case and period included, for [`normalize_unit`]
+/// to read later. The rest has its leading whitespace trimmed. Returns
+/// `None` when no unit matches or nothing follows the unit.
+pub fn split_leading_unit(s: &str) -> Option<(String, &str)> {
+    let (first, after_first) = split_first_word(s)?;
+    if let Some((second, rest)) = split_first_word(after_first) {
+        let unit = format!("{first} {}", second.strip_suffix(',').unwrap_or(second));
+        if !rest.is_empty() && is_known_unit(&unit) {
+            return Some((unit, rest));
+        }
+    }
+    let unit = first.strip_suffix(',').unwrap_or(first);
+    if !after_first.is_empty() && is_known_unit(unit) {
+        return Some((unit.to_string(), after_first));
+    }
+    None
+}
+
+/// Splits the first word off `s` at a run of whitespace and returns it with
+/// the rest, whose leading whitespace is trimmed. Returns `None` when `s` is
+/// blank.
+pub fn split_first_word(s: &str) -> Option<(&str, &str)> {
+    let s = s.trim_start();
+    if s.is_empty() {
+        return None;
+    }
+    Some(match s.split_once(char::is_whitespace) {
+        Some((word, rest)) => (word, rest.trim_start()),
+        None => (s, ""),
+    })
 }
 
 /// Lookup table for Unicode vulgar fractions in the U+2150..U+215E block
@@ -406,8 +527,8 @@ mod tests {
 
     #[test]
     fn is_known_unit_strips_trailing_comma() {
-        // Compound-non-unit bug surface: `splitn(3, ' ')` puts e.g.
-        // `"cloves,"` at parts[1]. The predicate must accept that.
+        // A word split leaves the comma on the unit token ("cloves," in
+        // "6 cloves, minced garlic"), and the predicate must accept it.
         assert!(is_known_unit("cloves,"));
         assert!(is_known_unit("stalks,"));
     }
@@ -502,5 +623,231 @@ mod tests {
             Some(json!({ "type": "range", "min": 12.0, "max": 15.0 }))
         );
         assert_eq!(try_parse_amount_json("80/20"), None);
+    }
+
+    #[test]
+    fn normalize_unit_reads_dotted_abbreviations() {
+        for (input, expected) in [
+            ("tsp.", "tsp"),
+            ("Tbsp.", "tbsp"),
+            ("oz.", "oz"),
+            ("lb.", "lb"),
+            ("lbs.", "lb"),
+            ("tbs.", "tbsp"),
+            ("tbl.", "tbsp"),
+            ("g.", "g"),
+            ("c.", "cup"),
+            ("fl oz.", "fl oz"),
+            ("T.", "tbsp"),
+            ("t.", "tsp"),
+        ] {
+            assert_eq!(normalize_unit(input), expected, "normalize_unit({input:?})");
+        }
+    }
+
+    #[test]
+    fn normalize_unit_reads_t_and_capital_t_as_different_units() {
+        for (input, expected) in [("t", "tsp"), ("T", "tbsp"), (" T ", "tbsp"), ("TS", "tsp")] {
+            assert_eq!(normalize_unit(input), expected, "normalize_unit({input:?})");
+        }
+    }
+
+    #[test]
+    fn normalize_unit_reads_short_metric_and_cup_spellings() {
+        for (input, expected) in [
+            ("c", "cup"),
+            ("C", "cup"),
+            ("dl", "dl"),
+            ("deciliters", "dl"),
+            ("cl", "cl"),
+            ("centilitre", "cl"),
+            ("kilo", "kg"),
+            ("kilos", "kg"),
+            ("tbl", "tbsp"),
+        ] {
+            assert_eq!(normalize_unit(input), expected, "normalize_unit({input:?})");
+        }
+    }
+
+    #[test]
+    fn normalize_unit_reads_fluid_oz() {
+        for input in [
+            "fluid oz",
+            "Fluid Ozs",
+            "fluid oz.",
+            "fl. oz.",
+            "fl ounces",
+            "fl  oz",
+            "fl ozs",
+            "fl. ounce",
+            "fl.oz",
+            "fl.oz.",
+        ] {
+            assert_eq!(normalize_unit(input), "fl oz", "normalize_unit({input:?})");
+        }
+    }
+
+    #[test]
+    fn is_known_unit_rejects_words_the_period_rule_must_not_invent() {
+        for token in [
+            "cups.", "glass.", "st.", "no.", "in.", "ea.", "oz..", ".", "..", "s.", "T-bone",
+        ] {
+            assert!(!is_known_unit(token), "{token:?} is not a unit");
+        }
+    }
+
+    #[test]
+    fn is_known_unit_strips_a_comma_after_a_period() {
+        assert!(is_known_unit("oz.,"));
+        assert!(is_known_unit("tsp.,"));
+    }
+
+    #[test]
+    fn normalize_unit_is_idempotent() {
+        let inputs = [
+            "tsp.",
+            "Tbsp.",
+            "oz.",
+            "lbs.",
+            "t",
+            "T",
+            "t.",
+            "T.",
+            "c",
+            "C",
+            "dl",
+            "cl",
+            "kilo",
+            "kilos",
+            "tbl",
+            "fluid oz",
+            "Fluid Ozs",
+            "cups.",
+            "glass.",
+            "oz..",
+            ".",
+            "bunches",
+            "leaves",
+            "Tablespoons",
+            "to taste",
+            "",
+            "oz.s",
+            "lb.s",
+            "fl oz.s",
+            "fl oz..",
+            "fluid ounces.",
+            "fl.oz.",
+            "Ts",
+            "Ts.",
+            "TS",
+            "pkg",
+            "cup s",
+            "ttt s",
+            "tts S",
+            "to  taste",
+        ];
+        for input in inputs.iter().chain(MEASURED_UNITS).chain(DISCRETE_UNITS) {
+            let once = normalize_unit(input);
+            assert_eq!(normalize_unit(&once), once, "normalize_unit({input:?})");
+        }
+    }
+
+    #[test]
+    fn split_leading_unit_takes_one_or_two_words() {
+        for (input, unit, rest) in [
+            ("cups flour", "cups", "flour"),
+            ("cloves, minced garlic", "cloves", "minced garlic"),
+            ("fl oz milk", "fl oz", "milk"),
+            ("fluid oz milk", "fluid oz", "milk"),
+            ("fl. oz. milk", "fl. oz.", "milk"),
+            ("fl oz, milk", "fl oz", "milk"),
+            ("Tbsp. butter", "Tbsp.", "butter"),
+            ("fl  oz   milk", "fl oz", "milk"),
+            ("T butter, softened", "T", "butter, softened"),
+        ] {
+            assert_eq!(
+                split_leading_unit(input),
+                Some((unit.to_string(), rest)),
+                "split_leading_unit({input:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn split_leading_unit_needs_a_unit_and_a_rest() {
+        for input in [
+            "fl oz",
+            "cups",
+            "zucchini, sliced",
+            "",
+            "   ",
+            "T-bone steak",
+        ] {
+            assert_eq!(
+                split_leading_unit(input),
+                None,
+                "split_leading_unit({input:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn fluid_ounce_follows_the_period_rules() {
+        for input in [
+            "fl oz..",
+            "fluid ounces.",
+            "fl ounces.",
+            "fl.",
+            "fl. cups",
+            "fluid",
+        ] {
+            assert_ne!(normalize_unit(input), "fl oz", "normalize_unit({input:?})");
+        }
+    }
+
+    #[test]
+    fn capitalized_t_plurals_are_tablespoons_and_all_caps_stays_teaspoon() {
+        for (input, expected) in [
+            ("Ts", "tbsp"),
+            ("Ts.", "tbsp"),
+            ("ts", "tsp"),
+            ("TS", "tsp"),
+        ] {
+            assert_eq!(normalize_unit(input), expected, "normalize_unit({input:?})");
+        }
+    }
+
+    #[test]
+    fn pkg_is_package() {
+        assert_eq!(normalize_unit("pkg"), "package");
+        assert_eq!(normalize_unit("pkgs."), "package");
+        assert!(is_known_unit("pkg"));
+    }
+
+    #[test]
+    fn a_period_before_a_plural_s_stays_unknown() {
+        for input in ["oz.s", "lb.s", "fl oz.s"] {
+            assert!(!is_known_unit(input), "{input:?} is not a unit");
+        }
+    }
+
+    #[test]
+    fn a_lone_s_after_a_space_stays_unknown() {
+        for input in ["cup s", "oz s"] {
+            assert_eq!(normalize_unit(input), input, "normalize_unit({input:?})");
+            assert!(!is_known_unit(input), "{input:?} is not a unit");
+        }
+    }
+
+    #[test]
+    fn to_taste_with_extra_spaces_is_to_taste() {
+        for input in ["to  taste", "To\tTaste", " to taste "] {
+            assert_eq!(
+                normalize_unit(input),
+                "to taste",
+                "normalize_unit({input:?})"
+            );
+        }
+        assert_eq!(normalize_unit("to taste."), "to taste.");
     }
 }

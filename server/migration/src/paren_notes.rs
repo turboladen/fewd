@@ -5,23 +5,24 @@
 //! conditions hold:
 //!
 //! 1. The suffix immediately after the closing `)` starts with whitespace +
-//!    word chars (NOT a comma). A comma suffix is the fewd-xez precedent
-//!    (`pear (or Fuji apple), grated`) where the parens carry an alternative
+//!    word chars (NOT a comma). Before a comma suffix
+//!    (`pear (or Fuji apple), grated`) the parens carry an alternative
 //!    noun, not size info — there the downstream splitter must see the
 //!    string intact so it can find the top-level comma.
 //! 2. The parenthetical content contains at least one token recognized by
 //!    [`crate::ingredient_amount::is_known_unit`] (oz, lb, ml, g, …). This
 //!    disambiguates *size info* (`(28 oz each)`) from *alternative nouns*
-//!    (`(or Fuji apple)`).
+//!    (`(or Fuji apple)`). A one-letter unit (`g`, `c`, `T`) counts only right
+//!    after an amount, so `(about 1 T)` is size info and `(vitamin C)` is not.
 //!
 //! When peeled, the surrounding whitespace is collapsed to a single space.
 //! When neither condition holds, the input is returned unchanged.
 //!
 //! Shared between the runtime parser (`recipe_parser::parse_ingredient_line`)
-//! and the backfill migration that repairs dietpi rows already corrupted
-//! by the pre-fix parser. See fewd-i47 for the bug history.
+//! and the backfill migration that repairs rows whose size info landed in the
+//! ingredient name.
 
-use crate::ingredient_amount::is_known_unit;
+use crate::ingredient_amount::{is_known_unit, unicode_fraction_value};
 
 /// Peel a mid-string size-info parenthetical from `s`, returning
 /// `(cleaned, Some(notes))` if the heuristic matches, or `(s.to_string(), None)`
@@ -67,9 +68,9 @@ pub fn peel_size_paren(s: &str) -> (String, Option<String>) {
 }
 
 /// True if `suffix` begins with whitespace followed by an alphanumeric
-/// character. A leading comma (or `,` after whitespace) returns false —
-/// that case must defer to `split_name_and_prep` so fewd-xez behavior is
-/// preserved.
+/// character. A leading comma (or `,` after whitespace) returns false,
+/// because that case belongs to `split_name_and_prep`, which needs the
+/// comma to find a prep clause.
 fn suffix_starts_with_word_chars(suffix: &str) -> bool {
     let mut chars = suffix.chars();
     let Some(first) = chars.next() else {
@@ -85,13 +86,28 @@ fn suffix_starts_with_word_chars(suffix: &str) -> bool {
 }
 
 /// True if any whitespace-delimited token inside the parenthetical is a
-/// known unit. ASCII punctuation is stripped off each candidate so `"oz,"`
-/// and `"oz."` still match while `"28oz"` (no separator) does not.
+/// known unit. Every character that is not alphanumeric is trimmed off each
+/// candidate, so `"oz,"` and `"oz."` still match while `"28oz"` (no
+/// separator) does not. A one-letter token counts only when the token before
+/// it holds a number.
 fn contains_unit_token(inner: &str) -> bool {
-    inner.split_whitespace().any(|tok| {
+    // A bare letter in a parenthetical is usually a label (vitamin C, size L,
+    // Plan B); it measures something only after a number. Any token with a
+    // digit or a fraction counts as that number, so "1,5 l", "~400 g",
+    // "2x400 g" and "14.5 oz/411 g" all qualify.
+    let tokens: Vec<&str> = inner.split_whitespace().collect();
+    tokens.iter().enumerate().any(|(i, tok)| {
         let stripped = tok.trim_matches(|c: char| !c.is_alphanumeric());
-        !stripped.is_empty() && is_known_unit(stripped)
+        let measured =
+            stripped.chars().count() > 1 || i.checked_sub(1).is_some_and(|j| has_number(tokens[j]));
+        measured && is_known_unit(stripped)
     })
+}
+
+fn has_number(token: &str) -> bool {
+    token
+        .chars()
+        .any(|c| c.is_ascii_digit() || unicode_fraction_value(c).is_some())
 }
 
 #[cfg(test)]
@@ -216,5 +232,44 @@ mod tests {
         let (cleaned, notes) = peel("2 cans (28 oz each) crushed tomatoes");
         assert!(!cleaned.contains("  "), "double space in {cleaned:?}");
         assert_eq!(notes.as_deref(), Some("28 oz each"));
+    }
+
+    #[test]
+    fn one_letter_label_in_parens_is_left_alone() {
+        for line in [
+            "2 tablets (vitamin C) crushed",
+            "1 bag (size L) chips",
+            "1 binder (Plan B) clips",
+            "1 cup flour (type T) sifted",
+        ] {
+            assert_eq!(peel(line), (line.to_string(), None), "{line}");
+        }
+    }
+
+    #[test]
+    fn one_letter_unit_after_an_amount_is_peeled() {
+        for (line, cleaned, notes) in [
+            ("1 stick (about 1 T) butter", "1 stick butter", "about 1 T"),
+            ("1 can (½ c) beans", "1 can beans", "½ c"),
+            ("1 jar (1-2 t.) paste", "1 jar paste", "1-2 t."),
+            ("1 bag (28 g each) chips", "1 bag chips", "28 g each"),
+            ("1 jar (8 oz.) pesto", "1 jar pesto", "8 oz."),
+            ("1 bottle (1,5 l) water", "1 bottle water", "1,5 l"),
+            ("1 bottle (0,5 l) water", "1 bottle water", "0,5 l"),
+            (
+                "1 can (14.5 oz/411 g) diced tomatoes",
+                "1 can diced tomatoes",
+                "14.5 oz/411 g",
+            ),
+            ("1 bag (~400 g) spinach", "1 bag spinach", "~400 g"),
+            ("1 can (2x400 g) beans", "1 can beans", "2x400 g"),
+            ("1 carton (1 qt/1 l) stock", "1 carton stock", "1 qt/1 l"),
+        ] {
+            assert_eq!(
+                peel(line),
+                (cleaned.to_string(), Some(notes.to_string())),
+                "{line}"
+            );
+        }
     }
 }

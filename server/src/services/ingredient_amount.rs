@@ -5,7 +5,8 @@
 //! runtime parser and the backfill migration share one source of truth.
 
 pub use migration::{
-    is_known_unit, try_parse_amount, unicode_fraction_value, AmountKind, RANGE_DASHES,
+    is_known_unit, split_first_word, split_leading_unit, try_parse_amount, unicode_fraction_value,
+    AmountKind, RANGE_DASHES,
 };
 
 use crate::dto::IngredientAmountDto;
@@ -97,6 +98,24 @@ mod tests {
             "gallons",
             "gal",
             "fl oz",
+            "fluid oz",
+            "fluid ozs",
+            "dl",
+            "deciliter",
+            "cl",
+            "centiliter",
+            "kilo",
+            "kilos",
+            // Short, dotted and case-sensitive spellings
+            "c",
+            "C",
+            "t",
+            "T",
+            "tbl",
+            "tsp.",
+            "Tbsp.",
+            "oz.",
+            "lb.",
         ];
         for unit in units {
             assert!(is_known_unit(unit), "is_known_unit must accept {unit:?}");
