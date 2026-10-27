@@ -216,7 +216,8 @@ pub fn create_meal_input_to_dto(
     let servings = input
         .servings
         .into_iter()
-        .map(|s| serving_input_to_dto(s, lookups))
+        .enumerate()
+        .map(|(index, s)| serving_input_to_dto(index + 1, s, lookups))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(CreateMealDto {
         date: input.date,
@@ -241,10 +242,13 @@ fn default_order_index(meal_type: MealType) -> i32 {
     }
 }
 
+// `number` counts servings from 1, so a blank item name is reported by
+// position.
 fn serving_input_to_dto(
+    number: usize,
     serving: ServingInput,
     lookups: &MealLookups,
-) -> Result<PersonServingDto, ResolveError> {
+) -> Result<PersonServingDto, CreateMealError> {
     match serving {
         ServingInput::Recipe {
             person_name,
@@ -267,9 +271,19 @@ fn serving_input_to_dto(
             notes,
         } => {
             let person_id = resolve_person(&person_name, lookups)?;
+            let adhoc_items = items
+                .into_iter()
+                .enumerate()
+                .map(|(index, item)| {
+                    ingredient_in(item).map_err(|field| InputError::EmptyIngredientName {
+                        location: format!("serving #{number} item #{}", index + 1),
+                        field,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             Ok(PersonServingDto::Adhoc {
                 person_id,
-                adhoc_items: items.into_iter().map(ingredient_in).collect(),
+                adhoc_items,
                 notes,
             })
         }
@@ -614,5 +628,42 @@ mod tests {
             }
             _ => panic!("expected Recipe serving"),
         }
+    }
+
+    #[test]
+    fn create_meal_input_rejects_a_blank_adhoc_item_name_by_number() {
+        let item = |name: &str| IngredientOut {
+            name: name.into(),
+            prep: None,
+            amount: super::super::common::IngredientAmountOut::Single { value: 1.0 },
+            unit: String::new(),
+            notes: None,
+            or_alternative: None,
+        };
+        let input = CreateMealInput {
+            date: "2026-04-22".into(),
+            meal_type: "dinner".into(),
+            order_index: None,
+            servings: vec![
+                ServingInput::Recipe {
+                    person_name: "Alice".into(),
+                    recipe_slug: "carbonara".into(),
+                    servings_count: 1.0,
+                    notes: None,
+                },
+                ServingInput::Adhoc {
+                    person_name: "Alice".into(),
+                    items: vec![item("bread"), item("  ")],
+                    notes: None,
+                },
+            ],
+        };
+        let msg = create_meal_input_to_dto(input, &mk_lookups())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            msg.starts_with("serving #2 item #2: name must not be empty"),
+            "{msg}"
+        );
     }
 }

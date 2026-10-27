@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::dto::{CreateDrinkRecipeDto, DrinkMood};
 use crate::entities::{bar_item, drink_recipe, person};
 use crate::services::claude_client::{ClaudeClient, ClaudeError, SendMessageResponse};
+use crate::services::drink_recipe_service::sanitize_generated_drink;
 use crate::services::recipe_adapter::strip_code_fences;
 
 #[derive(Debug, Serialize)]
@@ -226,6 +227,7 @@ Rules:
         // Force correct source on every suggestion
         for dto in &mut suggestions {
             dto.source = "ai_suggested".to_string();
+            sanitize_generated_drink(dto);
         }
 
         Ok(suggestions)

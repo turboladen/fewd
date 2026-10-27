@@ -92,6 +92,13 @@ pub enum InputError {
     /// An `adapt_recipe` ingredient change, numbered from 1, names no
     /// ingredient to replace or remove.
     EmptyIngredientChangeName(usize),
+    /// An ingredient or ad-hoc item has a blank name. `location` numbers the
+    /// entry from 1, such as `ingredient #2` or `serving #1 item #3`, and
+    /// `field` is the blank field within it, such as `or_alternative.name`.
+    EmptyIngredientName {
+        location: String,
+        field: String,
+    },
 }
 
 impl std::fmt::Display for InputError {
@@ -155,6 +162,10 @@ impl std::fmt::Display for InputError {
             Self::EmptyIngredientChangeName(number) => write!(
                 f,
                 "ingredient change #{number}: name must not be empty or whitespace-only. Give the whole name of the ingredient to replace or remove, as get_recipe shows it."
+            ),
+            Self::EmptyIngredientName { location, field } => write!(
+                f,
+                "{location}: {field} must not be empty or whitespace-only. Give every ingredient a name, such as \"garlic\" (put preparation like \"minced\" in prep), or leave the entry out."
             ),
             Self::ConflictingInstructionChanges => write!(
                 f,

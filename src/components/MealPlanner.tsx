@@ -18,7 +18,11 @@ import type { ParsedMealTemplate } from '../types/mealTemplate'
 import { parseMealTemplate } from '../types/mealTemplate'
 import type { Person } from '../types/person'
 import type { Ingredient, RecipePickerOption } from '../types/recipe'
-import { normalizeIngredientsPrep } from '../types/recipe'
+import {
+  dropEmptyIngredients,
+  normalizeIngredientsPrep,
+  unnamedIngredientError,
+} from '../types/recipe'
 import {
   addDays,
   formatDateDisplay,
@@ -608,12 +612,18 @@ function MealEditor({
       return
     }
 
-    // Flatten map and filter out empty-name ingredients from ad-hoc servings
+    // Flatten map, dropping the empty rows and alternatives of ad-hoc servings
     const servings: PersonServing[] = []
-    for (const items of servingsMap.values()) {
+    for (const [personId, items] of servingsMap) {
       for (const serving of items) {
         if (serving.food_type === 'adhoc') {
-          const validItems = serving.adhoc_items.filter((item) => item.name.trim() !== '')
+          const unnamed = unnamedIngredientError(serving.adhoc_items)
+          if (unnamed) {
+            const personName = people.find((p) => p.id === personId)?.name ?? 'Someone'
+            setValidationError(`${personName}: ${unnamed}`)
+            return
+          }
+          const validItems = dropEmptyIngredients(serving.adhoc_items)
           if (validItems.length === 0) {
             setValidationError('Ad-hoc items must have at least one ingredient with a name')
             return

@@ -472,6 +472,20 @@ pub struct UpdateRecipeInput {
     pub icon: Option<String>,
 }
 
+// Number each ingredient from 1, so a blank name is reported by position.
+fn ingredients_in(ingredients: Vec<IngredientOut>) -> Result<Vec<IngredientDto>, InputError> {
+    ingredients
+        .into_iter()
+        .enumerate()
+        .map(|(index, ing)| {
+            ingredient_in(ing).map_err(|field| InputError::EmptyIngredientName {
+                location: format!("ingredient #{}", index + 1),
+                field,
+            })
+        })
+        .collect()
+}
+
 pub fn create_recipe_input_to_dto(
     input: CreateRecipeInput,
     parent_recipe_id: Option<String>,
@@ -495,7 +509,7 @@ pub fn create_recipe_input_to_dto(
         servings: input.servings,
         portion_size: input.portion_size.map(portion_in),
         instructions: input.instructions,
-        ingredients: input.ingredients.into_iter().map(ingredient_in).collect(),
+        ingredients: ingredients_in(input.ingredients)?,
         nutrition_per_serving: input.nutrition_per_serving.map(nutrition_in),
         tags: input.tags,
         notes: input.notes,
@@ -683,7 +697,8 @@ pub fn adapt_recipe_input_to_spec(input: AdaptRecipeInput) -> Result<VariantSpec
 }
 
 // Added and replacement ingredients run through `ingredient_in`, so a comma'd
-// name is split into name and prep exactly as on create. Match targets pass
+// name is split into name and prep exactly as on create, and a blank name is
+// rejected under this change's number. Match targets pass
 // through untouched: the service tries the whole string before any split.
 //
 // An omitted `prep` and an explicit blank one mean different things, which is
@@ -704,9 +719,15 @@ fn ingredient_change_in(
         };
         Ok(IngredientMatch { name, prep })
     };
+    let named = |ing: IngredientOut, key: &str| {
+        ingredient_in(ing).map_err(|field| InputError::EmptyIngredientName {
+            location: format!("ingredient change #{number}"),
+            field: format!("{key}.{field}"),
+        })
+    };
     Ok(match change {
         IngredientChangeInput::Add { ingredient } => {
-            IngredientChange::Add(ingredient_in(ingredient))
+            IngredientChange::Add(named(ingredient, "ingredient")?)
         }
         IngredientChangeInput::Replace {
             name,
@@ -714,7 +735,7 @@ fn ingredient_change_in(
             replacement,
         } => IngredientChange::Replace {
             target: target(name, prep)?,
-            replacement: ingredient_in(replacement),
+            replacement: named(replacement, "with")?,
         },
         IngredientChangeInput::Remove { name, prep } => IngredientChange::Remove {
             target: target(name, prep)?,
@@ -760,9 +781,7 @@ pub fn update_recipe_input_to_dto(input: UpdateRecipeInput) -> Result<UpdateReci
         // `ingredient_in` runs the comma'd-name splitter, exactly as on
         // create — skipping it would let "garlic, minced" land as one
         // ingredient name and fragment shopping aggregation.
-        ingredients: input
-            .ingredients
-            .map(|v| v.into_iter().map(ingredient_in).collect()),
+        ingredients: input.ingredients.map(ingredients_in).transpose()?,
         nutrition_per_serving: input.nutrition_per_serving.map(nutrition_in),
         tags: input.tags,
         notes: blank_to_none(input.notes).map(Some),
@@ -1514,5 +1533,116 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(p.normalized_tags(), vec!["dinner", "easy"]);
+    }
+
+    // ─── Blank ingredient names ─────────────────────────────────────
+
+    fn named(name: &str) -> IngredientOut {
+        IngredientOut {
+            name: name.into(),
+            prep: None,
+            amount: IngredientAmountOut::Single { value: 1.0 },
+            unit: "cup".into(),
+            notes: None,
+            or_alternative: None,
+        }
+    }
+
+    fn with_alternative(name: &str, alternative: &str) -> IngredientOut {
+        IngredientOut {
+            or_alternative: Some(Box::new(named(alternative))),
+            ..named(name)
+        }
+    }
+
+    #[test]
+    fn create_rejects_a_blank_ingredient_name_by_number() {
+        let err = create_recipe_input_to_dto(
+            CreateRecipeInput {
+                ingredients: vec![named("garlic"), named(" ")],
+                ..mk_input("X", 2)
+            },
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.starts_with("ingredient #2: name must not be empty"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn create_rejects_a_blank_or_alternative_name() {
+        let err = create_recipe_input_to_dto(
+            CreateRecipeInput {
+                ingredients: vec![with_alternative("butter", "")],
+                ..mk_input("X", 2)
+            },
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.starts_with("ingredient #1: or_alternative.name must not be empty"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn update_rejects_a_blank_ingredient_name_by_number() {
+        let err = update_recipe_input_to_dto(UpdateRecipeInput {
+            ingredients: Some(vec![named("garlic"), named("basil"), named("\t")]),
+            ..mk_update("x")
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.starts_with("ingredient #3: name must not be empty"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn adapt_rejects_a_blank_added_ingredient_name() {
+        let err = adapt_spec(serde_json::json!({"ingredient_changes": [
+            {"op": "add", "ingredient":
+                {"name": " ", "amount": {"kind": "single", "value": 1.0}, "unit": ""}},
+        ]}))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.starts_with("ingredient change #1: ingredient.name must not be empty"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn adapt_rejects_a_blank_replacement_name() {
+        let err = adapt_spec(serde_json::json!({"ingredient_changes": [
+            {"op": "remove", "name": "salt"},
+            {"op": "replace", "name": "sage", "with":
+                {"name": "basil", "amount": {"kind": "single", "value": 1.0}, "unit": "",
+                 "or_alternative": {"name": "", "amount": {"kind": "single", "value": 1.0}, "unit": ""}}},
+        ]}))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.starts_with("ingredient change #2: with.or_alternative.name must not be empty"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn adapt_reports_a_blank_target_before_a_blank_replacement() {
+        let err = adapt_spec(serde_json::json!({"ingredient_changes": [
+            {"op": "replace", "name": " ", "with":
+                {"name": "", "amount": {"kind": "single", "value": 1.0}, "unit": ""}},
+        ]}))
+        .unwrap_err();
+        assert!(
+            matches!(err, InputError::EmptyIngredientChangeName(1)),
+            "{err:?}"
+        );
     }
 }

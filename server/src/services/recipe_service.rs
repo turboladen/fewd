@@ -5,9 +5,14 @@ use sea_orm::*;
 
 use crate::dto::{CreateRecipeDto, IngredientDto, TimeValueDto, UpdateRecipeDto};
 use crate::entities::recipe::{self, Entity as Recipe};
+use crate::services::normalize::{
+    drop_unusable_import_ingredients, normalize_tags, required_name, trim_ingredient_names,
+};
 use crate::services::recipe_parser::DEFAULT_SERVINGS;
 use crate::services::recipe_scaler::scale_amounts;
-use crate::services::recipe_times::{resolve_times, SentTimes, StoredTimes};
+use crate::services::recipe_times::{
+    drop_unusable_import_times, resolve_times, SentTimes, StoredTimes,
+};
 use crate::services::service_error::{whole_star_rating, ServiceError, ValidationError};
 use crate::services::to_json;
 
@@ -68,19 +73,18 @@ pub fn default_unusable_import_servings(dto: &mut CreateRecipeDto) {
     }
 }
 
-/// Trim each tag and drop the ones left empty.
+/// Repairs a recipe the model produced so that create accepts it. It drops
+/// unusable times, replaces unusable servings, and drops nameless
+/// ingredients, logging a warning for each repair. Call it on every recipe
+/// the model produces, whether it is saved at once (import) or handed back
+/// as a draft the client saves later (adapt, suggest).
 //
-// `search_filtered` compares `LOWER(je.value) = ?` against a needle the
-// caller has already trimmed, so a stored " dinner" answers no tag search
-// while still rendering in the UI. Every write path — the HTTP routes,
-// `import_recipe_url`, and the MCP create/update tools — reaches the tags
-// column through `create` and `update` below, so normalizing in those two
-// places keeps that state unreachable.
-fn normalize_tags(tags: Vec<String>) -> Vec<String> {
-    tags.into_iter()
-        .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty())
-        .collect()
+// Recipes a person wrote, such as a markdown import or a direct create, are
+// not repaired: their errors name the field so the person can fix it.
+pub fn sanitize_generated_recipe(dto: &mut CreateRecipeDto) {
+    drop_unusable_import_times(dto);
+    default_unusable_import_servings(dto);
+    drop_unusable_import_ingredients(&dto.name, &mut dto.ingredients);
 }
 
 /// Filter set for [`RecipeService::search_filtered`]. All fields are optional;
@@ -160,14 +164,17 @@ impl RecipeService {
 
     pub async fn create(
         db: &DatabaseConnection,
-        data: CreateRecipeDto,
+        mut data: CreateRecipeDto,
     ) -> Result<recipe::Model, ServiceError> {
+        // The name is checked first, as the MCP converter does.
+        let name = required_name("name", data.name)?;
         // The shopping list and the scale preview divide by this count.
         if data.servings < 1 {
             return Err(ValidationError::NonPositiveServings(data.servings).into());
         }
+        trim_ingredient_names("ingredients", &mut data.ingredients)?;
         let now = chrono::Utc::now();
-        let base_slug = migration::slugify(&data.name);
+        let base_slug = migration::slugify(&name);
 
         let times = resolve_times(
             StoredTimes::default(),
@@ -198,7 +205,7 @@ impl RecipeService {
             let model = recipe::ActiveModel {
                 id: Set(uuid::Uuid::new_v4().to_string()),
                 slug: Set(candidate_slug),
-                name: Set(data.name.clone()),
+                name: Set(name.clone()),
                 description: Set(data.description.clone()),
                 source: Set(data.source.clone()),
                 source_url: Set(data.source_url.clone()),
@@ -238,13 +245,23 @@ impl RecipeService {
     pub async fn update(
         db: &DatabaseConnection,
         id: String,
-        data: UpdateRecipeDto,
+        mut data: UpdateRecipeDto,
     ) -> Result<recipe::Model, ServiceError> {
+        // No check below depends on the stored row, so a bad value answers
+        // a validation error even when the id names no recipe.
+        let name = data.name.map(|n| required_name("name", n)).transpose()?;
         // A count below 1 would scale every stored amount to zero or below,
         // and nothing could scale them back.
         if let Some(servings) = data.servings.filter(|&s| s < 1) {
             return Err(ValidationError::NonPositiveServings(servings).into());
         }
+        if let Some(ingredients) = &mut data.ingredients {
+            trim_ingredient_names("ingredients", ingredients)?;
+        }
+        let rating = data
+            .rating
+            .map(|rating| rating.map(whole_star_rating).transpose())
+            .transpose()?;
 
         let existing = Recipe::find_by_id(id)
             .one(db)
@@ -287,7 +304,7 @@ impl RecipeService {
 
         let mut recipe: recipe::ActiveModel = existing.into();
 
-        if let Some(name) = data.name {
+        if let Some(name) = name {
             recipe.name = Set(name);
         }
         if let Some(description) = data.description {
@@ -340,8 +357,8 @@ impl RecipeService {
         if let Some(is_favorite) = data.is_favorite {
             recipe.is_favorite = Set(is_favorite);
         }
-        if let Some(rating) = data.rating {
-            recipe.rating = Set(rating.map(whole_star_rating).transpose()?);
+        if let Some(rating) = rating {
+            recipe.rating = Set(rating);
         }
 
         recipe.updated_at = Set(chrono::Utc::now());

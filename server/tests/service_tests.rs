@@ -4729,3 +4729,669 @@ async fn shopping_list_converts_one_meals_items_in_different_units() {
     assert_eq!(list[0].total_unit.as_deref(), Some("cup"));
     assert_eq!(amount_value(list[0].total_amount.as_ref().unwrap()), 2.06);
 }
+
+// --- Write normalization: names, tags, and ingredient names ---
+
+fn named_ingredient(name: &str) -> IngredientDto {
+    IngredientDto {
+        name: name.to_string(),
+        prep: None,
+        amount: IngredientAmountDto::Single { value: 1.0 },
+        unit: "cup".to_string(),
+        notes: None,
+        or_alternative: None,
+    }
+}
+
+fn with_alternative(name: &str, alternative: &str) -> IngredientDto {
+    IngredientDto {
+        or_alternative: Some(Box::new(named_ingredient(alternative))),
+        ..named_ingredient(name)
+    }
+}
+
+fn stored_names(json: &str) -> Vec<(String, Option<String>)> {
+    stored_ingredients(json)
+        .into_iter()
+        .map(|i| (i.name, i.or_alternative.map(|alt| alt.name)))
+        .collect()
+}
+
+fn test_drink_dto(name: &str) -> fewd_lib::dto::CreateDrinkRecipeDto {
+    fewd_lib::dto::CreateDrinkRecipeDto {
+        name: name.to_string(),
+        description: None,
+        source: "manual".to_string(),
+        source_url: None,
+        servings: 1,
+        instructions: "Shake".to_string(),
+        ingredients: vec![named_ingredient("rum")],
+        technique: None,
+        glassware: None,
+        garnish: None,
+        tags: vec![],
+        notes: None,
+        icon: None,
+        is_non_alcoholic: None,
+    }
+}
+
+// The drink update DTO has no `Default`, so tests build it from JSON.
+fn drink_update(body: serde_json::Value) -> fewd_lib::dto::UpdateDrinkRecipeDto {
+    serde_json::from_value(body).unwrap()
+}
+
+fn adhoc_serving(items: Vec<IngredientDto>) -> PersonServingDto {
+    PersonServingDto::Adhoc {
+        person_id: "p1".to_string(),
+        adhoc_items: items,
+        notes: None,
+    }
+}
+
+fn validation_message(err: &ServiceError) -> String {
+    match err {
+        ServiceError::Validation(e) => e.to_string(),
+        ServiceError::Database(e) => panic!("expected a validation error, got {e}"),
+    }
+}
+
+#[tokio::test]
+async fn recipe_name_is_trimmed_on_create_and_update() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(&db, test_recipe_dto("  Chicken Bowls  "))
+        .await
+        .unwrap();
+    assert_eq!(recipe.name, "Chicken Bowls");
+    assert_eq!(recipe.slug, "chicken-bowls");
+
+    let updated = RecipeService::update(
+        &db,
+        recipe.id,
+        UpdateRecipeDto {
+            name: Some("\tTacos ".to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.name, "Tacos");
+}
+
+#[tokio::test]
+async fn recipe_blank_name_is_rejected_on_create_and_update() {
+    let db = setup_db().await;
+    let err = RecipeService::create(&db, test_recipe_dto("   "))
+        .await
+        .unwrap_err();
+    assert!(validation_message(&err).starts_with("name"), "{err}");
+    assert!(RecipeService::get_all(&db).await.unwrap().is_empty());
+
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let err = RecipeService::update(
+        &db,
+        recipe.id.clone(),
+        UpdateRecipeDto {
+            name: Some(" \n".to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(validation_message(&err).starts_with("name"), "{err}");
+    let stored = RecipeService::get_by_id(&db, recipe.id).await.unwrap();
+    assert_eq!(stored.unwrap().name, "Pasta");
+}
+
+#[tokio::test]
+async fn recipe_blank_name_is_reported_before_nonpositive_servings() {
+    // The MCP converter checks the name first, so both surfaces report the
+    // same field for an input that breaks both rules.
+    let db = setup_db().await;
+    let err = RecipeService::create(
+        &db,
+        CreateRecipeDto {
+            servings: 0,
+            ..test_recipe_dto(" ")
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(validation_message(&err).starts_with("name"), "{err}");
+}
+
+#[tokio::test]
+async fn recipe_blank_ingredient_name_is_rejected_by_number() {
+    let db = setup_db().await;
+    let err = RecipeService::create(
+        &db,
+        CreateRecipeDto {
+            ingredients: vec![named_ingredient("garlic"), named_ingredient("  ")],
+            ..test_recipe_dto("Pasta")
+        },
+    )
+    .await
+    .unwrap_err();
+    let message = validation_message(&err);
+    assert!(message.starts_with("ingredients[2].name"), "{message}");
+
+    let err = RecipeService::create(
+        &db,
+        CreateRecipeDto {
+            ingredients: vec![with_alternative("butter", "")],
+            ..test_recipe_dto("Pasta")
+        },
+    )
+    .await
+    .unwrap_err();
+    let message = validation_message(&err);
+    assert!(
+        message.starts_with("ingredients[1].or_alternative.name"),
+        "{message}"
+    );
+    assert!(RecipeService::get_all(&db).await.unwrap().is_empty());
+
+    let recipe = RecipeService::create(&db, test_recipe_dto("Pasta"))
+        .await
+        .unwrap();
+    let err = RecipeService::update(
+        &db,
+        recipe.id.clone(),
+        UpdateRecipeDto {
+            ingredients: Some(vec![named_ingredient("\t")]),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap_err();
+    let message = validation_message(&err);
+    assert!(message.starts_with("ingredients[1].name"), "{message}");
+    let stored = RecipeService::get_by_id(&db, recipe.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored_ingredients(&stored.ingredients).len(), 2);
+}
+
+#[tokio::test]
+async fn recipe_update_reports_a_blank_ingredient_before_a_missing_row() {
+    let db = setup_db().await;
+    let err = RecipeService::update(
+        &db,
+        "no-such-recipe".to_string(),
+        UpdateRecipeDto {
+            ingredients: Some(vec![named_ingredient("")]),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        validation_message(&err).starts_with("ingredients[1].name"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn recipe_ingredient_names_are_trimmed_on_create_and_update() {
+    let db = setup_db().await;
+    let recipe = RecipeService::create(
+        &db,
+        CreateRecipeDto {
+            ingredients: vec![
+                named_ingredient(" garlic "),
+                with_alternative("basil\t", "  parsley"),
+            ],
+            ..test_recipe_dto("Pesto")
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        stored_names(&recipe.ingredients),
+        vec![
+            ("garlic".to_string(), None),
+            ("basil".to_string(), Some("parsley".to_string())),
+        ]
+    );
+
+    let updated = RecipeService::update(
+        &db,
+        recipe.id,
+        UpdateRecipeDto {
+            ingredients: Some(vec![named_ingredient("  pine nuts ")]),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        stored_names(&updated.ingredients),
+        vec![("pine nuts".to_string(), None)]
+    );
+}
+
+#[tokio::test]
+async fn drink_tags_and_name_are_trimmed_on_create_and_update() {
+    use fewd_lib::services::drink_recipe_service::DrinkRecipeService;
+    let db = setup_db().await;
+    let drink = DrinkRecipeService::create(
+        &db,
+        fewd_lib::dto::CreateDrinkRecipeDto {
+            tags: vec![" tiki ".to_string(), String::new(), "Rum".to_string()],
+            ..test_drink_dto(" Mai Tai ")
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(drink.name, "Mai Tai");
+    assert_eq!(drink.slug, "mai-tai");
+    let tags: Vec<String> = serde_json::from_str(&drink.tags).unwrap();
+    assert_eq!(tags, vec!["tiki", "Rum"]);
+
+    let updated = DrinkRecipeService::update(
+        &db,
+        drink.id,
+        drink_update(serde_json::json!({"name": "\tZombie\n", "tags": ["  strong", " "]})),
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.name, "Zombie");
+    let tags: Vec<String> = serde_json::from_str(&updated.tags).unwrap();
+    assert_eq!(tags, vec!["strong"]);
+}
+
+#[tokio::test]
+async fn drink_blank_name_is_rejected_on_create_and_update() {
+    use fewd_lib::services::drink_recipe_service::DrinkRecipeService;
+    let db = setup_db().await;
+    let err = DrinkRecipeService::create(&db, test_drink_dto("  "))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().starts_with("name"), "{err}");
+    assert!(DrinkRecipeService::get_all(&db).await.unwrap().is_empty());
+
+    let drink = DrinkRecipeService::create(&db, test_drink_dto("Negroni"))
+        .await
+        .unwrap();
+    let err = DrinkRecipeService::update(
+        &db,
+        drink.id.clone(),
+        drink_update(serde_json::json!({"name": ""})),
+    )
+    .await
+    .unwrap_err();
+    assert!(validation_message(&err).starts_with("name"), "{err}");
+    let stored = DrinkRecipeService::get_by_id(&db, drink.id).await.unwrap();
+    assert_eq!(stored.unwrap().name, "Negroni");
+}
+
+#[tokio::test]
+async fn drink_blank_ingredient_name_is_rejected_by_number() {
+    use fewd_lib::services::drink_recipe_service::DrinkRecipeService;
+    let db = setup_db().await;
+    let err = DrinkRecipeService::create(
+        &db,
+        fewd_lib::dto::CreateDrinkRecipeDto {
+            ingredients: vec![named_ingredient("rum"), with_alternative("lime", " ")],
+            ..test_drink_dto("Daiquiri")
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        err.to_string()
+            .starts_with("ingredients[2].or_alternative.name"),
+        "{err}"
+    );
+    assert!(DrinkRecipeService::get_all(&db).await.unwrap().is_empty());
+
+    let drink = DrinkRecipeService::create(&db, test_drink_dto("Daiquiri"))
+        .await
+        .unwrap();
+    let err = DrinkRecipeService::update(
+        &db,
+        drink.id,
+        drink_update(serde_json::json!({
+            "ingredients": [named_ingredient("rum"), named_ingredient("")],
+        })),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        validation_message(&err).starts_with("ingredients[2].name"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn drink_ingredient_names_are_trimmed_on_create_and_update() {
+    use fewd_lib::services::drink_recipe_service::DrinkRecipeService;
+    let db = setup_db().await;
+    let drink = DrinkRecipeService::create(
+        &db,
+        fewd_lib::dto::CreateDrinkRecipeDto {
+            ingredients: vec![with_alternative(" lime juice", "lemon juice ")],
+            ..test_drink_dto("Daiquiri")
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        stored_names(&drink.ingredients),
+        vec![("lime juice".to_string(), Some("lemon juice".to_string()))]
+    );
+
+    let updated = DrinkRecipeService::update(
+        &db,
+        drink.id,
+        drink_update(serde_json::json!({"ingredients": [named_ingredient("  white rum  ")]})),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        stored_names(&updated.ingredients),
+        vec![("white rum".to_string(), None)]
+    );
+}
+
+#[tokio::test]
+async fn meal_adhoc_item_names_are_trimmed_and_blank_ones_rejected() {
+    let db = setup_db().await;
+    let meal = MealService::create(
+        &db,
+        dinner(
+            "2025-06-10",
+            vec![adhoc_serving(vec![with_alternative(" bread ", " rolls")])],
+        ),
+    )
+    .await
+    .unwrap();
+    let servings: Vec<PersonServingDto> = serde_json::from_str(&meal.servings).unwrap();
+    let PersonServingDto::Adhoc { adhoc_items, .. } = &servings[0] else {
+        panic!("expected an ad-hoc serving");
+    };
+    assert_eq!(adhoc_items[0].name, "bread");
+    assert_eq!(
+        adhoc_items[0].or_alternative.as_ref().unwrap().name,
+        "rolls"
+    );
+
+    let blank_second_item = || {
+        vec![
+            recipe_serving("p1", "r1", 1.0),
+            adhoc_serving(vec![named_ingredient("butter"), named_ingredient(" ")]),
+        ]
+    };
+    let err = MealService::create(&db, dinner("2025-06-11", blank_second_item()))
+        .await
+        .unwrap_err();
+    let message = validation_message(&err);
+    assert!(
+        message.starts_with("servings[2].adhoc_items[2].name"),
+        "{message}"
+    );
+
+    let err = MealService::update(
+        &db,
+        meal.id.clone(),
+        fewd_lib::dto::UpdateMealDto {
+            date: None,
+            meal_type: None,
+            order_index: None,
+            servings: Some(blank_second_item()),
+        },
+    )
+    .await
+    .unwrap_err();
+    let message = validation_message(&err);
+    assert!(
+        message.starts_with("servings[2].adhoc_items[2].name"),
+        "{message}"
+    );
+    let stored = MealService::get_by_id(&db, meal.id).await.unwrap().unwrap();
+    assert_eq!(stored.servings, meal.servings);
+}
+
+#[tokio::test]
+async fn meal_template_names_are_trimmed_and_blank_ones_rejected() {
+    let db = setup_db().await;
+    let template_dto = |name: &str, items: Vec<IngredientDto>| CreateMealTemplateDto {
+        name: name.to_string(),
+        meal_type: MealType::Breakfast,
+        servings: vec![adhoc_serving(items)],
+    };
+    let template = MealTemplateService::create(
+        &db,
+        template_dto(" Quick Brekkie ", vec![named_ingredient(" toast ")]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(template.name, "Quick Brekkie");
+    let servings: Vec<PersonServingDto> = serde_json::from_str(&template.servings).unwrap();
+    let PersonServingDto::Adhoc { adhoc_items, .. } = &servings[0] else {
+        panic!("expected an ad-hoc serving");
+    };
+    assert_eq!(adhoc_items[0].name, "toast");
+
+    let err = MealTemplateService::create(&db, template_dto("  ", vec![named_ingredient("toast")]))
+        .await
+        .unwrap_err();
+    assert!(validation_message(&err).starts_with("name"), "{err}");
+    let err = MealTemplateService::create(&db, template_dto("Brekkie", vec![named_ingredient("")]))
+        .await
+        .unwrap_err();
+    assert!(
+        validation_message(&err).starts_with("servings[1].adhoc_items[1].name"),
+        "{err}"
+    );
+
+    let renamed = MealTemplateService::update(
+        &db,
+        template.id.clone(),
+        fewd_lib::dto::UpdateMealTemplateDto {
+            name: Some("Sunday Brekkie\t".to_string()),
+            meal_type: None,
+            servings: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(renamed.name, "Sunday Brekkie");
+    let err = MealTemplateService::update(
+        &db,
+        template.id.clone(),
+        fewd_lib::dto::UpdateMealTemplateDto {
+            name: Some(" ".to_string()),
+            meal_type: None,
+            servings: None,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(validation_message(&err).starts_with("name"), "{err}");
+    let err = MealTemplateService::update(
+        &db,
+        template.id,
+        fewd_lib::dto::UpdateMealTemplateDto {
+            name: None,
+            meal_type: None,
+            servings: Some(vec![adhoc_serving(vec![named_ingredient("\n")])]),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        validation_message(&err).starts_with("servings[1].adhoc_items[1].name"),
+        "{err}"
+    );
+    let all = MealTemplateService::get_all(&db).await.unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].name, "Sunday Brekkie");
+}
+
+#[tokio::test]
+async fn meal_template_from_meal_trims_its_name_and_rejects_a_blank_one() {
+    let db = setup_db().await;
+    let meal = MealService::create(
+        &db,
+        dinner(
+            "2025-06-10",
+            vec![adhoc_serving(vec![named_ingredient("bread")])],
+        ),
+    )
+    .await
+    .unwrap();
+    let err = MealTemplateService::create_from_meal(&db, meal.id.clone(), "   ".to_string())
+        .await
+        .unwrap_err();
+    assert!(validation_message(&err).starts_with("name"), "{err}");
+
+    let template = MealTemplateService::create_from_meal(&db, meal.id, " Pasta Night ".to_string())
+        .await
+        .unwrap();
+    assert_eq!(template.name, "Pasta Night");
+}
+
+#[test]
+fn adapter_parse_response_drops_an_ingredient_with_no_name() {
+    // The draft goes back to the web form, and saving it would fail on the
+    // nameless row, so the row is dropped and a blank alternative cleared.
+    let json = r#"{"name": "Test", "source": "x", "servings": 2, "instructions": "Do it",
+        "tags": [],
+        "ingredients": [
+            {"name": "garlic", "amount": {"type": "single", "value": 1}, "unit": "clove", "notes": null},
+            {"name": "  ", "amount": {"type": "single", "value": 2}, "unit": "cup", "notes": null},
+            {"name": "basil", "amount": {"type": "single", "value": 1}, "unit": "cup", "notes": null,
+             "or_alternative": {"name": "", "amount": {"type": "single", "value": 1}, "unit": "cup", "notes": null}}
+        ]}"#;
+
+    let result = RecipeAdapter::parse_response(json, "parent-1").unwrap();
+    let names: Vec<(&str, bool)> = result
+        .ingredients
+        .iter()
+        .map(|i| (i.name.as_str(), i.or_alternative.is_some()))
+        .collect();
+    assert_eq!(names, [("garlic", false), ("basil", false)]);
+}
+
+#[test]
+fn suggestion_parse_response_drops_an_ingredient_with_no_name() {
+    use fewd_lib::services::ai_suggestion_service::AiSuggestionService;
+    let json = r#"[{"name": "Test", "source": "x", "servings": 2, "instructions": "Do it",
+        "tags": [],
+        "ingredients": [
+            {"name": "", "amount": {"type": "single", "value": 2}, "unit": "cup", "notes": null},
+            {"name": "rice", "amount": {"type": "single", "value": 1}, "unit": "cup", "notes": null}
+        ]}]"#;
+
+    let result = AiSuggestionService::parse_response(json).unwrap();
+    let names: Vec<&str> = result[0]
+        .ingredients
+        .iter()
+        .map(|i| i.name.as_str())
+        .collect();
+    assert_eq!(names, ["rice"]);
+}
+
+#[test]
+fn cocktail_suggestion_parse_response_repairs_nameless_ingredients_and_servings() {
+    // A suggestion is saved through drink create as the model returned it,
+    // so a nameless row or a zero count would make the save fail.
+    use fewd_lib::services::cocktail_suggestion_service::CocktailSuggestionService;
+    let json = r#"[{"name": "Daiquiri", "servings": 0, "instructions": "Shake", "tags": [],
+        "ingredients": [
+            {"name": "rum", "amount": {"type": "single", "value": 2}, "unit": "oz", "notes": null,
+             "or_alternative": {"name": " ", "amount": {"type": "single", "value": 2}, "unit": "oz", "notes": null}},
+            {"name": "", "amount": {"type": "single", "value": 1}, "unit": "oz", "notes": null}
+        ]}]"#;
+
+    let result = CocktailSuggestionService::parse_response(json).unwrap();
+    assert_eq!(result[0].servings, 1);
+    let names: Vec<(&str, bool)> = result[0]
+        .ingredients
+        .iter()
+        .map(|i| (i.name.as_str(), i.or_alternative.is_some()))
+        .collect();
+    assert_eq!(names, [("rum", false)]);
+}
+
+#[tokio::test]
+async fn drink_writes_reject_nonpositive_servings() {
+    use fewd_lib::services::drink_recipe_service::DrinkRecipeService;
+    let db = setup_db().await;
+    for servings in [0, -1] {
+        let err = DrinkRecipeService::create(
+            &db,
+            fewd_lib::dto::CreateDrinkRecipeDto {
+                servings,
+                ..test_drink_dto("Negroni")
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().starts_with("servings"), "{servings}: {err}");
+    }
+    assert!(DrinkRecipeService::get_all(&db).await.unwrap().is_empty());
+
+    let drink = DrinkRecipeService::create(&db, test_drink_dto("Negroni"))
+        .await
+        .unwrap();
+    let err = DrinkRecipeService::update(
+        &db,
+        drink.id.clone(),
+        drink_update(serde_json::json!({"servings": 0})),
+    )
+    .await
+    .unwrap_err();
+    assert!(validation_message(&err).starts_with("servings"), "{err}");
+    let stored = DrinkRecipeService::get_by_id(&db, drink.id).await.unwrap();
+    assert_eq!(stored.unwrap().servings, 1);
+}
+
+#[tokio::test]
+async fn meal_template_from_meal_trims_stored_adhoc_items_and_rejects_a_blank_one() {
+    // The stored meal row is written directly, so the test does not depend
+    // on whether meal writes accept the names.
+    let db = setup_db().await;
+    let store = |meal: fewd_lib::entities::meal::Model, items: Vec<IngredientDto>| {
+        let mut row = meal.into_active_model();
+        row.servings = Set(serde_json::to_string(&vec![adhoc_serving(items)]).unwrap());
+        row
+    };
+    let meal = MealService::create(
+        &db,
+        dinner(
+            "2025-06-10",
+            vec![adhoc_serving(vec![named_ingredient("bread")])],
+        ),
+    )
+    .await
+    .unwrap();
+
+    let padded = store(meal.clone(), vec![named_ingredient(" bread ")]);
+    sea_orm::ActiveModelTrait::update(padded, &db)
+        .await
+        .unwrap();
+    let template = MealTemplateService::create_from_meal(&db, meal.id.clone(), "Toast".to_string())
+        .await
+        .unwrap();
+    let servings: Vec<PersonServingDto> = serde_json::from_str(&template.servings).unwrap();
+    let PersonServingDto::Adhoc { adhoc_items, .. } = &servings[0] else {
+        panic!("expected an ad-hoc serving");
+    };
+    assert_eq!(adhoc_items[0].name, "bread");
+
+    let blank = store(meal.clone(), vec![named_ingredient(" ")]);
+    sea_orm::ActiveModelTrait::update(blank, &db).await.unwrap();
+    let err = MealTemplateService::create_from_meal(&db, meal.id, "Toast".to_string())
+        .await
+        .unwrap_err();
+    assert!(
+        validation_message(&err).starts_with("servings[1].adhoc_items[1].name"),
+        "{err}"
+    );
+    assert_eq!(MealTemplateService::get_all(&db).await.unwrap().len(), 1);
+}

@@ -22,10 +22,7 @@ use crate::services::meal_service::MealService;
 use crate::services::person_service::PersonService;
 use crate::services::printable_service::{self, PersonNameMap};
 use crate::services::recipe_import_service::{ImportError, RecipeImportService};
-use crate::services::recipe_service::{
-    default_unusable_import_servings, RecipeService, SearchFilters,
-};
-use crate::services::recipe_times::drop_unusable_import_times;
+use crate::services::recipe_service::{sanitize_generated_recipe, RecipeService, SearchFilters};
 use crate::services::recipe_variant::{build_variant_dto, VariantError};
 use crate::services::service_error::ServiceError;
 use crate::services::settings_service::SettingsService;
@@ -832,8 +829,7 @@ impl FewdMcp {
         // will harmonize both surfaces on the canonical form.
         let mut dto = result.recipe;
         dto.source_url = Some(url.to_string());
-        drop_unusable_import_times(&mut dto);
-        default_unusable_import_servings(&mut dto);
+        sanitize_generated_recipe(&mut dto);
 
         // Match the HTTP-route token meter so MCP imports show up in usage stats.
         SettingsService::increment_token_usage(&self.db, result.input_tokens, result.output_tokens)
@@ -1474,6 +1470,14 @@ mod tests {
                 }
                 .to_string(),
                 vec!["1500", "366", "Narrow"],
+            ),
+            (
+                InputError::EmptyIngredientName {
+                    location: "serving #1 item #2".into(),
+                    field: "or_alternative.name".into(),
+                }
+                .to_string(),
+                vec!["serving #1 item #2", "or_alternative.name", "empty", "prep"],
             ),
         ];
 
@@ -4874,6 +4878,10 @@ mod tests {
                     {"op": "remove", "name": "sage"},
                     {"op": "remove", "name": "sage"},
                 ]}),
+                json!({"ingredient_changes": [{"op": "add", "ingredient":
+                    {"name": " ", "amount": {"kind": "single", "value": 1.0}, "unit": ""}}]}),
+                json!({"ingredient_changes": [{"op": "replace", "name": "sage", "with":
+                    {"name": "", "amount": {"kind": "single", "value": 1.0}, "unit": ""}}]}),
                 json!({"instruction_edits": [{"find": " ", "replace": "x"}]}),
                 json!({"instruction_edits": [{"find": "chorizo", "replace": "x"}]}),
                 json!({"instruction_edits": [{"find": "sage", "replace": "basil"}]}),

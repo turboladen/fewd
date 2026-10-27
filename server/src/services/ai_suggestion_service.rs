@@ -7,8 +7,7 @@ use crate::entities::{meal, person, recipe};
 use crate::services::claude_client::{ClaudeClient, ClaudeError, SendMessageResponse};
 use crate::services::prompt_builder::PromptBuilder;
 use crate::services::recipe_adapter::{strip_code_fences, PersonAdaptOptions, RecipeAdapter};
-use crate::services::recipe_service::default_unusable_import_servings;
-use crate::services::recipe_times::drop_unusable_import_times;
+use crate::services::recipe_service::sanitize_generated_recipe;
 
 /// The "character" or vibe of the meal suggestions
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -221,8 +220,7 @@ Rules:
         for dto in &mut suggestions {
             dto.source = "ai_suggested".to_string();
             dto.parent_recipe_id = None;
-            drop_unusable_import_times(dto);
-            default_unusable_import_servings(dto);
+            sanitize_generated_recipe(dto);
         }
 
         Ok(suggestions)

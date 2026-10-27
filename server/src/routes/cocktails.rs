@@ -15,7 +15,7 @@ use crate::services::bar_item_service::BarItemService;
 use crate::services::claude_client::{ClaudeClient, ProgressEvent};
 use crate::services::cocktail_suggestion_service::{CocktailContext, CocktailSuggestionService};
 use crate::services::drink_recipe_import_service::DrinkRecipeImportService;
-use crate::services::drink_recipe_service::DrinkRecipeService;
+use crate::services::drink_recipe_service::{sanitize_generated_drink, DrinkRecipeService};
 use crate::services::person_service::PersonService;
 use crate::services::recipe_import_service::RecipeImportService;
 use crate::services::settings_service::SettingsService;
@@ -241,19 +241,16 @@ pub async fn import_drink_recipe_url(
                     Ok(mut dto) => {
                         dto.source = "url_import".to_string();
                         dto.source_url = Some(url);
+                        sanitize_generated_drink(&mut dto);
 
                         match DrinkRecipeService::create(&db, dto).await {
                             Ok(recipe) => {
                                 let value = serde_json::to_value(&recipe).unwrap_or_default();
                                 let _ = sse_tx.send(SsePayload::Complete(value)).await;
                             }
-                            // The DbErr text carries SQLite detail, so it
-                            // stays in the log and the client gets a label.
                             Err(e) => {
-                                tracing::error!("Failed to save imported drink recipe: {}", e);
-                                let _ = sse_tx
-                                    .send(SsePayload::Error("Failed to save recipe".to_string()))
-                                    .await;
+                                let message = super::recipes::import_save_error_message(e);
+                                let _ = sse_tx.send(SsePayload::Error(message)).await;
                             }
                         }
                     }

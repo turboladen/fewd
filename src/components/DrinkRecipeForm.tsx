@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import type { DrinkRecipeFormData } from '../types/drinkRecipe'
-import { normalizeIngredientsPrep } from '../types/recipe'
+import {
+  dropEmptyIngredients,
+  normalizeIngredientsPrep,
+  unnamedIngredientError,
+} from '../types/recipe'
 import { IngredientInput } from './IngredientInput'
 import { NumberInput } from './NumberInput'
 import { TagInput } from './TagInput'
@@ -21,12 +25,18 @@ export function DrinkRecipeForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (form.ingredients.length === 0 || form.ingredients.every((i) => !i.name.trim())) {
+    const unnamed = unnamedIngredientError(form.ingredients)
+    if (unnamed) {
+      setValidationError(unnamed)
+      return
+    }
+    const ingredients = dropEmptyIngredients(form.ingredients)
+    if (ingredients.length === 0) {
       setValidationError('At least 1 ingredient with a name required')
       return
     }
     setValidationError(null)
-    onSubmit({ ...form, ingredients: normalizeIngredientsPrep(form.ingredients) })
+    onSubmit({ ...form, ingredients: normalizeIngredientsPrep(ingredients) })
   }
 
   return (

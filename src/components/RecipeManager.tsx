@@ -21,6 +21,7 @@ import type {
   TimeValue,
 } from '../types/recipe'
 import {
+  dropEmptyIngredients,
   formatAmount,
   formatIngredientLabel,
   formatRatio,
@@ -30,6 +31,7 @@ import {
   ingredientsEqual,
   normalizeIngredientsPrep,
   parseRecipe,
+  unnamedIngredientError,
 } from '../types/recipe'
 import {
   DEFAULT_RECIPE_SORT,
@@ -160,7 +162,7 @@ export function RecipeForm({
   const [validationError, setValidationError] = useState<string | null>(null)
   const rescaleWarning = rescaleBaseline
       && form.servings !== rescaleBaseline.servings
-      && !ingredientsEqual(form.ingredients, rescaleBaseline.ingredients)
+      && !ingredientsEqual(dropEmptyIngredients(form.ingredients), rescaleBaseline.ingredients)
     ? `You changed the ingredients, so their amounts are saved as entered and will not be rescaled to ${form.servings} ${
       form.servings === 1 ? 'serving' : 'servings'
     }. To rescale them automatically, undo your ingredient changes, save the new servings, then edit the ingredients.`
@@ -168,12 +170,18 @@ export function RecipeForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (form.ingredients.length === 0 || form.ingredients.every((i) => !i.name.trim())) {
+    const unnamed = unnamedIngredientError(form.ingredients)
+    if (unnamed) {
+      setValidationError(unnamed)
+      return
+    }
+    const ingredients = dropEmptyIngredients(form.ingredients)
+    if (ingredients.length === 0) {
       setValidationError('At least 1 ingredient with a name required')
       return
     }
     setValidationError(null)
-    onSubmit({ ...form, ingredients: normalizeIngredientsPrep(form.ingredients) })
+    onSubmit({ ...form, ingredients: normalizeIngredientsPrep(ingredients) })
   }
 
   return (

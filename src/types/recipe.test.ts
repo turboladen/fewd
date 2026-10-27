@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Ingredient, IngredientAmount, Recipe, TimeValue } from './recipe'
 import {
+  dropEmptyIngredients,
   formatAmount,
   formatIngredientLabel,
   formatRatio,
@@ -11,6 +12,7 @@ import {
   parseInstructionSections,
   parseInstructionSteps,
   parseRecipe,
+  unnamedIngredientError,
 } from './recipe'
 
 describe('formatTime', () => {
@@ -489,5 +491,56 @@ describe('normalizeIngredientsPrep', () => {
     expect(first.prep).toBe('diced')
     expect(first.or_alternative?.prep).toBe('minced')
     expect(second.prep).toBeUndefined()
+  })
+})
+
+describe('dropEmptyIngredients', () => {
+  function row(name: string, overrides: Partial<Ingredient> = {}): Ingredient {
+    return { name, amount: { type: 'single', value: 1 }, unit: '', ...overrides }
+  }
+
+  it('drops only rows and alternatives that hold nothing', () => {
+    const result = dropEmptyIngredients([
+      row(' '),
+      row('lime', { or_alternative: row('lemon', { or_alternative: row('\t') }) }),
+      row('', { unit: 'cup' }),
+      row('rum', { or_alternative: row('cachaça') }),
+    ])
+
+    expect(result.map((i) => i.name)).toEqual(['lime', '', 'rum'])
+    expect(result[0].or_alternative?.name).toBe('lemon')
+    expect(result[0].or_alternative?.or_alternative).toBeUndefined()
+    expect(result[2].or_alternative?.name).toBe('cachaça')
+  })
+
+  it('drops a row whose amount was cleared and that holds nothing else', () => {
+    expect(dropEmptyIngredients([row('', { amount: { type: 'single', value: 0 } })])).toEqual([])
+    expect(unnamedIngredientError([row('', { amount: { type: 'single', value: 0 } })])).toBeNull()
+  })
+
+  it('keeps a row whose only data is a changed amount', () => {
+    expect(dropEmptyIngredients([row('', { amount: { type: 'single', value: 2 } })])).toHaveLength(
+      1,
+    )
+    expect(dropEmptyIngredients([row('', { amount: { type: 'range', min: 1, max: 2 } })]))
+      .toHaveLength(1)
+  })
+})
+
+describe('unnamedIngredientError', () => {
+  function row(name: string, overrides: Partial<Ingredient> = {}): Ingredient {
+    return { name, amount: { type: 'single', value: 1 }, unit: '', ...overrides }
+  }
+
+  it('skips empty rows and names the first unnamed row or nested alternative', () => {
+    expect(unnamedIngredientError([row('garlic'), row('')])).toBeNull()
+    expect(unnamedIngredientError([row(''), row('', { prep: 'minced' })])).toBe(
+      'Ingredient 2 has no name. Name it or remove the row.',
+    )
+    expect(
+      unnamedIngredientError([
+        row('lime', { or_alternative: row('lemon', { or_alternative: row(' ', { unit: 'oz' }) }) }),
+      ]),
+    ).toBe('The alternative for ingredient 1 has no name. Name it or remove the alternative.')
   })
 })

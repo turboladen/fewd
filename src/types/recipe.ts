@@ -56,6 +56,66 @@ export function normalizeIngredientsPrep(ingredients: Ingredient[]): Ingredient[
   return ingredients.map(normalizeOnePrep)
 }
 
+/**
+ * Returns true for a row the user added but never filled in: no name, unit,
+ * prep, or notes, a single amount that is the default 1 or was cleared to 0,
+ * and no alternative that holds anything.
+ */
+export function isEmptyIngredient(ingredient: Ingredient): boolean {
+  const blank = (text?: string | null) => (text ?? '').trim() === ''
+  return blank(ingredient.name) && blank(ingredient.unit) && blank(ingredient.prep)
+    && blank(ingredient.notes)
+    && ingredient.amount.type === 'single'
+    && (ingredient.amount.value === 1 || ingredient.amount.value === 0
+      || Number.isNaN(ingredient.amount.value))
+    && (!ingredient.or_alternative || isEmptyIngredient(ingredient.or_alternative))
+}
+
+/**
+ * Leave out every row the user left entirely empty and clear every
+ * alternative left entirely empty, as {@link isEmptyIngredient} decides.
+ * Rows that hold anything are kept, with or without a name.
+ */
+export function dropEmptyIngredients(ingredients: Ingredient[]): Ingredient[] {
+  return ingredients.filter((ingredient) => !isEmptyIngredient(ingredient)).map(
+    clearEmptyAlternative,
+  )
+}
+
+function clearEmptyAlternative(ingredient: Ingredient): Ingredient {
+  const alternative = ingredient.or_alternative
+  if (!alternative) return ingredient
+  return {
+    ...ingredient,
+    or_alternative: isEmptyIngredient(alternative) ? undefined : clearEmptyAlternative(alternative),
+  }
+}
+
+/**
+ * Returns a message naming the first row or alternative in `ingredients`
+ * that holds data but has no name, or null when there is none. Rows are
+ * numbered from 1 in the order the form shows them, and entirely empty rows
+ * are not reported, since saving drops them.
+ */
+export function unnamedIngredientError(ingredients: Ingredient[]): string | null {
+  for (const [index, ingredient] of ingredients.entries()) {
+    if (isEmptyIngredient(ingredient)) continue
+    if (ingredient.name.trim() === '') {
+      return `Ingredient ${index + 1} has no name. Name it or remove the row.`
+    }
+    let alternative = ingredient.or_alternative
+    while (alternative && !isEmptyIngredient(alternative)) {
+      if (alternative.name.trim() === '') {
+        return `The alternative for ingredient ${
+          index + 1
+        } has no name. Name it or remove the alternative.`
+      }
+      alternative = alternative.or_alternative
+    }
+  }
+  return null
+}
+
 function normalizeOnePrep(ingredient: Ingredient): Ingredient {
   return {
     ...ingredient,

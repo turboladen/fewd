@@ -362,6 +362,34 @@ describe('MealPlanner — default recipe for a new serving', () => {
   })
 })
 
+describe('MealPlanner — ad-hoc ingredient names', () => {
+  it('blocks saving an ad-hoc row with data but no name and names the person', async () => {
+    mockJson('GET', '/api/people', [
+      makePerson({ id: 'p1', name: 'Alice' }),
+      makePerson({ id: 'p2', name: 'Bob' }),
+    ])
+    mockJson('GET', '/api/recipes', [])
+    mockJson('GET', MEALS_URL, [])
+    mockJson('GET', '/api/meal-templates', [])
+    // No POST /api/meals mock registered — a save attempt would throw.
+
+    renderWithProviders(<MealPlanner />)
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Dinner/ }).length).toBe(7))
+    fireEvent.click(screen.getAllByRole('button', { name: /Dinner/ })[0])
+    await screen.findByRole('button', { name: 'Create Meal' })
+
+    // Bob is the second person, so his "+ Ingredients" button is the second one.
+    fireEvent.click(screen.getAllByRole('button', { name: /Ingredients/ })[1])
+    fireEvent.click(await screen.findByRole('button', { name: /add ingredient/i }))
+    fireEvent.change(screen.getByPlaceholderText('Unit'), { target: { value: 'cup' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create Meal' }))
+
+    await screen.findByText('Bob: Ingredient 1 has no name. Name it or remove the row.')
+    expect(screen.getByRole('button', { name: 'Create Meal' })).toBeInTheDocument()
+  })
+})
+
 describe('MealPlanner — delete a planned meal', () => {
   it('removes a meal via DELETE and the slot reverts to "+ Plan"', async () => {
     const alice = makePerson({ id: 'p1', name: 'Alice' })

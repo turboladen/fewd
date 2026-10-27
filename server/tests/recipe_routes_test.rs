@@ -882,3 +882,201 @@ async fn writes_to_a_missing_id_answer_404() {
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     assert_eq!(message(&body), "Meal not found");
 }
+
+// --- Write normalization: blank names answer 400 ---
+
+fn recipe_body(name: &str, ingredient_names: &[&str]) -> serde_json::Value {
+    let ingredients: Vec<serde_json::Value> = ingredient_names
+        .iter()
+        .map(|n| {
+            serde_json::json!({
+                "name": n,
+                "amount": { "type": "single", "value": 1 },
+                "unit": "cup",
+                "notes": null,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "name": name,
+        "source": "manual",
+        "servings": 4,
+        "instructions": "Mix and cook",
+        "ingredients": ingredients,
+        "tags": [],
+    })
+}
+
+#[tokio::test]
+async fn recipe_writes_with_a_blank_name_answer_400() {
+    let db = setup_db().await;
+    let (status, body) = send_json(
+        app(&db),
+        "POST",
+        "/api/recipes",
+        recipe_body("  ", &["garlic"]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(message(&body).starts_with("name"), "{body}");
+
+    let recipe = RecipeService::create(&db, recipe_dto("Pasta"))
+        .await
+        .expect("seed recipe");
+    for uri in [
+        format!("/api/recipes/{}", recipe.id),
+        "/api/recipes/no-such-recipe".to_string(),
+    ] {
+        let (status, body) =
+            send_json(app(&db), "PUT", &uri, serde_json::json!({ "name": "\t" })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}: {body}");
+        assert!(message(&body).starts_with("name"), "{uri}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn recipe_writes_with_a_blank_ingredient_name_answer_400() {
+    let db = setup_db().await;
+    let (status, body) = send_json(
+        app(&db),
+        "POST",
+        "/api/recipes",
+        recipe_body("Pasta", &["garlic", ""]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(message(&body).starts_with("ingredients[2].name"), "{body}");
+
+    let recipe = RecipeService::create(&db, recipe_dto("Pasta"))
+        .await
+        .expect("seed recipe");
+    let (status, body) = send_json(
+        app(&db),
+        "PUT",
+        &format!("/api/recipes/{}", recipe.id),
+        serde_json::json!({ "ingredients": recipe_body("x", &[" "])["ingredients"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(message(&body).starts_with("ingredients[1].name"), "{body}");
+}
+
+#[tokio::test]
+async fn drink_writes_with_a_blank_name_answer_400() {
+    let db = setup_db().await;
+    let (status, body) = send_json(
+        app(&db),
+        "POST",
+        "/api/drink-recipes",
+        recipe_body(" ", &["rum"]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(message(&body).starts_with("name"), "{body}");
+
+    let (status, body) = send_json(
+        app(&db),
+        "POST",
+        "/api/drink-recipes",
+        recipe_body("Daiquiri", &["rum", "  "]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(message(&body).starts_with("ingredients[2].name"), "{body}");
+
+    let drink_uri = seed_drink(&db).await;
+    for uri in [drink_uri.as_str(), "/api/drink-recipes/no-such-drink"] {
+        let (status, body) =
+            send_json(app(&db), "PUT", uri, serde_json::json!({ "name": "" })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}: {body}");
+        assert!(message(&body).starts_with("name"), "{uri}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn update_missing_drink_recipe_with_out_of_range_rating_answers_400() {
+    // The rating rule does not depend on the row, so a bad rating is
+    // reported even when the id names no drink.
+    let db = setup_db().await;
+    let (status, body) = send_json(
+        app(&db),
+        "PUT",
+        "/api/drink-recipes/no-such-drink",
+        serde_json::json!({ "rating": 9 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(message(&body).starts_with("rating"), "{body}");
+}
+
+#[tokio::test]
+async fn meal_writes_with_a_blank_adhoc_item_name_answer_400() {
+    let db = setup_db().await;
+    let body = |item_name: &str| {
+        serde_json::json!({
+            "date": "2025-06-10",
+            "meal_type": "Dinner",
+            "order_index": 2,
+            "servings": [{
+                "food_type": "adhoc",
+                "person_id": "p1",
+                "adhoc_items": recipe_body("x", &["bread", item_name])["ingredients"],
+                "notes": null,
+            }],
+        })
+    };
+    let (status, created) = send_json(app(&db), "POST", "/api/meals", body("butter")).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let meal_uri = format!("/api/meals/{}", created["id"].as_str().expect("meal id"));
+
+    for (method, uri) in [("POST", "/api/meals"), ("PUT", meal_uri.as_str())] {
+        let (status, response) = send_json(app(&db), method, uri, body(" ")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{method}: {response}");
+        assert!(
+            message(&response).starts_with("servings[1].adhoc_items[2].name"),
+            "{method}: {response}"
+        );
+    }
+
+    let mut template = body("butter");
+    template["name"] = serde_json::json!("  ");
+    let (status, response) = send_json(app(&db), "POST", "/api/meal-templates", template).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+    assert!(message(&response).starts_with("name"), "{response}");
+}
+
+#[tokio::test]
+async fn update_missing_recipe_with_out_of_range_rating_answers_400() {
+    let db = setup_db().await;
+    let (status, body) = send_json(
+        app(&db),
+        "PUT",
+        "/api/recipes/no-such-recipe",
+        serde_json::json!({ "rating": 9 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(message(&body).starts_with("rating"), "{body}");
+}
+
+#[tokio::test]
+async fn drink_writes_with_nonpositive_servings_answer_400() {
+    let db = setup_db().await;
+    let mut body = recipe_body("Daiquiri", &["rum"]);
+    body["servings"] = serde_json::json!(0);
+    let (status, response) = send_json(app(&db), "POST", "/api/drink-recipes", body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+    assert!(message(&response).starts_with("servings"), "{response}");
+
+    // The rule does not depend on the row, so a missing id answers 400.
+    let drink_uri = seed_drink(&db).await;
+    for uri in [drink_uri.as_str(), "/api/drink-recipes/no-such-drink"] {
+        let (status, response) =
+            send_json(app(&db), "PUT", uri, serde_json::json!({ "servings": 0 })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}: {response}");
+        assert!(
+            message(&response).starts_with("servings"),
+            "{uri}: {response}"
+        );
+    }
+}
