@@ -14,17 +14,21 @@ export function DrinkRecipeForm({
   onSubmit,
   onCancel,
   submitLabel,
+  saving = false,
 }: {
   initialData: DrinkRecipeFormData
   onSubmit: (data: DrinkRecipeFormData) => void
   onCancel: () => void
   submitLabel: string
+  /** Disables submitting and Cancel, so a save in flight cannot be sent twice or abandoned. */
+  saving?: boolean
 }) {
   const [form, setForm] = useState<DrinkRecipeFormData>(initialData)
   const [validationError, setValidationError] = useState<string | null>(null)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (saving) return
     const unnamed = unnamedIngredientError(form.ingredients)
     if (unnamed) {
       setValidationError(unnamed)
@@ -181,10 +185,10 @@ export function DrinkRecipeForm({
 
       {/* Actions */}
       <div className='flex gap-2'>
-        <button type='submit' className='btn-md btn-primary'>
+        <button type='submit' disabled={saving} className='btn-md btn-primary'>
           {submitLabel}
         </button>
-        <button type='button' onClick={onCancel} className='btn-md btn-outline'>
+        <button type='button' onClick={onCancel} disabled={saving} className='btn-md btn-outline'>
           Cancel
         </button>
       </div>

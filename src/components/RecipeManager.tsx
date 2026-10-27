@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   useCreateRecipe,
@@ -150,11 +150,14 @@ export function RecipeForm({
   onCancel,
   submitLabel,
   rescaleBaseline,
+  saving = false,
 }: {
   initialData: RecipeFormData
   onSubmit: (data: RecipeFormData) => void
   onCancel: () => void
   submitLabel: string
+  /** Disables submitting and Cancel, so a save in flight cannot be sent twice or abandoned. */
+  saving?: boolean
   /** This holds the servings and ingredients the form opened with. When it is set, the form warns that an edited list will not be rescaled to a changed count. */
   rescaleBaseline?: { servings: number; ingredients: Ingredient[] }
 }) {
@@ -170,6 +173,7 @@ export function RecipeForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (saving) return
     const unnamed = unnamedIngredientError(form.ingredients)
     if (unnamed) {
       setValidationError(unnamed)
@@ -362,6 +366,7 @@ export function RecipeForm({
       <div className='flex gap-2'>
         <button
           type='submit'
+          disabled={saving}
           className='btn-md btn-primary'
         >
           {submitLabel}
@@ -369,6 +374,7 @@ export function RecipeForm({
         <button
           type='button'
           onClick={onCancel}
+          disabled={saving}
           className='btn-md btn-outline'
         >
           Cancel
@@ -416,6 +422,7 @@ function ImportRecipeForm({
   urlLoading,
   urlLoadingMessage,
   fileLoading,
+  markdownLoading,
 }: {
   onSubmitMarkdown: (markdown: string) => void
   onSubmitUrl: (url: string) => void
@@ -427,6 +434,7 @@ function ImportRecipeForm({
   urlLoading?: boolean
   urlLoadingMessage?: string
   fileLoading?: boolean
+  markdownLoading?: boolean
 }) {
   const [importMode, setImportMode] = useState<'markdown' | 'url' | 'pdf'>('url')
   const [markdown, setMarkdown] = useState('')
@@ -436,6 +444,7 @@ function ImportRecipeForm({
 
   const handleMarkdownSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (markdownLoading) return
     onSubmitMarkdown(markdown)
   }
 
@@ -509,7 +518,8 @@ function ImportRecipeForm({
           <div className='flex gap-2'>
             <button
               type='submit'
-              className='btn-md btn-primary'
+              disabled={markdownLoading}
+              className='btn-md btn-primary disabled:cursor-wait'
             >
               Import
             </button>
@@ -650,39 +660,54 @@ export function ScaleRecipePanel({
   onUpdateInPlace,
   onCancel,
   error,
+  saving = false,
 }: {
   parsed: ParsedRecipe
   onSaveAsNew: (ingredients: Ingredient[], servings: number) => void
   onUpdateInPlace: (ingredients: Ingredient[], servings: number) => void
   onCancel: () => void
   error?: string
+  /** Disables the save and Cancel buttons, so a save in flight cannot be sent twice or abandoned. */
+  saving?: boolean
 }) {
   const [targetServings, setTargetServings] = useState(parsed.servings)
-  const [preview, setPreview] = useState<ScaleResult | null>(null)
-  const [editedIngredients, setEditedIngredients] = useState<Ingredient[] | null>(null)
+  // `servings` is what the previewed amounts were scaled for, and `edited`
+  // holds the user's changes to them. Saving is allowed only while the
+  // servings box still matches `servings`.
+  const [preview, setPreview] = useState<
+    (ScaleResult & { servings: number; edited: Ingredient[] }) | null
+  >(null)
   const previewMutation = usePreviewScaleRecipe()
+  const staleHintId = useId()
+
+  const canPreview = targetServings >= 1 && targetServings !== parsed.servings
 
   const handlePreview = () => {
-    if (targetServings < 1 || targetServings === parsed.servings) return
-    setEditedIngredients(null)
+    if (!canPreview) return
+    // The current preview and its edits stay until a new preview succeeds, and
+    // saving follows the servings box meanwhile, as it does at any other time.
     previewMutation.mutate(
       { id: parsed.id, newServings: targetServings },
       {
-        onSuccess: (result) => {
-          setPreview(result)
-          setEditedIngredients(result.ingredients)
+        // TanStack Query runs these callbacks only for the latest mutate call,
+        // so a slower, earlier preview cannot overwrite a later one.
+        onSuccess: (result, variables) => {
+          setPreview({ ...result, servings: variables.newServings, edited: result.ingredients })
         },
       },
     )
   }
 
+  const previewIsStale = preview?.servings !== targetServings
+  const canSave = !previewIsStale && !saving
+
   const flagsByIndex = new Map(preview?.flagged.map((f) => [f.index, f]) ?? [])
 
   const handleIngredientChange = (index: number, updated: Ingredient) => {
-    if (!editedIngredients) return
-    const newList = [...editedIngredients]
-    newList[index] = updated
-    setEditedIngredients(newList)
+    if (!preview) return
+    const edited = [...preview.edited]
+    edited[index] = updated
+    setPreview({ ...preview, edited })
   }
 
   return (
@@ -705,14 +730,15 @@ export function ScaleRecipePanel({
         <span className='text-sm text-stone-600'>servings</span>
         <button
           onClick={handlePreview}
-          disabled={targetServings < 1 || targetServings === parsed.servings}
+          disabled={!canPreview}
           className='btn-sm btn-secondary'
         >
           Preview
         </button>
       </div>
 
-      {previewMutation.error && (
+      {/* A preview failure matters only while the box holds the servings that failed. */}
+      {previewMutation.error && previewMutation.variables?.newServings === targetServings && (
         <div className='mb-3 panel-error text-red-700 text-sm'>
           {previewMutation.error instanceof Error
             ? previewMutation.error.message
@@ -720,7 +746,7 @@ export function ScaleRecipePanel({
         </div>
       )}
 
-      {preview && editedIngredients && (
+      {preview && (
         <>
           {preview.flagged.length > 0 && (
             <div className='mb-3 panel-warning text-amber-800 text-sm'>
@@ -736,7 +762,7 @@ export function ScaleRecipePanel({
               <span className='sr-only'>Ingredient</span>
               <span className='text-right'>Ratio</span>
             </div>
-            {editedIngredients.map((ing, i) => {
+            {preview.edited.map((ing, i) => {
               const original = parsed.ingredients[i]
               const ratio = original
                 ? ingredientRatio(ing.amount, original.amount)
@@ -810,39 +836,46 @@ export function ScaleRecipePanel({
             </div>
           )}
 
-          <div className='flex gap-2'>
+          {previewIsStale && (
+            <p id={staleHintId} className='mb-3 text-sm text-stone-600'>
+              This preview is for {preview.servings}{' '}
+              {preview.servings === 1 ? 'serving' : 'servings'}. Set servings back to{' '}
+              {preview.servings}
+              {canPreview ? ', or preview again,' : ''} to save.
+            </p>
+          )}
+        </>
+      )}
+
+      <div className='flex gap-2'>
+        {preview && (
+          <>
             <button
-              onClick={() => onSaveAsNew(editedIngredients, targetServings)}
+              onClick={() => onSaveAsNew(preview.edited, preview.servings)}
+              disabled={!canSave}
+              aria-describedby={previewIsStale ? staleHintId : undefined}
               className='btn-sm btn-primary'
             >
               Save as New Recipe
             </button>
             <button
-              onClick={() => onUpdateInPlace(editedIngredients, targetServings)}
+              onClick={() => onUpdateInPlace(preview.edited, preview.servings)}
+              disabled={!canSave}
+              aria-describedby={previewIsStale ? staleHintId : undefined}
               className='btn-sm btn-outline'
             >
               Update This Recipe
             </button>
-            <button
-              onClick={onCancel}
-              className='btn-sm btn-outline'
-            >
-              Cancel
-            </button>
-          </div>
-        </>
-      )}
-
-      {!preview && (
-        <div className='flex gap-2'>
-          <button
-            onClick={onCancel}
-            className='btn-sm btn-outline'
-          >
-            Cancel
-          </button>
-        </div>
-      )}
+          </>
+        )}
+        <button
+          onClick={onCancel}
+          disabled={saving}
+          className='btn-sm btn-outline'
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   )
 }
@@ -1179,13 +1212,15 @@ export function RecipeManager() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && viewMode !== 'list') {
+      // The add form disables Cancel while its save is in flight, and Escape
+      // must not abandon that save either.
+      if (e.key === 'Escape' && viewMode !== 'list' && !createMutation.isPending) {
         setViewMode('list')
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [viewMode])
+  }, [viewMode, createMutation.isPending])
 
   const filteredRecipes = useMemo(() => {
     if (!recipes) return undefined
@@ -1293,6 +1328,7 @@ export function RecipeManager() {
             onSubmit={handleCreate}
             onCancel={() => setViewMode('list')}
             submitLabel='Add Recipe'
+            saving={createMutation.isPending}
           />
           {createMutation.error && (
             <div className='mt-2 panel-error text-red-700 text-sm'>
@@ -1316,6 +1352,7 @@ export function RecipeManager() {
             urlLoading={importUrlMutation.isPending}
             urlLoadingMessage={importUrlMutation.progress?.message}
             fileLoading={importFileMutation.isPending}
+            markdownLoading={importMutation.isPending}
           />
         </div>
       )}

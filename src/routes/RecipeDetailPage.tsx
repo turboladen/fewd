@@ -51,6 +51,13 @@ export function RecipeDetailPage() {
     { recipeId: string; servings: number; ingredients: Ingredient[]; loaded: Recipe } | null
   >(null)
 
+  // The adapt panel saves through its own mutation and reports it here.
+  const [adaptSaving, setAdaptSaving] = useState(false)
+  // Only one of these runs at a time in any editing mode: the edit form
+  // updates, the adapt-edit form creates, the scale panel does either, and
+  // the adapt panel creates.
+  const saving = createMutation.isPending || updateMutation.isPending || adaptSaving
+
   const isCooking = searchParams.get('mode') === 'cook'
   const { data: enhanced } = useEnhancedInstructions(
     recipe?.id ?? '',
@@ -71,9 +78,13 @@ export function RecipeDetailPage() {
     // cooking to avoid a second, reset-skipping exit.
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || isCooking) return
+      // The edit forms and the scale panel disable Cancel while their save is
+      // in flight, and Escape must not abandon that save either.
+      if (mode !== 'view' && saving) return
       if (mode !== 'view') {
         setMode('view')
         setAdaptDraft(null)
+        setScaleError(null)
         return
       }
       if (confirmingDelete) {
@@ -84,7 +95,7 @@ export function RecipeDetailPage() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [mode, confirmingDelete, navigate, isCooking])
+  }, [mode, confirmingDelete, navigate, isCooking, saving])
 
   if (!id) {
     return (
@@ -325,6 +336,7 @@ export function RecipeDetailPage() {
               setAdaptDraft(null)
             }}
             submitLabel={isAdaptEdit ? 'Save Adapted Recipe' : 'Save Changes'}
+            saving={saving}
           />
           {(isAdaptEdit ? createMutation.error : updateMutation.error) && (
             <div className='mt-2 panel-error text-red-700 text-sm'>
@@ -349,6 +361,7 @@ export function RecipeDetailPage() {
             setScaleError(null)
           }}
           error={scaleError ?? undefined}
+          saving={saving}
         />
       </div>
     )
@@ -369,6 +382,7 @@ export function RecipeDetailPage() {
             setMode('adapt-edit')
           }}
           onCancel={() => setMode('view')}
+          onSavingChange={setAdaptSaving}
         />
       </div>
     )

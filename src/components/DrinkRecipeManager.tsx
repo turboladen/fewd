@@ -44,13 +44,18 @@ export function DrinkRecipeManager() {
   // Escape key to close add/import mode
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && (viewMode === 'add' || viewMode === 'import')) {
+      // The add form disables Cancel while its save is in flight, and Escape
+      // must not abandon that save either.
+      if (
+        e.key === 'Escape' && (viewMode === 'add' || viewMode === 'import')
+        && !createMutation.isPending
+      ) {
         setViewMode('list')
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [viewMode])
+  }, [viewMode, createMutation.isPending])
 
   const handleCreate = (formData: DrinkRecipeFormData) => {
     const dto: CreateDrinkRecipeDto = {
@@ -123,6 +128,7 @@ export function DrinkRecipeManager() {
             onSubmit={handleCreate}
             onCancel={() => setViewMode('list')}
             submitLabel='Add Recipe'
+            saving={createMutation.isPending}
           />
         </div>
       </div>

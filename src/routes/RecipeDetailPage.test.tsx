@@ -12,22 +12,30 @@ import { RecipeDetailPage } from './RecipeDetailPage'
 // The real panel streams an adaptation from the AI endpoint. This stand-in
 // hands the page a finished draft, so a test can reach adapt-edit mode.
 vi.mock('../components/AdaptRecipePanel', () => ({
-  AdaptRecipePanel: ({ onEdit }: { onEdit: (draft: unknown) => void }) => (
-    <button
-      type='button'
-      onClick={() =>
-        onEdit({
-          name: 'Soup for Steve',
-          source: 'adapted',
-          parent_recipe_id: 'r2',
-          servings: 2,
-          instructions: 'Stir.',
-          ingredients: [],
-          tags: [],
-        })}
-    >
-      Use adapted draft
-    </button>
+  AdaptRecipePanel: ({ onEdit, onSavingChange }: {
+    onEdit: (draft: unknown) => void
+    onSavingChange?: (saving: boolean) => void
+  }) => (
+    <>
+      <button type='button' onClick={() => onSavingChange?.(true)}>
+        Start adapted save
+      </button>
+      <button
+        type='button'
+        onClick={() =>
+          onEdit({
+            name: 'Soup for Steve',
+            source: 'adapted',
+            parent_recipe_id: 'r2',
+            servings: 2,
+            instructions: 'Stir.',
+            ingredients: [],
+            tags: [],
+          })}
+      >
+        Use adapted draft
+      </button>
+    </>
   ),
 }))
 
@@ -749,5 +757,73 @@ describe('RecipeDetailPage', () => {
 
     // RecipeManager renders the empty-state copy on the destination route.
     await waitFor(() => expect(screen.getByText('Your recipe book is empty')).toBeInTheDocument())
+  })
+
+  it('ignores Escape while the adapt panel is saving', async () => {
+    mockJson('GET', '/api/recipes/r1', makeRecipe())
+    renderDetail()
+    fireEvent.click(await screen.findByRole('button', { name: /Adapt/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Start adapted save' }))
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(screen.getByRole('button', { name: 'Use adapted draft' })).toBeInTheDocument()
+  })
+
+  it('ignores Escape while the edit form is saving', async () => {
+    mockJson('GET', '/api/recipes/r1', makeRecipe())
+    renderDetail()
+    fireEvent.click(await screen.findByRole('button', { name: /Edit/ }))
+
+    // Hold the update open so Escape lands while it is in flight.
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>(() => {}))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled())
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeInTheDocument()
+  })
+
+  it('sends one create when Save as New is clicked twice during a scale save', async () => {
+    mockJson('GET', '/api/recipes/r1', makeRecipe())
+    mockJson('POST', '/api/recipes/r1/scale', {
+      ingredients: [{ name: 'Tomato', amount: { type: 'single', value: 5 }, unit: 'cups' }],
+      flagged: [],
+    })
+    const scaled = makeRecipe({
+      id: 'r2',
+      slug: 'pasta-5',
+      name: 'Pasta (5 servings)',
+      servings: 5,
+    })
+    mockJson('GET', '/api/recipes/pasta-5', scaled)
+
+    renderDetail()
+    fireEvent.click(await screen.findByRole('button', { name: 'Scale' }))
+    fireEvent.change(screen.getByDisplayValue('4'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
+    const saveAsNew = await screen.findByRole('button', { name: 'Save as New Recipe' })
+
+    // Hold the create open so the second click lands while it is in flight.
+    let finishCreate = () => {}
+    vi.mocked(fetch).mockImplementationOnce(() =>
+      new Promise<Response>((done) => {
+        finishCreate = () => done(new Response(JSON.stringify(scaled), { status: 201 }))
+      })
+    )
+    fireEvent.click(saveAsNew)
+    await waitFor(() => expect(saveAsNew).toBeDisabled())
+    fireEvent.click(saveAsNew)
+    // Escape must not abandon the save either.
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.getByRole('button', { name: 'Save as New Recipe' })).toBeInTheDocument()
+
+    const isCreate = ([url, init]: Parameters<typeof fetch>) =>
+      url === '/api/recipes' && (init as RequestInit | undefined)?.method === 'POST'
+    expect(vi.mocked(fetch).mock.calls.filter(isCreate)).toHaveLength(1)
+
+    await act(async () => finishCreate())
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Pasta (5 servings)' })).toBeInTheDocument()
+    )
   })
 })

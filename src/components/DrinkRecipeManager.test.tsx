@@ -38,6 +38,31 @@ beforeEach(() => installFetchMock())
 afterEach(() => resetFetchMock())
 
 describe('DrinkRecipeManager', () => {
+  it('ignores Escape while the add form is saving', async () => {
+    mockJson('GET', '/api/drink-recipes', [makeDrink()])
+    renderWithProviders(<DrinkRecipeManager />)
+    await waitFor(() => expect(screen.getByText('Old Fashioned')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Add Recipe/ }))
+
+    fireEvent.change(screen.getByPlaceholderText('e.g. Old Fashioned'), {
+      target: { value: 'Daiquiri' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('Step-by-step instructions...'), {
+      target: { value: 'Shake.' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Add ingredient/i }))
+    fireEvent.change(screen.getByPlaceholderText('Ingredient name'), { target: { value: 'rum' } })
+
+    // Hold the create open so Escape lands while it is in flight.
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>(() => {}))
+    fireEvent.click(screen.getByRole('button', { name: 'Add Recipe' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled())
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    // The list view has its own Add Recipe button, so check for the form itself.
+    expect(screen.getByPlaceholderText('Step-by-step instructions...')).toBeInTheDocument()
+  })
+
   it('renders a list of recipes, showing a filled star for favorites', async () => {
     const oldFashioned = makeDrink({ id: 'd1', name: 'Old Fashioned', is_favorite: true })
     const daiquiri = makeDrink({ id: 'd2', name: 'Daiquiri', is_favorite: false })
