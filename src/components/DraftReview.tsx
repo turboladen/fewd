@@ -11,6 +11,8 @@ interface DraftReviewProps {
   acceptLabel?: string
   editLabel?: string
   rejectLabel?: string
+  /** Disables every action button, so a save in flight cannot be sent twice or abandoned. */
+  saving?: boolean
 }
 
 export function DraftReview({
@@ -26,6 +28,7 @@ export function DraftReview({
   acceptLabel = 'Accept',
   editLabel = 'Edit',
   rejectLabel = 'Reject',
+  saving = false,
 }: DraftReviewProps) {
   if (isLoading) {
     return (
@@ -81,18 +84,21 @@ export function DraftReview({
       <div className='flex gap-2'>
         <button
           onClick={onAccept}
+          disabled={saving}
           className='btn-sm btn-primary'
         >
           {acceptLabel}
         </button>
         <button
           onClick={onEdit}
+          disabled={saving}
           className='btn-sm btn-primary'
         >
           {editLabel}
         </button>
         <button
           onClick={onReject}
+          disabled={saving}
           className='btn-sm btn-outline'
         >
           {rejectLabel}
@@ -100,6 +106,7 @@ export function DraftReview({
         {onRegenerate && (
           <button
             onClick={onRegenerate}
+            disabled={saving}
             className='ml-auto text-sm text-stone-500 hover:text-stone-700'
           >
             Regenerate

@@ -8,6 +8,7 @@ const mockUseSetting = vi.fn()
 const mockMutate = vi.fn()
 const mockReset = vi.fn()
 const mockCreateMutate = vi.fn()
+let mockCreatePending = false
 
 vi.mock('../hooks/usePeople', () => ({
   usePeople: () => mockUsePeople(),
@@ -26,7 +27,7 @@ vi.mock('../hooks/useRecipes', () => ({
   }),
   useCreateRecipe: () => ({
     mutate: mockCreateMutate,
-    isPending: false,
+    isPending: mockCreatePending,
     error: null,
   }),
 }))
@@ -168,6 +169,26 @@ describe('AdaptRecipePanel', () => {
       }),
       expect.any(Object),
     )
+  })
+
+  it('reports its save as pending until the save settles or the panel unmounts', () => {
+    const onSavingChange = vi.fn()
+    mockCreatePending = true
+    const { rerender, unmount } = render(
+      <AdaptRecipePanel {...defaultProps} onSavingChange={onSavingChange} />,
+    )
+    expect(onSavingChange).toHaveBeenLastCalledWith(true)
+
+    mockCreatePending = false
+    rerender(<AdaptRecipePanel {...defaultProps} onSavingChange={onSavingChange} />)
+    expect(onSavingChange).toHaveBeenLastCalledWith(false)
+
+    mockCreatePending = true
+    rerender(<AdaptRecipePanel {...defaultProps} onSavingChange={onSavingChange} />)
+    expect(onSavingChange).toHaveBeenLastCalledWith(true)
+    unmount()
+    expect(onSavingChange).toHaveBeenLastCalledWith(false)
+    mockCreatePending = false
   })
 
   it('displays recipe title in panel header', () => {

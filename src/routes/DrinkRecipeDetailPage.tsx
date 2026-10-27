@@ -33,6 +33,9 @@ export function DrinkRecipeDetailPage() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       if (isEditing) {
+        // The edit form disables Cancel while its save is in flight, and
+        // Escape must not abandon that save either.
+        if (updateMutation.isPending) return
         setIsEditing(false)
       } else if (confirmingDelete) {
         setConfirmingDelete(false)
@@ -42,7 +45,7 @@ export function DrinkRecipeDetailPage() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isEditing, confirmingDelete, navigate])
+  }, [isEditing, confirmingDelete, navigate, updateMutation.isPending])
 
   if (!id) {
     return (
@@ -154,6 +157,7 @@ export function DrinkRecipeDetailPage() {
             onSubmit={handleUpdate}
             onCancel={() => setIsEditing(false)}
             submitLabel='Save Changes'
+            saving={updateMutation.isPending}
           />
         </div>
       </div>

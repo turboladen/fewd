@@ -11,6 +11,35 @@ describe('DraftReview', () => {
     onReject: vi.fn(),
   }
 
+  it('disables every action button while saving', () => {
+    const onAccept = vi.fn()
+    const onEdit = vi.fn()
+    const onReject = vi.fn()
+    const onRegenerate = vi.fn()
+    render(
+      <DraftReview
+        {...defaultProps}
+        onAccept={onAccept}
+        onEdit={onEdit}
+        onReject={onReject}
+        onRegenerate={onRegenerate}
+        saving
+      >
+        <div>content</div>
+      </DraftReview>,
+    )
+    for (const name of ['Accept', 'Edit', 'Reject', 'Regenerate']) {
+      const button = screen.getByRole('button', { name })
+      fireEvent.click(button)
+      expect(button).toBeDisabled()
+    }
+
+    expect(onAccept).not.toHaveBeenCalled()
+    expect(onEdit).not.toHaveBeenCalled()
+    expect(onReject).not.toHaveBeenCalled()
+    expect(onRegenerate).not.toHaveBeenCalled()
+  })
+
   it('renders loading state with generating text', () => {
     render(
       <DraftReview {...defaultProps} isLoading>

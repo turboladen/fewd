@@ -28,6 +28,25 @@ function submit(ingredients: Ingredient[]) {
 }
 
 describe('DrinkRecipeForm', () => {
+  it('disables submit and Cancel and ignores a submit while saving', () => {
+    const onSubmit = vi.fn()
+    render(
+      <DrinkRecipeForm
+        initialData={{ ...emptyDrinkRecipeForm, name: 'Daiquiri', instructions: 'Shake' }}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+        submitLabel='Save'
+        saving
+      />,
+    )
+    const save = screen.getByRole('button', { name: 'Save' })
+    fireEvent.submit(save.closest('form')!)
+
+    expect(save).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
   it('leaves entirely empty rows and alternatives out of the submitted drink', () => {
     const onSubmit = submit([
       row('rum', { unit: 'oz', or_alternative: row('') }),

@@ -76,6 +76,20 @@ describe('DrinkRecipeDetailPage', () => {
     }
   })
 
+  it('ignores Escape while the edit form is saving', async () => {
+    mockJson('GET', '/api/drink-recipes/d1', makeDrink())
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /Edit/ }))
+
+    // Hold the update open so Escape lands while it is in flight.
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>(() => {}))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled())
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeInTheDocument()
+  })
+
   it('a field empty at load is left out of the update', async () => {
     const drink = makeDrink({
       description: null,

@@ -162,6 +162,48 @@ describe('RecipeManager', () => {
     expect(screen.getByRole('heading', { name: 'Ingredients' })).toBeInTheDocument()
   })
 
+  it('sends one markdown import when Import is clicked twice', async () => {
+    mockJson('GET', '/api/recipes', [makeRecipe({ id: 'r0', name: 'Pasta' })])
+    renderWithProviders(<RecipeManager />, { initialPath: '/recipes' })
+    await waitFor(() => expect(screen.getByText('Pasta')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Paste Markdown' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '# Pancakes' } })
+
+    // Hold the import open so the second click lands while it is in flight.
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>(() => {}))
+    const importButton = screen.getByRole('button', { name: 'Import' })
+    fireEvent.click(importButton)
+    await waitFor(() => expect(importButton).toBeDisabled())
+    fireEvent.click(importButton)
+
+    const isImport = ([url]: Parameters<typeof fetch>) => url === '/api/recipes/import/markdown'
+    expect(vi.mocked(fetch).mock.calls.filter(isImport)).toHaveLength(1)
+  })
+
+  it('ignores Escape while the add form is saving', async () => {
+    mockJson('GET', '/api/recipes', [makeRecipe({ id: 'r0', name: 'Pasta' })])
+    renderWithProviders(<RecipeManager />, { initialPath: '/recipes' })
+    await waitFor(() => expect(screen.getByText('Pasta')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Add Recipe/i }))
+
+    fireEvent.change(screen.getAllByRole('textbox')[0], { target: { value: 'Pancakes' } })
+    fireEvent.change(screen.getByPlaceholderText('Step-by-step instructions...'), {
+      target: { value: 'Mix and fry.' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Add ingredient/i }))
+    fireEvent.change(screen.getByPlaceholderText('Ingredient name'), { target: { value: 'Flour' } })
+
+    // Hold the create open so Escape lands while it is in flight.
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>(() => {}))
+    fireEvent.click(screen.getByRole('button', { name: 'Add Recipe' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled())
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    // The list view has its own Add Recipe button, so check for the form itself.
+    expect(screen.getByPlaceholderText('Step-by-step instructions...')).toBeInTheDocument()
+  })
+
   it('adding a recipe POSTs, invalidates the list, and surfaces the new item on refetch', async () => {
     // Seed with one recipe so the empty-state's own "Add Recipe" action button
     // doesn't collide with the header button.
@@ -321,13 +363,17 @@ describe('ScaleRecipePanel', () => {
     }
   }
 
-  function renderPanel(parsed: ParsedRecipe) {
+  function renderPanel(
+    parsed: ParsedRecipe,
+    props: Partial<Parameters<typeof ScaleRecipePanel>[0]> = {},
+  ) {
     renderWithProviders(
       <ScaleRecipePanel
         parsed={parsed}
         onSaveAsNew={() => {}}
         onUpdateInPlace={() => {}}
         onCancel={() => {}}
+        {...props}
       />,
     )
   }
@@ -611,6 +657,163 @@ describe('ScaleRecipePanel', () => {
 
     await waitFor(() => expect(screen.getByText('Rounded from 3.333')).toBeInTheDocument())
   })
+
+  // Render the panel and preview the 4-serving recipe at 5 servings.
+  async function renderPreviewed(props: Partial<Parameters<typeof ScaleRecipePanel>[0]> = {}) {
+    mockJson('POST', '/api/recipes/r1/scale', makeScaleResult())
+    renderPanel(makeParsed(), props)
+    previewServings('4', '5')
+    await waitFor(() => expect(screen.getByDisplayValue('1.25')).toBeInTheDocument())
+  }
+
+  const saveAsNewButton = () => screen.queryByRole('button', { name: 'Save as New Recipe' })
+  const updateButton = () => screen.queryByRole('button', { name: 'Update This Recipe' })
+
+  // A scale response the test resolves by hand, so it can control arrival order.
+  function deferredScale(result: ScaleResult) {
+    let resolve = () => {}
+    const promise = new Promise<Response>((done) => {
+      resolve = () =>
+        done(
+          new Response(JSON.stringify(result), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+    })
+    return { promise, resolve }
+  }
+
+  it('disables both save buttons when the servings box changes after Preview', async () => {
+    const onSaveAsNew = vi.fn()
+    const onUpdateInPlace = vi.fn()
+    await renderPreviewed({ onSaveAsNew, onUpdateInPlace })
+
+    fireEvent.change(screen.getByDisplayValue('5'), { target: { value: '8' } })
+
+    expect(saveAsNewButton()).toBeDisabled()
+    expect(updateButton()).toBeDisabled()
+    fireEvent.click(saveAsNewButton()!)
+    fireEvent.click(updateButton()!)
+    expect(onSaveAsNew).not.toHaveBeenCalled()
+    expect(onUpdateInPlace).not.toHaveBeenCalled()
+  })
+
+  it('saves the previewed servings and hand edits once the box matches the preview again', async () => {
+    const onSaveAsNew = vi.fn()
+    const onUpdateInPlace = vi.fn()
+    await renderPreviewed({ onSaveAsNew, onUpdateInPlace })
+
+    fireEvent.change(screen.getByLabelText('eggs amount'), { target: { value: '6' } })
+    fireEvent.change(screen.getByDisplayValue('5'), { target: { value: '8' } })
+    fireEvent.change(screen.getByDisplayValue('8'), { target: { value: '5' } })
+
+    const [, milk] = makeScaleResult().ingredients
+    const expected = [
+      { name: 'eggs', amount: { type: 'single', value: 6 }, unit: 'whole' },
+      milk,
+    ]
+    fireEvent.click(saveAsNewButton()!)
+    expect(onSaveAsNew).toHaveBeenCalledWith(expected, 5)
+    fireEvent.click(updateButton()!)
+    expect(onUpdateInPlace).toHaveBeenCalledWith(expected, 5)
+  })
+
+  it('keeps the previous preview and its edits after a failed re-preview', async () => {
+    const onSaveAsNew = vi.fn()
+    await renderPreviewed({ onSaveAsNew })
+    fireEvent.change(screen.getByLabelText('eggs amount'), { target: { value: '6' } })
+
+    mockJson('POST', '/api/recipes/r1/scale', { message: 'boom' }, { status: 500 })
+    previewServings('5', '8')
+
+    await waitFor(() => expect(screen.getByText(/boom/)).toBeInTheDocument())
+    expect(screen.getByLabelText('eggs amount')).toHaveDisplayValue('6')
+    expect(saveAsNewButton()).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled()
+
+    fireEvent.change(screen.getByDisplayValue('8'), { target: { value: '5' } })
+    expect(screen.queryByText(/boom/)).not.toBeInTheDocument()
+    fireEvent.click(saveAsNewButton()!)
+    expect(onSaveAsNew).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({ name: 'eggs', amount: { type: 'single', value: 6 } }),
+        expect.anything(),
+      ],
+      5,
+    )
+  })
+
+  it('shows a preview error only while the box holds the servings that failed', async () => {
+    await renderPreviewed()
+    mockJson('POST', '/api/recipes/r1/scale', { message: 'boom' }, { status: 500 })
+    previewServings('5', '8')
+    await waitFor(() => expect(screen.getByText(/boom/)).toBeInTheDocument())
+
+    fireEvent.change(screen.getByDisplayValue('8'), { target: { value: '6' } })
+    expect(screen.queryByText(/boom/)).not.toBeInTheDocument()
+  })
+
+  it('explains the disabled save buttons while the box differs from the preview', async () => {
+    await renderPreviewed()
+    const hint = () => screen.queryByText(/This preview is for 5 servings/)
+    expect(hint()).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByDisplayValue('5'), { target: { value: '8' } })
+    expect(hint()).toHaveTextContent(
+      'This preview is for 5 servings. Set servings back to 5, or preview again, to save.',
+    )
+    expect(saveAsNewButton()).toHaveAccessibleDescription(hint()!.textContent!)
+    expect(updateButton()).toHaveAccessibleDescription(hint()!.textContent!)
+
+    fireEvent.change(screen.getByDisplayValue('8'), { target: { value: '5' } })
+    expect(hint()).not.toBeInTheDocument()
+  })
+
+  it('omits "preview again" from the hint while Preview is disabled', async () => {
+    await renderPreviewed()
+
+    // 4 is the recipe's own servings, so Preview is disabled.
+    fireEvent.change(screen.getByDisplayValue('5'), { target: { value: '4' } })
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeDisabled()
+    expect(screen.getByText(/This preview is for 5 servings/)).toHaveTextContent(
+      'This preview is for 5 servings. Set servings back to 5 to save.',
+    )
+  })
+
+  it('applies only the latest preview when responses arrive out of order', async () => {
+    const toFive = deferredScale(makeScaleResult())
+    const toSix = deferredScale({
+      ingredients: [
+        { name: 'eggs', amount: { type: 'single', value: 5 }, unit: 'whole' },
+        { name: 'milk', amount: { type: 'single', value: 1.5 }, unit: 'cup' },
+      ],
+      flagged: [],
+    })
+    vi.mocked(fetch)
+      .mockImplementationOnce(() => toFive.promise)
+      .mockImplementationOnce(() => toSix.promise)
+    const onSaveAsNew = vi.fn()
+    renderPanel(makeParsed(), { onSaveAsNew })
+
+    previewServings('4', '5')
+    previewServings('5', '6')
+    await act(async () => toSix.resolve())
+    await waitFor(() => expect(screen.getByDisplayValue('1.5')).toBeInTheDocument())
+    await act(async () => toFive.resolve())
+
+    expect(screen.queryByDisplayValue('1.25')).not.toBeInTheDocument()
+    fireEvent.click(saveAsNewButton()!)
+    expect(onSaveAsNew).toHaveBeenCalledWith(expect.any(Array), 6)
+  })
+
+  it('disables the save and Cancel buttons while a save is in flight', async () => {
+    await renderPreviewed({ saving: true })
+
+    expect(saveAsNewButton()).toBeDisabled()
+    expect(updateButton()).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+  })
 })
 
 describe('RecipeForm', () => {
@@ -644,6 +847,14 @@ describe('RecipeForm', () => {
     fireEvent.submit(screen.getByRole('button', { name: 'Save' }).closest('form')!)
     return onSubmit
   }
+
+  it('disables submit and Cancel and ignores a submit while saving', () => {
+    const onSubmit = renderForm([row('garlic')], { saving: true })
+
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
 
   it('leaves entirely empty rows and alternatives out of the submitted recipe', () => {
     const onSubmit = renderForm([

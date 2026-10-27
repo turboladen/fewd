@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePeople } from '../hooks/usePeople'
 import { useAdaptRecipe, useCreateRecipe } from '../hooks/useRecipes'
 import { useSetting } from '../hooks/useSettings'
@@ -14,6 +14,8 @@ interface AdaptRecipePanelProps {
   onComplete: (newRecipeSlug: string) => void
   onEdit: (draft: CreateRecipeDto) => void
   onCancel: () => void
+  /** Called with true when the adapted recipe's save starts, and with false when it settles or the panel unmounts. */
+  onSavingChange?: (saving: boolean) => void
 }
 
 interface PersonToggleState {
@@ -28,11 +30,21 @@ export function AdaptRecipePanel({
   onComplete,
   onEdit,
   onCancel,
+  onSavingChange,
 }: AdaptRecipePanelProps) {
   const { data: people } = usePeople()
   const apiKeyQuery = useSetting('anthropic_api_key')
   const adaptMutation = useAdaptRecipe()
   const createMutation = useCreateRecipe()
+  const createPending = createMutation.isPending
+
+  // The cleanup reports false on unmount too: a successful save unmounts the
+  // panel before its pending state settles, and the owner must not stay stuck.
+  useEffect(() => {
+    if (!createPending) return
+    onSavingChange?.(true)
+    return () => onSavingChange?.(false)
+  }, [createPending, onSavingChange])
 
   const activePeople = people?.filter((p) => p.is_active) ?? []
 
@@ -163,6 +175,7 @@ export function AdaptRecipePanel({
           onRegenerate={handleRegenerate}
           onCancel={handleReject}
           acceptLabel={createMutation.isPending ? 'Saving...' : 'Save Recipe'}
+          saving={createMutation.isPending}
           editLabel='Edit First'
         >
           {draft && <RecipePreview draft={draft} />}
