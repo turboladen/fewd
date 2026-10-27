@@ -82,3 +82,8 @@ dist-ssr
 
 # Superpowers plans are working files; lasting decisions become ADRs instead.
 docs/superpowers/plans/
+
+# Local secrets. The example file documents the variables and stays tracked.
+.env
+.env.*
+!.env.example
