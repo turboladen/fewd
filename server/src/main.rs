@@ -1,12 +1,11 @@
 use std::net::SocketAddr;
 
 use axum::extract::DefaultBodyLimit;
-use axum::http::{header, Method, StatusCode, Uri};
+use axum::http::{header, StatusCode, Uri};
 use axum::response::IntoResponse;
 use axum::Router;
 use fewd_lib::{db, mcp, routes, AppState};
 use rust_embed::Embed;
-use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 #[derive(Embed)]
@@ -30,37 +29,15 @@ async fn main() {
 
     let state = AppState { db };
 
-    // CORS is scoped to the `/api` + SPA subtree only — explicitly NOT
-    // applied to `/mcp`. The MCP transport (Streamable HTTP via
-    // mcp-remote / Claude Desktop) does not run in a browser context,
-    // so it doesn't need CORS preflights. Including `/mcp` in the
-    // CORS allowlist would let a malicious page fetched in the browser
-    // probe the local MCP server cross-origin (the threat model docs
-    // call out LAN-only deployment, but defense-in-depth is cheap
-    // here). See fewd-2y6.7.
-    let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::list([
-            "http://localhost:5173".parse().unwrap(), // Vite dev server
-            "http://localhost:3000".parse().unwrap(),
-            "http://localhost:3001".parse().unwrap(),
-        ]))
-        .allow_methods(AllowMethods::list([
-            Method::GET,
-            Method::POST,
-            Method::PUT,
-            Method::DELETE,
-            Method::OPTIONS,
-        ]))
-        .allow_headers(AllowHeaders::list([
-            header::CONTENT_TYPE,
-            header::ACCEPT,
-            header::AUTHORIZATION,
-        ]));
-
+    // The server sends no CORS headers, on purpose. The SPA, and the Vite proxy
+    // in dev, call `/api` same-origin, so no browser caller needs a CORS grant.
+    // Without one, a cross-origin page can neither read an `/api` response nor
+    // pass the preflight that a JSON or `X-Requested-With` POST forces. That is
+    // half of the CSRF invariant; `routes::csrf` enforces the other half.
+    // Adding a CORS layer weakens it.
     let api_and_spa = Router::new()
         .nest("/api", routes::api_routes())
-        .fallback(serve_spa)
-        .layer(cors);
+        .fallback(serve_spa);
 
     let app = Router::new()
         .nest_service("/mcp", mcp::router(state.db.clone()))

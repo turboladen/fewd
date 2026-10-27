@@ -15,6 +15,7 @@ pub enum AppError {
     Database(DbErr),
     NotFound(String),
     BadRequest(String),
+    Forbidden(String),
     Internal(String),
 }
 
@@ -30,6 +31,7 @@ impl IntoResponse for AppError {
             }
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
+            AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
             AppError::Internal(msg) => {
                 tracing::error!("Internal error: {}", msg);
                 (

@@ -7,11 +7,11 @@ paths:
 
 # Rust server
 
-Rust + Axum + SeaORM + SQLite. Route handlers in `server/src/routes/` stay thin (validation plus a service call) and register in `api_routes()` in `server/src/routes/mod.rs`; business logic lives in `server/src/services/`, DTOs in `server/src/dto.rs`, and entities in `server/src/entities/`. For a new entity end to end, use the `new-entity` skill.
+Rust + Axum + SeaORM + SQLite. Route handlers in `server/src/routes/` stay thin (validation plus a service call) and register in `routes()` in `server/src/routes/mod.rs`, which `api_routes()` wraps in the cross-site POST guard; business logic lives in `server/src/services/`, DTOs in `server/src/dto.rs`, and entities in `server/src/entities/`. For a new entity end to end, use the `new-entity` skill.
 
 ## Error handling
 
-- Route and service errors funnel through the hand-rolled `AppError` enum (`server/src/error.rs`), whose `IntoResponse` impl maps `Database`/`NotFound`/`BadRequest`/`Internal` to HTTP status codes. Add a `From<E>` impl to bubble a new error source into it. There is no `anyhow` or `thiserror` in this workspace.
+- Route and service errors funnel through the hand-rolled `AppError` enum (`server/src/error.rs`), whose `IntoResponse` impl maps `Database`/`NotFound`/`BadRequest`/`Forbidden`/`Internal` to HTTP status codes. Add a `From<E>` impl to bubble a new error source into it. There is no `anyhow` or `thiserror` in this workspace.
 - `AppError` logs `Database`/`Internal` via `tracing::error!` and returns a generic message, so internals don't leak.
 - Service writes that validate input return `ServiceError { Validation, Database }` (`server/src/services/service_error.rs`): `Validation` maps to a 400 over HTTP and an actionable tool error over MCP.
 

@@ -134,7 +134,11 @@ function down() {
 async function api(state, method, path, body) {
   const res = await fetch(`${state.base}${path.startsWith('/') ? path : '/' + path}`, {
     method,
-    headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+    // /api answers 403 to a POST that is neither JSON nor carries X-Requested-With.
+    headers: {
+      'X-Requested-With': 'fetch',
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();

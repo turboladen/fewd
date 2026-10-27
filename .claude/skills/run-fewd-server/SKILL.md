@@ -161,10 +161,12 @@ answer 200 within ~2s of boot.
   keep reaching the old process. The driver re-handshakes on any 404, so check
   session behavior across a restart with curl and a fixed `mcp-session-id`.
 - **A token exists only after you mint one.** `POST /api/people/{id}/mcp-token`
-  returns the plaintext exactly once. It **requires a JSON body** — `-d '{}'`
-  with `Content-Type: application/json`; without one it's **415**, by design
-  (the empty struct forces a CORS preflight so an HTML form can't rotate
-  someone's token). `DELETE` on the same path revokes (**204**).
+  returns the plaintext exactly once. It takes no body. `DELETE` on the same
+  path revokes (**204**).
+- **Every `/api` POST must be JSON or carry `X-Requested-With`.** Anything
+  else, including a bare `curl -X POST` or a multipart upload to
+  `/api/recipes/import/file`, is **403** from the cross-site POST guard. Add
+  `-H 'X-Requested-With: curl'` to a POST that has no JSON body.
 - **The `Host` header is checked.** rmcp allows `localhost`/`127.0.0.1`/`::1`;
   anything else is **403** until `MCP_ALLOWED_HOSTS=dietpi.local,…` opts it in.
   An entry without a port matches any port.

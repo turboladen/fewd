@@ -3,7 +3,7 @@
 // explicit null in an update clears the field.
 
 use axum::body::{to_bytes, Body};
-use axum::http::{Request, StatusCode};
+use axum::http::{HeaderValue, Request, StatusCode};
 use axum::Router;
 use fewd_lib::dto::{CreateDrinkRecipeDto, CreateRecipeDto, IngredientAmountDto, IngredientDto};
 use fewd_lib::routes::api_routes;
@@ -51,19 +51,33 @@ fn recipe_dto(name: &str) -> CreateRecipeDto {
     }
 }
 
-// Send a JSON request and hand back the status plus the parsed body.
-async fn send_json(
+// A `Header` holds a request header's name and its raw value bytes, so a test
+// can send a value that is not valid UTF-8.
+type Header = (&'static str, &'static [u8]);
+
+const JSON: Header = ("content-type", b"application/json");
+const FORM: Header = ("content-type", b"application/x-www-form-urlencoded");
+const TEXT: Header = ("content-type", b"text/plain;charset=UTF-8");
+const MULTIPART: Header = ("content-type", b"multipart/form-data; boundary=XyZ");
+const XRW: Header = ("x-requested-with", b"fetch");
+
+// Send a request with exactly the given headers and body, and hand back the
+// status plus the parsed body.
+async fn send_raw(
     app: Router,
     method: &str,
     uri: &str,
-    body: serde_json::Value,
+    headers: &[Header],
+    body: Vec<u8>,
 ) -> (StatusCode, serde_json::Value) {
-    let request = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
-        .expect("request builds");
+    let mut builder = Request::builder().method(method).uri(uri);
+    for (name, value) in headers {
+        builder = builder.header(
+            *name,
+            HeaderValue::from_bytes(value).expect("header value builds"),
+        );
+    }
+    let request = builder.body(Body::from(body)).expect("request builds");
     let response = app.oneshot(request).await.expect("router responds");
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX)
@@ -71,6 +85,16 @@ async fn send_json(
         .expect("body reads");
     let json = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     (status, json)
+}
+
+// Send a JSON request and hand back the status plus the parsed body.
+async fn send_json(
+    app: Router,
+    method: &str,
+    uri: &str,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    send_raw(app, method, uri, &[JSON], body.to_string().into_bytes()).await
 }
 
 fn message(body: &serde_json::Value) -> &str {
@@ -467,19 +491,6 @@ async fn markdown_import_reads_abbreviated_time_units() {
     assert_eq!(body["total_minutes"], 120, "{body}");
 }
 
-// Send a request with no body and hand back the status.
-async fn send_empty(app: Router, method: &str, uri: &str) -> StatusCode {
-    let request = Request::builder()
-        .method(method)
-        .uri(uri)
-        .body(Body::empty())
-        .expect("request builds");
-    app.oneshot(request)
-        .await
-        .expect("router responds")
-        .status()
-}
-
 // PUT `body` to `uri` and hand back the updated row, failing on any status
 // but 200.
 async fn put_ok(db: &DatabaseConnection, uri: &str, body: serde_json::Value) -> serde_json::Value {
@@ -860,17 +871,13 @@ async fn writes_to_a_missing_id_answer_404() {
         "/api/recipes/missing/favorite",
         "/api/drink-recipes/missing/favorite",
     ] {
-        assert_eq!(
-            send_empty(app(&db), "POST", uri).await,
-            StatusCode::NOT_FOUND,
-            "POST {uri}"
-        );
+        let (status, body) = send_raw(app(&db), "POST", uri, &[XRW], Vec::new()).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "POST {uri}: {body}");
     }
 
-    assert_eq!(
-        send_empty(app(&db), "DELETE", "/api/meals/missing").await,
-        StatusCode::NOT_FOUND
-    );
+    let (status, body) =
+        send_raw(app(&db), "DELETE", "/api/meals/missing", &[XRW], Vec::new()).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "DELETE: {body}");
 
     let (status, body) = send_json(
         app(&db),
@@ -1078,5 +1085,225 @@ async fn drink_writes_with_nonpositive_servings_answer_400() {
             message(&response).starts_with("servings"),
             "{uri}: {response}"
         );
+    }
+}
+
+// --- Cross-site POSTs: /api answers 403 to a POST a browser need not preflight ---
+
+// Builds a multipart body with one non-empty `file` part, using the boundary
+// that `MULTIPART` declares.
+fn multipart_file_body() -> Vec<u8> {
+    b"--XyZ\r\n\
+Content-Disposition: form-data; name=\"file\"; filename=\"r.pdf\"\r\n\
+Content-Type: application/pdf\r\n\r\n\
+%PDF-1.4 not really\r\n\
+--XyZ--\r\n"
+        .to_vec()
+}
+
+fn assert_rejected(status: StatusCode, body: &serde_json::Value, what: &str) {
+    assert_eq!(status, StatusCode::FORBIDDEN, "{what}: {body}");
+    let message = message(body);
+    assert!(
+        message.contains("Content-Type: application/json") && message.contains("X-Requested-With"),
+        "{what}: the message names the remedy: {body}"
+    );
+}
+
+// Seed one recipe and one drink, and hand back the four POST routes that take
+// no body: recipe favorite, enhance, drink favorite and the connection test.
+async fn seed_bodiless_post_uris(db: &DatabaseConnection) -> [String; 4] {
+    let recipe = RecipeService::create(db, recipe_dto("Toast"))
+        .await
+        .expect("seed recipe");
+    let drink_uri = seed_drink(db).await;
+    [
+        format!("/api/recipes/{}/favorite", recipe.id),
+        format!("/api/recipes/{}/enhance", recipe.id),
+        format!("{drink_uri}/favorite"),
+        "/api/settings/test-connection".to_string(),
+    ]
+}
+
+// Reports whether the only seeded recipe and the only seeded drink are
+// favorites.
+async fn favorites(db: &DatabaseConnection) -> (bool, bool) {
+    let recipes = RecipeService::get_all(db).await.expect("recipes load");
+    let drinks = DrinkRecipeService::get_all(db).await.expect("drinks load");
+    (recipes[0].is_favorite, drinks[0].is_favorite)
+}
+
+#[tokio::test]
+async fn cors_simple_posts_to_bodiless_routes_answer_403() {
+    let db = setup_db().await;
+    let uris = seed_bodiless_post_uris(&db).await;
+
+    for uri in &uris {
+        let attempts: [(&str, &[Header], &[u8]); 3] = [
+            ("form", &[FORM], b"a=1"),
+            ("text/plain", &[TEXT], b"{}"),
+            ("no content type", &[], b""),
+        ];
+        for (what, headers, body) in attempts {
+            let (status, response) = send_raw(app(&db), "POST", uri, headers, body.to_vec()).await;
+            assert_rejected(status, &response, &format!("POST {uri} as {what}"));
+        }
+    }
+    assert_eq!(favorites(&db).await, (false, false), "nothing was toggled");
+}
+
+#[tokio::test]
+async fn bodiless_posts_from_the_web_client_reach_their_handlers() {
+    let db = setup_db().await;
+    let [recipe_favorite, enhance, drink_favorite, test_connection] =
+        seed_bodiless_post_uris(&db).await;
+
+    // The web client sends X-Requested-With and no body. Scripted clients may
+    // send the JSON content type and no body instead.
+    for headers in [&[XRW][..], &[JSON]] {
+        for uri in [&recipe_favorite, &enhance, &drink_favorite] {
+            let (status, body) = send_raw(app(&db), "POST", uri, headers, Vec::new()).await;
+            assert_eq!(status, StatusCode::OK, "POST {uri}: {body}");
+        }
+        // No key is stored, so the handler answers before any network call.
+        let (status, body) =
+            send_raw(app(&db), "POST", &test_connection, headers, Vec::new()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert_eq!(message(&body), "No API key configured");
+    }
+    // Each favorite route ran twice, so each flag is back where it started.
+    assert_eq!(favorites(&db).await, (false, false));
+
+    let (status, body) = send_raw(app(&db), "POST", &recipe_favorite, &[XRW], Vec::new()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(favorites(&db).await, (true, false));
+}
+
+#[tokio::test]
+async fn file_import_without_x_requested_with_answers_403() {
+    let db = setup_db().await;
+    let attempts: [(&str, &[Header], Vec<u8>); 3] = [
+        ("multipart", &[MULTIPART], multipart_file_body()),
+        ("form", &[FORM], b"file=x".to_vec()),
+        ("text/plain", &[TEXT], b"x".to_vec()),
+    ];
+    for (what, headers, body) in attempts {
+        let (status, response) =
+            send_raw(app(&db), "POST", "/api/recipes/import/file", headers, body).await;
+        assert_rejected(status, &response, what);
+    }
+}
+
+#[tokio::test]
+async fn file_import_with_x_requested_with_reaches_the_handler() {
+    let db = setup_db().await;
+    let (status, body) = send_raw(
+        app(&db),
+        "POST",
+        "/api/recipes/import/file",
+        &[MULTIPART, XRW],
+        multipart_file_body(),
+    )
+    .await;
+    // No key is stored, so the handler stops after reading the file.
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(message(&body), "No API key configured. Set it in Settings.");
+}
+
+#[tokio::test]
+async fn the_guard_reads_the_content_type_essence_and_x_requested_with() {
+    let db = setup_db().await;
+    let [recipe_favorite, ..] = seed_bodiless_post_uris(&db).await;
+
+    // Each row is the request's headers and whether the guard lets it through.
+    let cases: [(&[Header], bool); 10] = [
+        (
+            &[("content-type", b"Multipart/Form-Data; boundary=XyZ")],
+            false,
+        ),
+        (&[("content-type", b"TEXT/PLAIN")], false),
+        (&[("content-type", b"text/plain;\tcharset=utf-8")], false),
+        (&[("content-type", b"text/plain; charset=\x80")], false),
+        (&[("content-type", b"")], false),
+        (&[("content-type", b"application/jsonx")], false),
+        (
+            &[("content-type", b"application/json; charset=utf-8")],
+            true,
+        ),
+        (&[("content-type", b"Application/JSON")], true),
+        (
+            &[("content-type", b" application/json ;charset=utf-8")],
+            true,
+        ),
+        (&[TEXT, XRW], true),
+    ];
+    for (headers, passes) in cases {
+        let what: Vec<String> = headers
+            .iter()
+            .map(|(name, value)| format!("{name}: {}", String::from_utf8_lossy(value)))
+            .collect();
+        let what = what.join(", ");
+        let (status, body) =
+            send_raw(app(&db), "POST", &recipe_favorite, headers, Vec::new()).await;
+        if passes {
+            assert_eq!(status, StatusCode::OK, "{what}: {body}");
+        } else {
+            assert_rejected(status, &body, &what);
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_guard_leaves_routing_errors_and_other_methods_alone() {
+    let db = setup_db().await;
+
+    // The test router has no SPA fallback, so an unknown path is a 404.
+    let (status, _) = send_raw(app(&db), "POST", "/api/nope", &[TEXT], Vec::new()).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "unknown path");
+    // On a path that exists, axum runs the route layer before its 405, so
+    // only a request that passes the guard sees the method error.
+    let (status, body) = send_raw(app(&db), "POST", "/api/version", &[TEXT], Vec::new()).await;
+    assert_rejected(status, &body, "text/plain POST to a GET-only path");
+    let (status, _) = send_raw(app(&db), "POST", "/api/version", &[JSON], Vec::new()).await;
+    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED, "GET-only path");
+    let (status, _) = send_raw(app(&db), "GET", "/api/recipes", &[], Vec::new()).await;
+    assert_eq!(status, StatusCode::OK, "GET without a content type");
+    let (status, _) = send_raw(app(&db), "DELETE", "/api/meals/missing", &[], Vec::new()).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "DELETE without a content type"
+    );
+}
+
+#[tokio::test]
+async fn form_post_to_a_json_route_answers_403() {
+    let db = setup_db().await;
+    let (status, body) = send_raw(
+        app(&db),
+        "POST",
+        "/api/recipes",
+        &[FORM],
+        b"name=Toast".to_vec(),
+    )
+    .await;
+    assert_rejected(status, &body, "form POST to /api/recipes");
+}
+
+#[tokio::test]
+async fn token_provisioning_takes_the_client_shapes_and_rejects_a_form() {
+    let db = setup_db().await;
+    let uri = format!("{}/mcp-token", seed_person(&db).await);
+
+    let (status, body) = send_raw(app(&db), "POST", &uri, &[FORM], b"a=1".to_vec()).await;
+    assert_rejected(status, &body, "form POST to the token route");
+
+    // The web client sends X-Requested-With with a `{}` JSON body, and a
+    // script may send either one alone.
+    let shapes: [(&[Header], &[u8]); 3] = [(&[XRW, JSON], b"{}"), (&[XRW], b""), (&[JSON], b"")];
+    for (headers, body) in shapes {
+        let (status, response) = send_raw(app(&db), "POST", &uri, headers, body.to_vec()).await;
+        assert_eq!(status, StatusCode::OK, "{headers:?}: {response}");
+        assert!(response["token"].is_string(), "{response}");
     }
 }
