@@ -255,7 +255,7 @@ impl FewdMcp {
     ) -> Result<Result<crate::entities::recipe::Model, CallToolResult>, McpError> {
         let Some(normalized) = normalize_slug(raw_slug) else {
             return Ok(Err(tool_user_error(
-                InputError::EmptyName("slug").to_string(),
+                InputError::EmptyField("slug").to_string(),
             )));
         };
         let found = RecipeService::get_by_slug(&self.db, normalized)
@@ -341,7 +341,7 @@ impl FewdMcp {
         // share the same latent issue and would benefit from the same
         // treatment — tracked as a follow-up bead.
         if input.name.trim().is_empty() {
-            return Ok(tool_user_error(InputError::EmptyName("name").to_string()));
+            return Ok(tool_user_error(InputError::EmptyField("name").to_string()));
         }
         // `find_active_by_name` is the same case-insensitive resolver
         // `list_people` and `create_meal` use, and it intentionally
@@ -532,12 +532,12 @@ impl FewdMcp {
             None => None,
             Some(slug) => {
                 // `parent_recipe_slug` is optional, so the recovery the LLM
-                // needs is "drop the field" — a bare EmptyName message would
+                // needs is "drop the field" — a bare EmptyField message would
                 // leave it hunting for a valid parent it never wanted.
                 let Some(normalized) = normalize_slug(slug) else {
                     return Ok(tool_user_error(format!(
                         "{} Omit it or use a valid slug from search_recipes.",
-                        InputError::EmptyName("parent_recipe_slug")
+                        InputError::EmptyField("parent_recipe_slug")
                     )));
                 };
                 let parent = RecipeService::get_by_slug(&self.db, normalized)
@@ -585,7 +585,7 @@ impl FewdMcp {
         // the field this tool takes, so the blank case is caught here first.
         if normalize_slug(&input.parent_recipe_slug).is_none() {
             return Ok(tool_user_error(
-                InputError::EmptyName("parent_recipe_slug").to_string(),
+                InputError::EmptyField("parent_recipe_slug").to_string(),
             ));
         }
         let parent_slug = input.parent_recipe_slug.clone();
@@ -618,7 +618,7 @@ impl FewdMcp {
 
     #[tool(
         name = "update_recipe",
-        description = "Revise an existing recipe when the user corrects or improves one already in the catalog — call `search_recipes` or `get_recipe` FIRST for the `slug` and current values (use `create_recipe` when the dish isn't in the catalog, or `adapt_recipe` to save a changed copy and keep the original). Returns the full updated recipe. Only the fields you send are written, except that a new `servings` sent without `ingredients` rescales the stored ingredients. Omitted or null fields are otherwise unchanged, and a blank string is ignored except for `name`, which is rejected. List and structured fields REPLACE the stored value whole: a partial `ingredients` array deletes every ingredient you left out, so send the complete list back. An invalid field, such as a time `unit` other than minutes, hours, or days, rejects the whole call and writes nothing. Not writable here: `is_favorite` (call `favorite_recipe`), `rating` (call `rate_recipe`, or `unrate_recipe` to clear it), `source`, `source_url`, the parent recipe, and the slug. Example: {\"slug\":\"beef-taco-bowls\",\"notes\":\"double the chili powder\"}",
+        description = "Revise an existing recipe when the user corrects or improves one already in the catalog — call `search_recipes` or `get_recipe` FIRST for the `slug` and current values (use `create_recipe` when the dish isn't in the catalog, or `adapt_recipe` to save a changed copy and keep the original). Returns the full updated recipe. Only the fields you send are written, except that a new `servings` sent without `ingredients` rescales the stored ingredients. Omitted fields are otherwise unchanged. Null clears `description`, `notes`, `icon`, `portion_size`, or a time, and changes nothing elsewhere. Blank `instructions`, `description`, `notes`, or `icon` is rejected. List and structured fields REPLACE the stored value whole: a partial `ingredients` array deletes the ingredients you left out. An invalid field rejects the whole call and writes nothing. Not writable here: `is_favorite` (call `favorite_recipe`), `rating` (call `rate_recipe`, or `unrate_recipe` to clear it), `source`, `source_url`, the parent recipe, and the slug. Example: {\"slug\":\"beef-taco-bowls\",\"notes\":\"double the chili powder\"}",
         input_schema = rmcp::handler::server::common::schema_for_type::<UpdateRecipeInput>()
     )]
     async fn update_recipe(
@@ -629,14 +629,16 @@ impl FewdMcp {
             Ok(v) => v,
             Err(e) => return Ok(e),
         };
-        let existing = match self.resolve_recipe_by_slug(&input.slug).await? {
-            Ok(recipe) => recipe,
-            Err(e) => return Ok(e),
-        };
-
+        // Validate before the lookup, as `RecipeService::update` does, so a
+        // bad value is reported even alongside a bad slug.
+        let slug = input.slug.clone();
         let dto = match update_recipe_input_to_dto(input) {
             Ok(dto) => dto,
             Err(e) => return Ok(tool_user_error(e.to_string())),
+        };
+        let existing = match self.resolve_recipe_by_slug(&slug).await? {
+            Ok(recipe) => recipe,
+            Err(e) => return Ok(e),
         };
         let updated = match RecipeService::update(&self.db, existing.id, dto).await {
             Ok(recipe) => recipe,
@@ -1440,7 +1442,7 @@ mod tests {
                 vec!["Breakfast", "Lunch", "Dinner", "Snack", "brunch"],
             ),
             (
-                InputError::EmptyName("name").to_string(),
+                InputError::EmptyField("name").to_string(),
                 vec!["name", "empty"],
             ),
             (
@@ -2317,7 +2319,7 @@ mod tests {
     async fn update_person_empty_name_returns_input_error_not_unknown_person() {
         // An empty / whitespace-only `name` is a missing-value problem,
         // not a typo, and deserves an input-level diagnostic
-        // (`InputError::EmptyName`: "name must not be empty or
+        // (`InputError::EmptyField`: "name must not be empty or
         // whitespace-only.") rather than the misleading
         // `ResolveError::UnknownPerson` route ("no active family member
         // named ''. Call list_people …"). Mirrors what
@@ -2483,7 +2485,7 @@ mod tests {
         let result = mcp
             .update_recipe(LenientParameters::for_test(UpdateRecipeInput {
                 servings: Some(6),
-                notes: Some("doubles well".into()),
+                notes: Some(Some("doubles well".into())),
                 ..mk_update_recipe(&seeded.slug)
             }))
             .await
@@ -2709,10 +2711,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_recipe_empty_instructions_is_no_op() {
-        // Instructions are NOT NULL and have no clear path. A blank value
-        // must leave the stored text alone rather than blanking a recipe
-        // the family cooks from.
+    async fn update_recipe_blank_instructions_is_a_tool_error_and_writes_nothing() {
+        // Instructions are NOT NULL and have no clear path, so a blank value
+        // is rejected rather than blanking a recipe the family cooks from.
         let mcp = setup_test_mcp().await;
         let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
 
@@ -2720,18 +2721,78 @@ mod tests {
             let result = mcp
                 .update_recipe(LenientParameters::for_test(UpdateRecipeInput {
                     instructions: Some(raw.into()),
+                    servings: Some(6),
                     ..mk_update_recipe(&seeded.slug)
                 }))
-                .await
-                .expect("update_recipe returns Ok");
-            assert_ne!(result.is_error, Some(true));
+                .await;
+            assert_tool_user_error(result, &["instructions must not be empty", "omit"]);
 
             let reloaded = reload_recipe(&mcp, &seeded.slug).await;
-            assert_eq!(
-                reloaded.instructions, "Original instructions",
-                "blank instructions {raw:?} must not overwrite the stored text"
-            );
+            assert_eq!(reloaded.instructions, "Original instructions", "{raw:?}");
+            assert_eq!(reloaded.servings, seeded.servings, "{raw:?} writes nothing");
         }
+    }
+
+    // Send `args` to `update_recipe` the way a client does, as JSON.
+    async fn update_with(mcp: &FewdMcp, args: serde_json::Value) -> CallToolResult {
+        let serde_json::Value::Object(object) = args else {
+            panic!("tool arguments must be a JSON object");
+        };
+        mcp.update_recipe(LenientParameters::<UpdateRecipeInput>::extract(Some(
+            object,
+        )))
+        .await
+        .expect("update_recipe returns Ok")
+    }
+
+    #[tokio::test]
+    async fn update_recipe_null_prep_time_keeps_the_total() {
+        // A clear never re-derives the total, so resting time folded into
+        // it survives.
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let result = update_with(
+            &mcp,
+            serde_json::json!({"slug": seeded.slug, "prep_time": null}),
+        )
+        .await;
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+
+        let after = reload_recipe(&mcp, &seeded.slug).await;
+        assert_eq!(after.prep_time, None);
+        assert_eq!(after.cook_time, seeded.cook_time);
+        assert_eq!(after.total_time, seeded.total_time);
+        assert_eq!(after.total_minutes, Some(30));
+    }
+
+    #[tokio::test]
+    async fn update_recipe_null_total_time_clears_the_search_column() {
+        let mcp = setup_test_mcp().await;
+        let seeded = seed_recipe_with_content(&mcp, "Beef Taco Bowls").await;
+
+        let result = update_with(
+            &mcp,
+            serde_json::json!({"slug": seeded.slug, "total_time": null}),
+        )
+        .await;
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+
+        let after = reload_recipe(&mcp, &seeded.slug).await;
+        assert_eq!(after.total_time, None);
+        assert_eq!(after.total_minutes, None, "max_total_time_minutes skips it");
+        assert_recipe_unchanged_except(&seeded, &after, &["total_time", "total_minutes"]);
+    }
+
+    #[test]
+    fn update_recipe_time_sent_as_a_string_is_rejected() {
+        let args = args_with(&[
+            ("slug", serde_json::json!("beef-taco-bowls")),
+            ("prep_time", serde_json::json!("")),
+        ]);
+        let LenientParameters(parsed) = LenientParameters::<UpdateRecipeInput>::extract(args);
+        let err = parsed.expect_err("a string is not a time");
+        assert!(err.contains("invalid type: string"), "{err}");
     }
 
     #[tokio::test]
@@ -4092,11 +4153,13 @@ mod tests {
         #[tokio::test]
         async fn update_recipe_rating_returns_tool_level_error() {
             let mcp = setup_test_mcp().await;
-            let args = args_with(&[("slug", json!("beef-taco-bowls")), ("rating", json!(5))]);
-            let result = mcp
-                .update_recipe(LenientParameters::<UpdateRecipeInput>::extract(args))
-                .await;
-            assert_tool_user_error(result, &["update_recipe: unknown field `rating`"]);
+            for rating in [json!(5), json!(null)] {
+                let args = args_with(&[("slug", json!("beef-taco-bowls")), ("rating", rating)]);
+                let result = mcp
+                    .update_recipe(LenientParameters::<UpdateRecipeInput>::extract(args))
+                    .await;
+                assert_tool_user_error(result, &["update_recipe: unknown field `rating`"]);
+            }
         }
 
         #[test]
@@ -4856,6 +4919,23 @@ mod tests {
                 result.is_err(),
                 "a malformed parent is a server fault, not a tool error: {result:?}"
             );
+            assert_eq!(recipe_count(&mcp).await, before, "nothing is saved");
+        }
+
+        #[tokio::test]
+        async fn edits_that_empty_the_instructions_are_rejected() {
+            let mcp = setup_test_mcp().await;
+            let parent = seed_gnocchi(&mcp).await;
+            let before = recipe_count(&mcp).await;
+
+            let result = adapt(
+                &mcp,
+                spicy_with(
+                    json!({"instruction_edits": [{"find": parent.instructions, "replace": " "}]}),
+                ),
+            )
+            .await;
+            assert_tool_user_error(result, &["would have no instructions", "`instructions`"]);
             assert_eq!(recipe_count(&mcp).await, before, "nothing is saved");
         }
 

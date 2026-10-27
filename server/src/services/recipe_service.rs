@@ -6,7 +6,8 @@ use sea_orm::*;
 use crate::dto::{CreateRecipeDto, IngredientDto, TimeValueDto, UpdateRecipeDto};
 use crate::entities::recipe::{self, Entity as Recipe};
 use crate::services::normalize::{
-    drop_unusable_import_ingredients, normalize_tags, required_name, trim_ingredient_names,
+    drop_unusable_import_ingredients, normalize_tags, required_name, required_text,
+    trim_ingredient_names,
 };
 use crate::services::recipe_parser::DEFAULT_SERVINGS;
 use crate::services::recipe_scaler::scale_amounts;
@@ -73,11 +74,32 @@ pub fn default_unusable_import_servings(dto: &mut CreateRecipeDto) {
     }
 }
 
+/// The instructions [`fill_missing_generated_instructions`] stores when the
+/// model produced none.
+const MISSING_INSTRUCTIONS_PLACEHOLDER: &str = "No instructions were found. Add the steps here.";
+
+/// Replaces a generated recipe's empty or whitespace-only instructions with
+/// [`MISSING_INSTRUCTIONS_PLACEHOLDER`], logging a warning that names the
+/// recipe.
+//
+// Create rejects blank instructions. As with servings, an editable
+// placeholder beats losing a recipe whose tokens are already spent.
+fn fill_missing_generated_instructions(dto: &mut CreateRecipeDto) {
+    if dto.instructions.trim().is_empty() {
+        tracing::warn!(
+            recipe = %dto.name,
+            "replacing blank instructions in generated recipe"
+        );
+        dto.instructions = MISSING_INSTRUCTIONS_PLACEHOLDER.to_string();
+    }
+}
+
 /// Repairs a recipe the model produced so that create accepts it. It drops
-/// unusable times, replaces unusable servings, and drops nameless
-/// ingredients, logging a warning for each repair. Call it on every recipe
-/// the model produces, whether it is saved at once (import) or handed back
-/// as a draft the client saves later (adapt, suggest).
+/// unusable times, replaces unusable servings, drops nameless ingredients,
+/// and fills in blank instructions, logging a warning for each repair. A
+/// blank description, notes, or icon becomes absent. Call it on every
+/// recipe the model produces, whether it is saved at once (import) or handed
+/// back as a draft the client saves later (adapt, suggest).
 //
 // Recipes a person wrote, such as a markdown import or a direct create, are
 // not repaired: their errors name the field so the person can fix it.
@@ -85,6 +107,14 @@ pub fn sanitize_generated_recipe(dto: &mut CreateRecipeDto) {
     drop_unusable_import_times(dto);
     default_unusable_import_servings(dto);
     drop_unusable_import_ingredients(&dto.name, &mut dto.ingredients);
+    fill_missing_generated_instructions(dto);
+    // MCP `update_recipe` rejects a blank string for these fields, so a
+    // stored blank would fail a client that echoes `get_recipe` back.
+    for field in [&mut dto.description, &mut dto.notes, &mut dto.icon] {
+        if field.as_deref().is_some_and(|text| text.trim().is_empty()) {
+            *field = None;
+        }
+    }
 }
 
 /// Filter set for [`RecipeService::search_filtered`]. All fields are optional;
@@ -172,6 +202,7 @@ impl RecipeService {
         if data.servings < 1 {
             return Err(ValidationError::NonPositiveServings(data.servings).into());
         }
+        required_text("instructions", &data.instructions)?;
         trim_ingredient_names("ingredients", &mut data.ingredients)?;
         let now = chrono::Utc::now();
         let base_slug = migration::slugify(&name);
@@ -254,6 +285,9 @@ impl RecipeService {
         // and nothing could scale them back.
         if let Some(servings) = data.servings.filter(|&s| s < 1) {
             return Err(ValidationError::NonPositiveServings(servings).into());
+        }
+        if let Some(instructions) = &data.instructions {
+            required_text("instructions", instructions)?;
         }
         if let Some(ingredients) = &mut data.ingredients {
             trim_ingredient_names("ingredients", ingredients)?;
@@ -635,5 +669,54 @@ mod tests {
             default_unusable_import_servings(&mut dto);
             assert_eq!(dto.servings, servings);
         }
+    }
+
+    #[test]
+    fn fill_missing_generated_instructions_uses_the_placeholder() {
+        for blank in ["", " \n\t"] {
+            let mut dto = CreateRecipeDto {
+                instructions: blank.to_string(),
+                ..dto_with_servings(4)
+            };
+            fill_missing_generated_instructions(&mut dto);
+            assert_eq!(dto.instructions, MISSING_INSTRUCTIONS_PLACEHOLDER);
+        }
+    }
+
+    async fn setup_db() -> DatabaseConnection {
+        use migration::MigratorTrait;
+        let db = Database::connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite connects");
+        migration::Migrator::up(&db, None)
+            .await
+            .expect("migrations run");
+        db
+    }
+
+    #[tokio::test]
+    async fn update_rejects_blank_instructions_before_the_lookup() {
+        // The id names no recipe, so only a check that runs before the
+        // lookup can answer a validation error.
+        let db = setup_db().await;
+        let err = RecipeService::update(
+            &db,
+            "no-such-id".to_string(),
+            UpdateRecipeDto {
+                instructions: Some(" ".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect_err("blank instructions are rejected");
+        assert!(
+            matches!(
+                err,
+                ServiceError::Validation(ValidationError::EmptyField {
+                    field: "instructions"
+                })
+            ),
+            "{err:?}"
+        );
     }
 }

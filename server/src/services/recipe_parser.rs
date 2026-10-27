@@ -32,6 +32,13 @@ impl RecipeParser {
         if name.is_empty() {
             return Err("Recipe name is required".to_string());
         }
+        // Create rejects blank instructions too, but only this message can
+        // name the heading the parser looks for.
+        let instructions = instructions
+            .filter(|text| !text.trim().is_empty())
+            .ok_or_else(|| {
+                "No instructions found: add a '## Instructions' section with the steps".to_string()
+            })?;
 
         Ok(CreateRecipeDto {
             name,
@@ -48,7 +55,7 @@ impl RecipeParser {
             total_time,
             servings,
             portion_size: None,
-            instructions: instructions.unwrap_or_default(),
+            instructions,
             ingredients,
             nutrition_per_serving: None,
             tags,

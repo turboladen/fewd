@@ -24,13 +24,30 @@ pub fn normalize_tags(tags: Vec<String>) -> Vec<String> {
 ///
 /// # Errors
 ///
-/// Returns [`ValidationError::EmptyName`] naming `field` for a blank name.
+/// Returns [`ValidationError::EmptyField`] naming `field` for a blank name.
 pub fn required_name(field: &'static str, name: String) -> Result<String, ValidationError> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err(ValidationError::EmptyName { field });
+        return Err(ValidationError::EmptyField { field });
     }
     Ok(trimmed.to_string())
+}
+
+/// Reject `text` when it holds nothing but whitespace. Unlike
+/// [`required_name`], it does not trim, so the caller stores the text as
+/// written.
+///
+/// # Errors
+///
+/// Returns [`ValidationError::EmptyField`] naming `field` for blank text.
+//
+// Instructions are Markdown, where leading indentation and trailing newlines
+// can carry meaning, so the check must not trim what gets stored.
+pub fn required_text(field: &'static str, text: &str) -> Result<(), ValidationError> {
+    if text.trim().is_empty() {
+        return Err(ValidationError::EmptyField { field });
+    }
+    Ok(())
 }
 
 /// Trim the name of every ingredient in `ingredients` and of every
@@ -157,8 +174,22 @@ mod tests {
         assert_eq!(required_name("name", " Tacos\t".into()), Ok("Tacos".into()));
         assert_eq!(
             required_name("name", " \n".into()),
-            Err(ValidationError::EmptyName { field: "name" })
+            Err(ValidationError::EmptyField { field: "name" })
         );
+    }
+
+    #[test]
+    fn required_text_rejects_blanks_and_accepts_padded_text() {
+        for blank in ["", "   ", "\t\n"] {
+            assert_eq!(
+                required_text("instructions", blank),
+                Err(ValidationError::EmptyField {
+                    field: "instructions"
+                }),
+                "{blank:?}"
+            );
+        }
+        assert_eq!(required_text("instructions", "  Stir.\n"), Ok(()));
     }
 
     #[test]

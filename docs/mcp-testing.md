@@ -298,6 +298,20 @@ Expect: the full created recipe with its auto-generated slug (probably `test-rec
 
 Expect: tool-level error naming the missing `source` field. Pinned by `lenient_parameters_extract_missing_required_field_captures_serde_error` (the contract that deserialize errors surface as tool-level errors rather than JSON-RPC protocol errors that get hidden by most MCP clients).
 
+**Error path — blank instructions:**
+
+```json
+{
+  "name": "Test Recipe",
+  "source": "manual",
+  "servings": 4,
+  "instructions": "   ",
+  "ingredients": []
+}
+```
+
+Expect: tool-level error saying `instructions` must not be empty or whitespace-only, and no recipe created.
+
 **Error path — zero servings:**
 
 ```json
@@ -388,17 +402,33 @@ Expect: the recipe now has exactly one ingredient. Anything that was there befor
 
 Expect: `tags` is empty and the ingredients are untouched. `[]` is the only way to clear a list.
 
-**No clear path for scalars:**
+**Clearing a scalar with null:**
 
 ```json
 {
   "slug": "test-recipe",
-  "instructions": "",
-  "notes": "   "
+  "notes": null,
+  "prep_time": null
 }
 ```
 
-Expect: success, and both fields keep their previous values. An empty or whitespace-only string means "no change", never "blank it".
+Expect: `notes` and `prep_time` come back `null`, and `total_time` keeps its value, because a clear never moves the total. Null clears `description`, `notes`, `icon`, `portion_size`, `prep_time`, `cook_time`, and `total_time`. On any other field the tool accepts, it means the same as omitting it.
+
+**Error path — blank string:**
+
+```json
+{ "slug": "test-recipe", "notes": "   " }
+```
+
+Expect: tool-level error saying `notes` must not be empty or whitespace-only and pointing at null to clear it. The stored notes are unchanged.
+
+**Error path — blank instructions:**
+
+```json
+{ "slug": "test-recipe", "instructions": "" }
+```
+
+Expect: tool-level error saying `instructions` must not be empty or whitespace-only and pointing at omitting the field, because instructions cannot be cleared.
 
 **Error path — unknown slug:**
 
@@ -544,7 +574,7 @@ Expect: tool-level error citing "1 to 5", quoting the value **as you sent it**, 
 
 ### `unrate_recipe`
 
-Removes a rating entirely. This is the only way to clear a scalar column back to null anywhere on fewd's MCP surface — `update_recipe`'s `tags` and `ingredients` and `update_person`'s list fields all clear with `[]`, but no other scalar has a path back to empty. It is also the only one in the product: the web UI's star control cannot clear a rating either.
+Removes a rating entirely. It is the only way to clear a rating over MCP, because `update_recipe` does not accept `rating`, even as null. It is also the only one in the product: the web UI's star control cannot clear a rating either.
 
 **Happy path:**
 
