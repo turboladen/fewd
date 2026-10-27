@@ -386,12 +386,12 @@ fn ends_in_quantity(text: &str) -> bool {
         .is_some_and(|c| c.is_ascii_digit() || unicode_fraction_value(c).is_some())
 }
 
-/// Split trimmed `text` into the trimmed text before its last word and the word,
-/// which may end in one period. `None` when the text does not end in a word that
-/// follows whitespace.
+/// Split trimmed `text` into the trimmed text before its last word and the word.
+/// The word is made of letters, hyphens and periods, so `"fl.oz."` is one word.
+/// `None` when the text does not end in a word that follows whitespace.
 fn split_last_word(text: &str) -> Option<(&str, &str)> {
     let body = text.strip_suffix('.').unwrap_or(text);
-    let rest = body.trim_end_matches(|c: char| c.is_alphabetic() || c == '-');
+    let rest = body.trim_end_matches(|c: char| c.is_alphabetic() || c == '-' || c == '.');
     if rest.len() == body.len() || !rest.ends_with(char::is_whitespace) {
         return None;
     }
@@ -948,6 +948,8 @@ mod tests {
             ("fl oz", "Whisk in 8 fl oz milk."),
             ("fluid ounces", "Whisk in 8 fluid ounces milk."),
             ("fl. oz.", "Whisk in 8 fl. oz. milk."),
+            ("fl.oz.", "Whisk in 8 fl.oz. milk."),
+            ("fl.oz", "Whisk in 8 fl.oz milk."),
         ] {
             let ingredients = vec![make_ingredient("milk", 8.0, unit)];
             let result = enhance_instructions(&ingredients, step);
