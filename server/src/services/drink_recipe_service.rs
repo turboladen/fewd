@@ -6,7 +6,7 @@ use crate::services::normalize::{
     drop_unusable_import_ingredients, normalize_tags, required_name, trim_ingredient_names,
 };
 use crate::services::service_error::{whole_star_rating, ServiceError, ValidationError};
-use crate::services::to_json;
+use crate::services::{begin_write, to_json};
 
 pub struct DrinkRecipeService;
 
@@ -182,21 +182,31 @@ impl DrinkRecipeService {
         Ok(())
     }
 
+    /// Flips the drink's favorite flag and returns the updated row.
     pub async fn toggle_favorite(
         db: &DatabaseConnection,
         id: String,
     ) -> Result<drink_recipe::Model, DbErr> {
-        let existing = DrinkRecipe::find_by_id(id)
-            .one(db)
+        // The flip is one UPDATE, so concurrent toggles all count, and the
+        // read-back inside the transaction sees this call's result.
+        let txn = begin_write(db).await?;
+        let flipped = txn
+            .execute(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                "UPDATE drink_recipes SET is_favorite = NOT is_favorite, updated_at = ? \
+                 WHERE id = ?",
+                [chrono::Utc::now().into(), id.clone().into()],
+            ))
+            .await?;
+        if flipped.rows_affected() == 0 {
+            return Err(DbErr::RecordNotFound("Drink recipe not found".to_string()));
+        }
+        let drink = DrinkRecipe::find_by_id(id)
+            .one(&txn)
             .await?
             .ok_or(DbErr::RecordNotFound("Drink recipe not found".to_string()))?;
-
-        let new_favorite = !existing.is_favorite;
-        let mut recipe: drink_recipe::ActiveModel = existing.into();
-        recipe.is_favorite = Set(new_favorite);
-        recipe.updated_at = Set(chrono::Utc::now());
-
-        recipe.update(db).await
+        txn.commit().await?;
+        Ok(drink)
     }
 }
 

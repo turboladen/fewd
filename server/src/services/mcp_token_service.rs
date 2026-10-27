@@ -29,11 +29,11 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use rand::RngCore;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection,
-    DatabaseTransaction, DbErr, EntityTrait, QueryFilter, Set, Statement, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, Set,
 };
 
 use crate::entities::person;
+use crate::services::begin_write;
 
 /// Result of provisioning a fresh MCP token for a person. The plaintext
 /// must be displayed to the user exactly once and discarded — it is not
@@ -87,22 +87,17 @@ impl McpTokenService {
     /// fingerprint, and return the plaintext for one-time display.
     /// Replaces any previously-issued token on the same row (rotation).
     ///
-    /// Atomic: load + update run inside a transaction that acquires
-    /// SQLite's RESERVED lock before the SELECT (see
-    /// [`begin_locked_for_person`]). Without that escalation, two
-    /// concurrent provision() calls on the same person could both
-    /// load the same snapshot and both return 200 OK, with only one
-    /// of the two plaintexts surviving the second write — the other
-    /// client would walk away with a token that doesn't authenticate.
-    ///
-    /// Hashing happens *before* the transaction starts so the DB-wide
-    /// RESERVED lock isn't held across argon2's ~10-50ms compute. The
-    /// hash is discarded on `NotFound`/`Inactive`, which is cheaper
-    /// than blocking every other writer through every provision call.
+    /// Atomic: the load and the update run in one transaction that holds
+    /// the database write lock, so concurrent `provision` and `revoke`
+    /// calls for one person run one after another.
     pub async fn provision(
         db: &DatabaseConnection,
         person_id: &str,
     ) -> Result<ProvisionedToken, TokenError> {
+        // Hashing happens before the transaction starts, so the database-wide
+        // write lock is not held across argon2's ~10-50ms compute. The hash
+        // is discarded on `NotFound`/`Inactive`, which is cheaper than
+        // blocking every other writer through every provision call.
         let plaintext = generate_plaintext();
         let fingerprint = fingerprint_of(&plaintext);
         let hash = hash_plaintext(&plaintext).map_err(|err| {
@@ -110,7 +105,10 @@ impl McpTokenService {
             TokenError::Hashing(err)
         })?;
 
-        let txn = begin_locked_for_person(db, person_id).await?;
+        // One provision or revoke for this person runs at a time, so when
+        // this commits the stored hash is this call's, until a later call
+        // replaces it.
+        let txn = begin_write(db).await?;
 
         let person = person::Entity::find_by_id(person_id.to_string())
             .one(&txn)
@@ -186,13 +184,12 @@ impl McpTokenService {
     /// revoke, `verify` will reject any token previously issued for this
     /// row, including the plaintext the user copied at provision time.
     ///
-    /// Atomic: wrapped in the same RESERVED-lock transaction as
-    /// `provision`. Revoke-vs-revoke races are benign (idempotent), but
-    /// revoke racing against a concurrent provision could otherwise leave
-    /// the provisioning client with a plaintext that doesn't authenticate
-    /// (last write wins, but neither response signaled the conflict).
+    /// Atomic: runs under the same write lock as `provision`, so the two
+    /// never interleave for one person.
     pub async fn revoke(db: &DatabaseConnection, person_id: &str) -> Result<(), TokenError> {
-        let txn = begin_locked_for_person(db, person_id).await?;
+        // One provision or revoke for this person runs at a time, so a
+        // revoke never lands between a provision's read and its write.
+        let txn = begin_write(db).await?;
 
         let person = person::Entity::find_by_id(person_id.to_string())
             .one(&txn)
@@ -208,40 +205,6 @@ impl McpTokenService {
         txn.commit().await?;
         Ok(())
     }
-}
-
-/// Begin a transaction and immediately escalate it to SQLite's
-/// RESERVED-lock state so the caller's subsequent SELECT is serialized
-/// against any concurrent writer. SeaORM's default `db.begin()` issues
-/// `BEGIN DEFERRED`, which only acquires the write lock at the first
-/// UPDATE — too late to serialize a load+update sequence against a
-/// concurrent writer. The no-op `UPDATE … SET id = id WHERE id = ?`
-/// here forces SQLite to take RESERVED before the caller's SELECT,
-/// closing the TOCTOU window.
-///
-/// Note on lock granularity: SQLite's RESERVED lock is **database-wide**,
-/// not row-level — once held, every other writer (any table, any row)
-/// blocks until we commit. The `WHERE id = ?` filter just keeps the
-/// statement cheap and intent-clear; it doesn't narrow the lock. For
-/// this codebase's traffic this is a fine trade-off, but it's worth
-/// knowing that holding the transaction across slow work would block
-/// unrelated writers too.
-///
-/// SeaORM has no first-class way to issue `BEGIN IMMEDIATE` (see
-/// `set_transaction_config` for SQLite, which just logs and ignores
-/// `IsolationLevel`), so this no-op write is the idiomatic substitute.
-async fn begin_locked_for_person(
-    db: &DatabaseConnection,
-    person_id: &str,
-) -> Result<DatabaseTransaction, DbErr> {
-    let txn = db.begin().await?;
-    txn.execute(Statement::from_sql_and_values(
-        DatabaseBackend::Sqlite,
-        "UPDATE people SET id = id WHERE id = ?",
-        [person_id.into()],
-    ))
-    .await?;
-    Ok(txn)
 }
 
 fn generate_plaintext() -> String {

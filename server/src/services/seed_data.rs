@@ -2,11 +2,18 @@ use chrono::NaiveDate;
 use sea_orm::*;
 
 use crate::entities::person::{self, Entity as Person};
-use crate::services::to_json;
+use crate::services::{begin_write, to_json};
 
+/// Inserts the default family when the people table is empty. A database
+/// that already has people is left alone without taking the write lock.
 pub async fn seed_if_empty(db: &DatabaseConnection) -> Result<(), DbErr> {
-    let count = Person::find().count(db).await?;
-    if count > 0 {
+    if Person::find().count(db).await? > 0 {
+        return Ok(());
+    }
+    // A partial seed would leave the table non-empty and block every later
+    // seed, so the recount and the people commit together or not at all.
+    let txn = begin_write(db).await?;
+    if Person::find().count(&txn).await? > 0 {
         return Ok(());
     }
 
@@ -41,8 +48,9 @@ pub async fn seed_if_empty(db: &DatabaseConnection) -> Result<(), DbErr> {
             mcp_token_fingerprint: Set(None),
         };
 
-        person.insert(db).await?;
+        person.insert(&txn).await?;
     }
+    txn.commit().await?;
 
     Ok(())
 }

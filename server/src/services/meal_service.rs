@@ -5,10 +5,9 @@ use sea_orm::*;
 
 use crate::dto::{CreateMealDto, PersonServingDto, UpdateMealDto};
 use crate::entities::meal::{self, Entity as Meal};
-use crate::entities::recipe::{self, Entity as Recipe};
 use crate::services::normalize::trim_adhoc_item_names;
 use crate::services::service_error::{check_servings_counts, ServiceError, ValidationError};
-use crate::services::to_json;
+use crate::services::{begin_write, to_json};
 
 pub struct MealService;
 
@@ -49,6 +48,8 @@ impl MealService {
         Meal::find_by_id(id).one(db).await
     }
 
+    /// Creates a meal and counts one plan for each distinct recipe it serves.
+    /// The meal row and the counters commit together or not at all.
     pub async fn create(
         db: &DatabaseConnection,
         mut data: CreateMealDto,
@@ -68,44 +69,50 @@ impl MealService {
             updated_at: Set(now),
         };
 
-        let result = meal.insert(db).await?;
-
-        // Increment times_planned for any recipes used in this meal
-        increment_recipe_usage(db, &data.servings).await?;
+        let txn = begin_write(db).await?;
+        let result = meal.insert(&txn).await?;
+        let ids = collect_recipe_ids(&data.servings);
+        increment_recipe_usage(&txn, ids.iter().map(String::as_str)).await?;
+        txn.commit().await?;
 
         Ok(result)
     }
 
+    /// Updates a meal. When the servings change, recipes that left the meal
+    /// lose one plan and recipes that joined it gain one. When the stored
+    /// servings cannot be read, no recipe's count changes and a warning
+    /// names the meal. The meal row and the counters commit together or not
+    /// at all.
     pub async fn update(
         db: &DatabaseConnection,
         id: String,
         mut data: UpdateMealDto,
     ) -> Result<meal::Model, ServiceError> {
-        // Every check runs before the usage counters below are written.
+        // Every check runs before the transaction opens.
         if let Some(servings) = &mut data.servings {
             check_servings_counts(servings)?;
             trim_adhoc_item_names(servings)?;
         }
         let date = data.date.as_deref().map(parse_meal_date).transpose()?;
+
+        // Lock before reading, so the stored servings cannot change before the
+        // counters move.
+        let txn = begin_write(db).await?;
         let existing = Meal::find_by_id(id)
-            .one(db)
+            .one(&txn)
             .await?
             .ok_or(DbErr::RecordNotFound("Meal not found".to_string()))?;
 
-        // When servings change, adjust recipe usage counters
-        if let Some(ref new_servings) = data.servings {
-            let old_servings: Vec<PersonServingDto> =
-                serde_json::from_str(&existing.servings).unwrap_or_default();
-            let old_ids = collect_recipe_ids(&old_servings);
-            let new_ids = collect_recipe_ids(new_servings);
-
-            // Decrement recipes that were removed
-            let removed: Vec<&str> = old_ids.difference(&new_ids).map(|s| s.as_str()).collect();
-            decrement_recipe_usage(db, &removed).await?;
-
-            // Increment recipes that were added
-            let added: Vec<&str> = new_ids.difference(&old_ids).map(|s| s.as_str()).collect();
-            increment_recipe_usage_by_ids(db, &added).await?;
+        // Counters move only when both the old and the new recipe sets are
+        // known; otherwise a recipe in both could be counted twice.
+        if let Some(new_servings) = &data.servings {
+            if let Some(old_ids) = stored_recipe_ids(&existing) {
+                let new_ids = collect_recipe_ids(new_servings);
+                decrement_recipe_usage(&txn, old_ids.difference(&new_ids).map(String::as_str))
+                    .await?;
+                increment_recipe_usage(&txn, new_ids.difference(&old_ids).map(String::as_str))
+                    .await?;
+            }
         }
 
         let mut meal: meal::ActiveModel = existing.into();
@@ -125,24 +132,48 @@ impl MealService {
 
         meal.updated_at = Set(chrono::Utc::now());
 
-        Ok(meal.update(db).await?)
+        let updated = meal.update(&txn).await?;
+        txn.commit().await?;
+        Ok(updated)
     }
 
+    /// Deletes a meal and removes one plan from each distinct recipe it
+    /// served. When the stored servings cannot be read, no recipe's count
+    /// changes and a warning names the meal. The deletion and the counters
+    /// commit together or not at all.
     pub async fn delete(db: &DatabaseConnection, id: String) -> Result<(), DbErr> {
-        let existing = Meal::find_by_id(id.clone())
-            .one(db)
+        // Lock before reading, so the stored servings cannot change before the
+        // counters move.
+        let txn = begin_write(db).await?;
+        let existing = Meal::find_by_id(id)
+            .one(&txn)
             .await?
             .ok_or(DbErr::RecordNotFound("Meal not found".to_string()))?;
 
-        // Decrement recipe usage before deleting
-        let servings: Vec<PersonServingDto> =
-            serde_json::from_str(&existing.servings).unwrap_or_default();
-        let ids = collect_recipe_ids(&servings);
-        let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
-        decrement_recipe_usage(db, &id_refs).await?;
+        if let Some(ids) = stored_recipe_ids(&existing) {
+            decrement_recipe_usage(&txn, ids.iter().map(String::as_str)).await?;
+        }
 
-        Meal::delete_by_id(id).exec(db).await?;
+        existing.delete(&txn).await?;
+        txn.commit().await?;
         Ok(())
+    }
+}
+
+/// Returns the recipe ids in a stored meal's servings. When the stored JSON
+/// cannot be read, it logs a warning naming the meal and returns `None`; the
+/// caller's write still goes ahead but leaves every recipe's count unchanged.
+fn stored_recipe_ids(meal: &meal::Model) -> Option<HashSet<String>> {
+    match serde_json::from_str::<Vec<PersonServingDto>>(&meal.servings) {
+        Ok(servings) => Some(collect_recipe_ids(&servings)),
+        Err(e) => {
+            tracing::warn!(
+                meal_id = %meal.id,
+                error = %e,
+                "stored meal servings are not valid JSON; recipe plan counts left unchanged"
+            );
+            None
+        }
     }
 }
 
@@ -157,50 +188,42 @@ fn collect_recipe_ids(servings: &[PersonServingDto]) -> HashSet<String> {
         .collect()
 }
 
-/// Increment times_planned and update last_planned for each recipe referenced in servings
-async fn increment_recipe_usage(
-    db: &DatabaseConnection,
-    servings: &[PersonServingDto],
-) -> Result<(), DbErr> {
-    let ids = collect_recipe_ids(servings);
-    let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
-    increment_recipe_usage_by_ids(db, &id_refs).await
-}
+// Each counter changes in one UPDATE statement, so the read and the
+// arithmetic happen under SQLite's write lock and concurrent meal writes
+// cannot lose a count. An id with no recipe row matches nothing.
 
-/// Increment times_planned and update last_planned for specific recipe IDs
-async fn increment_recipe_usage_by_ids(
-    db: &DatabaseConnection,
-    recipe_ids: &[&str],
+/// Increments times_planned and sets last_planned for each recipe id.
+async fn increment_recipe_usage<'a, C: ConnectionTrait>(
+    db: &C,
+    recipe_ids: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), DbErr> {
     let now = chrono::Utc::now();
-
     for recipe_id in recipe_ids {
-        if let Some(existing) = Recipe::find_by_id(*recipe_id).one(db).await? {
-            let new_times_planned = existing.times_planned + 1;
-            let mut recipe: recipe::ActiveModel = existing.into();
-            recipe.times_planned = Set(new_times_planned);
-            recipe.last_planned = Set(Some(now));
-            recipe.updated_at = Set(now);
-            recipe.update(db).await?;
-        }
+        db.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "UPDATE recipes SET times_planned = times_planned + 1, last_planned = ?, \
+             updated_at = ? WHERE id = ?",
+            [now.into(), now.into(), recipe_id.into()],
+        ))
+        .await?;
     }
-
     Ok(())
 }
 
-/// Decrement times_planned for specific recipe IDs (floor at 0)
-async fn decrement_recipe_usage(db: &DatabaseConnection, recipe_ids: &[&str]) -> Result<(), DbErr> {
+/// Decrements times_planned for each recipe id, never below 0.
+async fn decrement_recipe_usage<'a, C: ConnectionTrait>(
+    db: &C,
+    recipe_ids: impl IntoIterator<Item = &'a str>,
+) -> Result<(), DbErr> {
     let now = chrono::Utc::now();
-
     for recipe_id in recipe_ids {
-        if let Some(existing) = Recipe::find_by_id(*recipe_id).one(db).await? {
-            let new_times_planned = (existing.times_planned - 1).max(0);
-            let mut recipe: recipe::ActiveModel = existing.into();
-            recipe.times_planned = Set(new_times_planned);
-            recipe.updated_at = Set(now);
-            recipe.update(db).await?;
-        }
+        db.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "UPDATE recipes SET times_planned = MAX(times_planned - 1, 0), updated_at = ? \
+             WHERE id = ?",
+            [now.into(), recipe_id.into()],
+        ))
+        .await?;
     }
-
     Ok(())
 }

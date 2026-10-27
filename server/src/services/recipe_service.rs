@@ -561,21 +561,30 @@ impl RecipeService {
         recipe.update(db).await
     }
 
+    /// Flips the recipe's favorite flag and returns the updated row.
     pub async fn toggle_favorite(
         db: &DatabaseConnection,
         id: String,
     ) -> Result<recipe::Model, DbErr> {
-        let existing = Recipe::find_by_id(id)
-            .one(db)
+        // The flip is one UPDATE, so concurrent toggles all count, and the
+        // read-back inside the transaction sees this call's result.
+        let txn = crate::services::begin_write(db).await?;
+        let flipped = txn
+            .execute(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                "UPDATE recipes SET is_favorite = NOT is_favorite, updated_at = ? WHERE id = ?",
+                [chrono::Utc::now().into(), id.clone().into()],
+            ))
+            .await?;
+        if flipped.rows_affected() == 0 {
+            return Err(DbErr::RecordNotFound("Recipe not found".to_string()));
+        }
+        let recipe = Recipe::find_by_id(id)
+            .one(&txn)
             .await?
             .ok_or(DbErr::RecordNotFound("Recipe not found".to_string()))?;
-
-        let new_favorite = !existing.is_favorite;
-        let mut recipe: recipe::ActiveModel = existing.into();
-        recipe.is_favorite = Set(new_favorite);
-        recipe.updated_at = Set(chrono::Utc::now());
-
-        recipe.update(db).await
+        txn.commit().await?;
+        Ok(recipe)
     }
 }
 
