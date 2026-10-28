@@ -5,8 +5,8 @@
 //! runtime parser and the backfill migration share one source of truth.
 
 pub use migration::{
-    is_known_unit, split_first_word, split_leading_unit, try_parse_amount, unicode_fraction_value,
-    AmountKind, RANGE_DASHES,
+    is_amount_char, is_known_unit, split_first_word, split_leading_unit, try_parse_amount,
+    unicode_fraction_value, AmountKind, RANGE_DASHES,
 };
 
 use crate::dto::IngredientAmountDto;

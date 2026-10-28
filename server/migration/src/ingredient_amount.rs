@@ -129,6 +129,7 @@ pub const DISCRETE_UNITS: &[&str] = &[
     "sprig",
     "bag",
     "bottle",
+    "box",
     "package",
     "block",
     "stalk",
@@ -172,10 +173,10 @@ pub fn normalize_unit(unit: &str) -> String {
         return "fl oz".to_string();
     }
     let (body, dotted) = strip_period(&lower);
-    if !dotted && body.split_whitespace().eq(["to", "taste"]) {
+    let singular = singular_unit(body);
+    if !dotted && singular.split_whitespace().eq(["to", "taste"]) {
         return "to taste".to_string();
     }
-    let singular = singular_unit(body);
     if let Some(canonical) = abbreviation(singular) {
         return canonical.to_string();
     }
@@ -308,21 +309,47 @@ pub fn is_known_unit(token: &str) -> bool {
 /// and a two-word unit comes back joined by one space. A trailing `,` on the
 /// unit is dropped (`"cloves, minced"` gives `"cloves"`); otherwise the unit
 /// is returned as written, case and period included, for [`normalize_unit`]
-/// to read later. The rest has its leading whitespace trimmed. Returns
-/// `None` when no unit matches or nothing follows the unit.
+/// to read later. The rest has its leading whitespace trimmed and passes
+/// through [`name_after_unit`], so `"pinches of salt"` gives `"pinches"` and
+/// `"salt"`. Returns `None` when no unit matches or nothing follows the unit.
 pub fn split_leading_unit(s: &str) -> Option<(String, &str)> {
     let (first, after_first) = split_first_word(s)?;
     if let Some((second, rest)) = split_first_word(after_first) {
         let unit = format!("{first} {}", second.strip_suffix(',').unwrap_or(second));
         if !rest.is_empty() && is_known_unit(&unit) {
-            return Some((unit, rest));
+            let name = name_after_unit(&unit, rest);
+            return Some((unit, name));
         }
     }
     let unit = first.strip_suffix(',').unwrap_or(first);
     if !after_first.is_empty() && is_known_unit(unit) {
-        return Some((unit.to_string(), after_first));
+        return Some((unit.to_string(), name_after_unit(unit, after_first)));
     }
     None
+}
+
+/// Returns the name that follows `unit` in `rest`. A leading word `"of"`, in
+/// any case, is dropped with its whitespace when another word follows it
+/// (`"of salt"` gives `"salt"`), except after a unit that normalizes to
+/// `"whole"`. `"of"` alone and `"offal"` come back unchanged.
+//
+// "2 whole of the eggs" is not a measure of eggs, so "of" stays after whole.
+pub fn name_after_unit<'a>(unit: &str, rest: &'a str) -> &'a str {
+    if normalize_unit(unit) == "whole" {
+        rest
+    } else {
+        strip_leading_of(rest)
+    }
+}
+
+// Drops a leading word "of", in any case, and the whitespace after it when
+// another word follows, so "of salt" gives "salt". Otherwise it returns
+// `rest` unchanged: "of" alone and "offal" stay as they are.
+fn strip_leading_of(rest: &str) -> &str {
+    match split_first_word(rest) {
+        Some((word, after)) if word.eq_ignore_ascii_case("of") && !after.is_empty() => after,
+        _ => rest,
+    }
 }
 
 /// Splits the first word off `s` at a run of whitespace and returns it with
@@ -337,6 +364,12 @@ pub fn split_first_word(s: &str) -> Option<(&str, &str)> {
         Some((word, rest)) => (word, rest.trim_start()),
         None => (s, ""),
     })
+}
+
+/// Returns `true` for a character that writes part of an amount: an ASCII
+/// digit or a vulgar fraction that [`unicode_fraction_value`] reads.
+pub fn is_amount_char(c: char) -> bool {
+    c.is_ascii_digit() || unicode_fraction_value(c).is_some()
 }
 
 /// Lookup table for Unicode vulgar fractions in the U+2150..U+215E block
@@ -560,7 +593,7 @@ mod tests {
     #[test]
     fn is_known_unit_accepts_es_plurals() {
         for unit in [
-            "bunches", "pinches", "dashes", "splashes", "Bunches", "bunches,",
+            "bunches", "pinches", "dashes", "splashes", "Bunches", "bunches,", "box", "boxes",
         ] {
             assert!(is_known_unit(unit), "expected {unit:?} to be a known unit");
         }
@@ -568,7 +601,7 @@ mod tests {
 
     #[test]
     fn is_known_unit_rejects_words_the_plural_rule_must_not_invent() {
-        for token in ["glass", "glasses", "boxes", "s", "ss", "to taste"] {
+        for token in ["glass", "glasses", "s", "ss", "to taste"] {
             assert!(!is_known_unit(token), "{token:?} is not a unit");
         }
     }
@@ -745,6 +778,8 @@ mod tests {
             "ttt s",
             "tts S",
             "to  taste",
+            "to  tastes",
+            "to\ttastes",
         ];
         for input in inputs.iter().chain(MEASURED_UNITS).chain(DISCRETE_UNITS) {
             let once = normalize_unit(input);
@@ -849,5 +884,43 @@ mod tests {
             );
         }
         assert_eq!(normalize_unit("to taste."), "to taste.");
+    }
+
+    #[test]
+    fn strip_leading_of_drops_one_whole_word() {
+        for (input, expected) in [
+            ("of salt", "salt"),
+            ("Of beans", "beans"),
+            ("of  flour", "flour"),
+            ("of the eggs", "the eggs"),
+            ("of", "of"),
+            ("offal", "offal"),
+            ("salt", "salt"),
+            ("", ""),
+        ] {
+            assert_eq!(
+                strip_leading_of(input),
+                expected,
+                "strip_leading_of({input:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn split_leading_unit_drops_of_after_a_measure() {
+        for (input, unit, rest) in [
+            ("pinches of salt", "pinches", "salt"),
+            ("fl oz of milk", "fl oz", "milk"),
+            ("cans of beans, drained", "cans", "beans, drained"),
+            ("cups of", "cups", "of"),
+            ("cup offal", "cup", "offal"),
+            ("whole of the eggs", "whole", "of the eggs"),
+        ] {
+            assert_eq!(
+                split_leading_unit(input),
+                Some((unit.to_string(), rest)),
+                "split_leading_unit({input:?})"
+            );
+        }
     }
 }
