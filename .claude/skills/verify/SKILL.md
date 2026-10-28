@@ -18,6 +18,10 @@ change runs `dprint` and `typos` in well under one.
 bun .claude/skills/verify/verify.mjs
 ```
 
+It gates the checkout that holds the script, wherever you run it from. To
+check a worktree, run that worktree's own copy:
+`( cd <worktree> && bun .claude/skills/verify/verify.mjs )`.
+
 It prints which files selected which scopes before the gates run:
 
 ```
